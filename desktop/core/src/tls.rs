@@ -289,7 +289,14 @@ pub fn server_config(identity: &LocalIdentity) -> Result<Arc<rustls::ServerConfi
         )
         .map_err(Error::Tls)?;
 
-    config.alpn_protocols = vec![crate::ALPN_PROTOCOL.to_vec()];
+    // Both protocols are offered on one listener. Which one a connection is
+    // carrying is decided by ALPN during the handshake and read back with
+    // [`negotiated_protocol`], so the listener never has to guess from the
+    // first bytes.
+    config.alpn_protocols = vec![
+        crate::ALPN_PROTOCOL.to_vec(),
+        crate::ALPN_DATA_PROTOCOL.to_vec(),
+    ];
     // Session resumption is disabled: it would let a peer skip a full
     // handshake, and full handshakes are where our pinning check lives.
     // Handshakes happen rarely enough that the cost is irrelevant.
@@ -302,6 +309,29 @@ pub fn client_config(
     identity: &LocalIdentity,
     expected_server: Fingerprint,
 ) -> Result<Arc<rustls::ClientConfig>> {
+    client_config_with_alpn(identity, expected_server, crate::ALPN_PROTOCOL)
+}
+
+/// Client config for a bulk data stream.
+///
+/// Identical to [`client_config`] in every security-relevant way — same
+/// pinned verifier, same client certificate, same TLS 1.3-only version list.
+/// The only difference is the ALPN identifier, which tells the listener what
+/// kind of connection this is. A data stream is emphatically *not* a weaker
+/// connection than a control session; it is the same connection carrying
+/// different traffic.
+pub fn data_stream_client_config(
+    identity: &LocalIdentity,
+    expected_server: Fingerprint,
+) -> Result<Arc<rustls::ClientConfig>> {
+    client_config_with_alpn(identity, expected_server, crate::ALPN_DATA_PROTOCOL)
+}
+
+fn client_config_with_alpn(
+    identity: &LocalIdentity,
+    expected_server: Fingerprint,
+    alpn: &[u8],
+) -> Result<Arc<rustls::ClientConfig>> {
     let mut config = rustls::ClientConfig::builder_with_provider(provider())
         .with_protocol_versions(TLS13_ONLY)
         .map_err(Error::Tls)?
@@ -313,8 +343,31 @@ pub fn client_config(
         )
         .map_err(Error::Tls)?;
 
-    config.alpn_protocols = vec![crate::ALPN_PROTOCOL.to_vec()];
+    config.alpn_protocols = vec![alpn.to_vec()];
     Ok(Arc::new(config))
+}
+
+/// What kind of connection a completed handshake turned out to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NegotiatedProtocol {
+    /// The control session: HELLO, pairing, capability messages.
+    Control,
+    /// A bulk data stream carrying one transfer's bytes.
+    Data,
+}
+
+/// Reads back which ALPN protocol the handshake selected.
+///
+/// A peer that negotiated no ALPN at all, or something unrecognised, gets
+/// `None` and must be dropped. Guessing "probably control" from an absent
+/// ALPN would hand an unknown client the handshake path by default, which is
+/// exactly the wrong direction to fail in.
+pub fn negotiated_protocol(conn: &rustls::CommonState) -> Option<NegotiatedProtocol> {
+    match conn.alpn_protocol() {
+        Some(p) if p == crate::ALPN_PROTOCOL => Some(NegotiatedProtocol::Control),
+        Some(p) if p == crate::ALPN_DATA_PROTOCOL => Some(NegotiatedProtocol::Data),
+        _ => None,
+    }
 }
 
 /// Extracts the peer's pinned-identity fingerprint from a completed handshake.

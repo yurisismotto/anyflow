@@ -47,6 +47,12 @@ pub struct TestServer {
     pub battery: Arc<BatteryState>,
     /// Which address families this server's listener actually accepts on.
     pub families: anyflow_daemon::listener::Families,
+    /// `files.v1`, in the acceptor role: this is the end that listens.
+    pub transfers: Arc<TransferManager>,
+    /// Where this server stores received files.
+    pub downloads: std::path::PathBuf,
+    /// Steers the "does a human accept this file?" answer.
+    pub approvals: Arc<ApprovalSwitch>,
     _dir: tempfile::TempDir,
 }
 
@@ -70,14 +76,46 @@ impl TestServer {
         let fingerprint = store.identity().fingerprint();
 
         let battery = Arc::new(BatteryState::default());
+
+        let downloads = dir.path().join("downloads");
+        let approvals = Arc::new(ApprovalSwitch::default());
+        let transfers = TransferManager::new(
+            StreamRole::Acceptor,
+            fingerprint,
+            FilesConfig {
+                destination: Destination::new(downloads.clone()),
+                max_file_bytes: 64 * 1024 * 1024,
+                // Short, so the timeout paths are exercised for real rather
+                // than skipped or faked. The production defaults are minutes;
+                // a suite that waited them out would never be run.
+                // Short enough that the timeout paths run for real, long
+                // enough that a loaded machine does not reap a transfer a
+                // test is still setting up. Production defaults are minutes.
+                accept_timeout: Duration::from_secs(3),
+                stream_open_timeout: Duration::from_millis(700),
+            },
+            Arc::clone(&approvals) as Arc<dyn TransferApproval>,
+        );
+
         let registry = CapabilityRegistry::builder()
             .register(Arc::new(BatteryCapability::new(Arc::clone(&battery))))
+            .register(Arc::new(FilesCapability::new(Arc::clone(&transfers))))
             .build();
 
         let tls = anyflow_core::tls::server_config(store.identity()).expect("server config");
         let acceptor = TlsAcceptor::from(tls);
 
-        let state = Arc::new(DaemonState::new(store, registry, Arc::clone(&battery)));
+        let state = Arc::new(
+            DaemonState::new(store, registry, Arc::clone(&battery))
+                .with_transfers(Arc::clone(&transfers)),
+        );
+
+        // The real authorizer: the trust store, asked fresh every time. The
+        // grant rules under test are the production ones.
+        transfers
+            .set_authorizer(Arc::clone(&state) as Arc<dyn FilesAuthorizer>)
+            .await;
+        transfers.spawn_reaper();
 
         let (listeners, addr, families) = if dual_stack {
             let bound = anyflow_daemon::listener::bind_endpoints(0).expect("bind");
@@ -107,8 +145,51 @@ impl TestServer {
             fingerprint,
             battery,
             families,
+            transfers,
+            downloads,
+            approvals,
             _dir: dir,
         }
+    }
+
+    /// Grants or withdraws a capability for a peer, through the real store.
+    pub async fn set_grant(&self, peer: Fingerprint, capability: &str, granted: bool) {
+        let mut store = self.state.store.lock().await;
+        store
+            .set_capability_grant(&peer, capability, granted)
+            .expect("persist grant");
+    }
+
+    /// Everything this server has stored, by filename.
+    pub fn received_files(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(&self.downloads) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Partial files left in the download directory. Must be empty after any
+    /// transfer that did not complete.
+    pub fn partial_files(&self) -> Vec<String> {
+        self.received_files()
+            .into_iter()
+            .filter(|n| is_partial(n))
+            .collect()
+    }
+
+    /// Files that were verified and promoted — what a user would actually
+    /// see. A transfer still in flight has a `.part` file in the directory,
+    /// and that is not a received file.
+    pub fn completed_files(&self) -> Vec<String> {
+        self.received_files()
+            .into_iter()
+            .filter(|n| !is_partial(n))
+            .collect()
     }
 
     /// Opens a pairing window with an auto-accepting operator, and returns
@@ -143,7 +224,15 @@ pub struct TestClient {
     pub fingerprint: Fingerprint,
     pub host: Arc<dyn SessionHost>,
     pub battery: Arc<BatteryState>,
+    /// `files.v1`, in the dialer role: a phone never listens.
+    pub transfers: Arc<TransferManager>,
+    pub downloads: std::path::PathBuf,
+    pub approvals: Arc<ApprovalSwitch>,
+    /// This device's own `files.v1` grant for the desktop.
+    pub grants: Arc<GrantSwitch>,
+    _dir: tempfile::TempDir,
     trusted: Arc<Mutex<Vec<Fingerprint>>>,
+    files_armed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 struct ClientHost {
@@ -165,7 +254,7 @@ impl SessionHost for ClientHost {
             PeerStatus::Trusted {
                 device_id: "server".into(),
                 device_name: "Fedora".into(),
-                granted_capabilities: vec!["battery.v1".into()],
+                granted_capabilities: vec!["battery.v1".into(), "files.v1".into()],
             }
         } else {
             PeerStatus::Unknown
@@ -199,15 +288,54 @@ impl SessionHost for ClientHost {
 }
 
 impl TestClient {
+    /// A client that speaks `files.v1` by hand: the real handler is replaced
+    /// with a capture, so a test can send whatever it likes.
+    pub fn new_raw(name: &str) -> (Self, Arc<Captured>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let captured = Arc::new(Captured { rx: Mutex::new(rx) });
+        let client = Self::build(name, Some(tx));
+        (client, captured)
+    }
+
     pub fn new(name: &str) -> Self {
+        Self::build(name, None)
+    }
+
+    fn build(name: &str, capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>) -> Self {
         init_crypto();
         let identity =
             Arc::new(LocalIdentity::generate(name, v1::Platform::Android).expect("identity"));
         let fingerprint = identity.fingerprint();
         let battery = Arc::new(BatteryState::default());
-        let registry = CapabilityRegistry::builder()
-            .register(Arc::new(BatteryCapability::new(Arc::clone(&battery))))
-            .build();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let downloads = dir.path().join("downloads");
+        let approvals = Arc::new(ApprovalSwitch::default());
+        let grants = Arc::new(GrantSwitch::default());
+        grants.set(true);
+
+        let transfers = TransferManager::new(
+            StreamRole::Dialer,
+            fingerprint,
+            FilesConfig {
+                destination: Destination::new(downloads.clone()),
+                max_file_bytes: 64 * 1024 * 1024,
+                accept_timeout: Duration::from_secs(3),
+                stream_open_timeout: Duration::from_millis(700),
+            },
+            Arc::clone(&approvals) as Arc<dyn TransferApproval>,
+        );
+
+        let mut builder = CapabilityRegistry::builder()
+            .register(Arc::new(BatteryCapability::new(Arc::clone(&battery))));
+        builder = match capture {
+            Some(tx) => builder.register(Arc::new(CapturingCapability {
+                id: "files.v1".to_string(),
+                tx,
+            })),
+            None => builder.register(Arc::new(FilesCapability::new(Arc::clone(&transfers)))),
+        };
+        let registry = builder.build();
         let trusted = Arc::new(Mutex::new(Vec::new()));
 
         let host: Arc<dyn SessionHost> = Arc::new(ClientHost {
@@ -221,8 +349,55 @@ impl TestClient {
             fingerprint,
             host,
             battery,
+            transfers,
+            downloads,
+            approvals,
+            grants,
+            _dir: dir,
             trusted,
+            files_armed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Finishes wiring `files.v1` now that the server's address is known.
+    ///
+    /// Called by [`connect`]; also callable directly by a test that drives
+    /// the data stream by hand.
+    ///
+    /// [`connect`]: Self::connect
+    pub async fn arm_files(&self, addr: SocketAddr, pinned: Fingerprint) {
+        // Idempotent: a client that reconnects (which the grant flow
+        // requires) must not end up with two reapers.
+        if self
+            .files_armed
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
+        self.transfers
+            .set_authorizer(Arc::clone(&self.grants) as Arc<dyn FilesAuthorizer>)
+            .await;
+        self.transfers
+            .set_dialer(Arc::new(TestDialer {
+                addr,
+                identity: Arc::clone(&self.identity),
+                pinned,
+            }))
+            .await;
+        self.transfers.spawn_reaper();
+    }
+
+    /// Everything this device has stored, by filename.
+    pub fn received_files(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(&self.downloads) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        names.sort();
+        names
     }
 
     /// Marks a server as already-trusted, simulating a persisted pairing.
@@ -255,6 +430,7 @@ impl TestClient {
         pinned: Fingerprint,
         token: Option<&PairingToken>,
     ) -> Result<ConnectedSession> {
+        self.arm_files(addr, pinned).await;
         let mut tls = self.tls_connect(addr, pinned).await?;
         match session::connect_handshake(&mut tls, &self.host, pinned, token).await? {
             ClientHandshake::Established(established, state) => {
@@ -379,4 +555,301 @@ where
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+// ---------------------------------------------------------------------------
+// files.v1 harness
+// ---------------------------------------------------------------------------
+//
+// Everything below drives the *real* capability over the *real* transport:
+// a real TLS data stream, real pinning, the real MAC. A test that expects a
+// refusal gets it from the code that runs in production, never from a stub.
+
+use anyflow_capability_files::transfer::{FailureReason, TransferId, TransferState};
+use anyflow_capability_files::{
+    DataStreamDialer, DataStreamIo, Destination, FilesAuthorizer, FilesCapability, FilesConfig,
+    IncomingOffer, StreamRole, TransferApproval, TransferManager, TransferSnapshot,
+};
+
+fn is_partial(name: &str) -> bool {
+    name.starts_with(".anyflow-") || name.ends_with(".part")
+}
+
+/// A `TransferApproval` a test can steer.
+///
+/// Also counts how many times it was asked, which is how "the peer was
+/// refused before anyone was bothered" is asserted: a prompt that never
+/// appeared is the difference between a check that ran early and one that ran
+/// too late.
+pub struct ApprovalSwitch {
+    accept: std::sync::atomic::AtomicBool,
+    /// When set, the approval never answers. Stands in for a human who walked
+    /// away, so the accept timeout can be exercised.
+    stall: std::sync::atomic::AtomicBool,
+    asked: std::sync::atomic::AtomicUsize,
+}
+
+impl Default for ApprovalSwitch {
+    fn default() -> Self {
+        Self {
+            accept: std::sync::atomic::AtomicBool::new(true),
+            stall: std::sync::atomic::AtomicBool::new(false),
+            asked: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
+impl ApprovalSwitch {
+    pub fn set_accept(&self, accept: bool) {
+        self.accept
+            .store(accept, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn set_stall(&self, stall: bool) {
+        self.stall
+            .store(stall, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// How many times a human was asked.
+    pub fn asked(&self) -> usize {
+        self.asked.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[async_trait::async_trait]
+impl TransferApproval for ApprovalSwitch {
+    async fn confirm_receive(&self, _offer: &IncomingOffer) -> bool {
+        self.asked
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if self.stall.load(std::sync::atomic::Ordering::Relaxed) {
+            std::future::pending::<()>().await;
+        }
+        self.accept.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// A `files.v1` grant the test controls directly.
+///
+/// Used for the phone side only. The desktop's authorizer is the real
+/// `DaemonState`, reading the real trust store, because the desktop is where
+/// the grant rules under test actually live.
+#[derive(Default)]
+pub struct GrantSwitch {
+    granted: std::sync::atomic::AtomicBool,
+}
+
+impl GrantSwitch {
+    pub fn set(&self, granted: bool) {
+        self.granted
+            .store(granted, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[async_trait::async_trait]
+impl FilesAuthorizer for GrantSwitch {
+    async fn is_authorized(&self, _peer: &Fingerprint) -> bool {
+        self.granted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Dials data streams at a fixed address with a fixed pinned identity —
+/// exactly what the phone does, using the same `data_stream_client_config`.
+pub struct TestDialer {
+    pub addr: SocketAddr,
+    pub identity: Arc<LocalIdentity>,
+    pub pinned: Fingerprint,
+}
+
+#[async_trait::async_trait]
+impl DataStreamDialer for TestDialer {
+    async fn dial(&self, _peer: &Fingerprint) -> Result<Box<dyn DataStreamIo>> {
+        let stream = open_data_stream(self.addr, &self.identity, self.pinned).await?;
+        Ok(Box::new(stream))
+    }
+}
+
+/// Opens a raw, authenticated data-stream connection.
+///
+/// Public so a test can play a hostile dialer: complete a genuine TLS
+/// handshake with a real identity and then send whatever it likes as the
+/// first frame.
+pub async fn open_data_stream(
+    addr: SocketAddr,
+    identity: &LocalIdentity,
+    pinned: Fingerprint,
+) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
+    let config = anyflow_core::tls::data_stream_client_config(identity, pinned)?;
+    let connector = TlsConnector::from(config);
+    let tcp = TcpStream::connect(addr).await?;
+    let name = rustls_pki_types::ServerName::try_from("anyflow.invalid").expect("static name");
+    Ok(connector.connect(name, tcp).await?)
+}
+
+/// Waits for a transfer to reach a terminal state and returns its snapshot.
+pub async fn wait_for_terminal(
+    manager: &Arc<TransferManager>,
+    id: TransferId,
+    timeout: Duration,
+) -> TransferSnapshot {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if let Some(snapshot) = manager.snapshot_one(id).await {
+            if snapshot.state.is_terminal() {
+                return snapshot;
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let state = manager
+                .snapshot_one(id)
+                .await
+                .map(|s| s.state.to_string())
+                .unwrap_or_else(|| "gone".into());
+            panic!("transfer {id} did not settle within {timeout:?} (state: {state})");
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Waits for a transfer to reach a particular state.
+pub async fn wait_for_state(
+    manager: &Arc<TransferManager>,
+    id: TransferId,
+    want: TransferState,
+    timeout: Duration,
+) {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if manager
+            .snapshot_one(id)
+            .await
+            .is_some_and(|s| s.state == want)
+        {
+            return;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let state = manager
+                .snapshot_one(id)
+                .await
+                .map(|s| s.state.to_string())
+                .unwrap_or_else(|| "gone".into());
+            panic!("transfer {id} never reached {want} within {timeout:?} (state: {state})");
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Asserts a transfer failed for exactly this reason.
+pub fn assert_failed_with(snapshot: &TransferSnapshot, reason: FailureReason) {
+    assert!(
+        matches!(
+            snapshot.state,
+            TransferState::Failed | TransferState::Cancelled
+        ),
+        "expected a failure, got {}",
+        snapshot.state
+    );
+    assert_eq!(snapshot.failure, Some(reason), "wrong failure reason");
+}
+
+/// A capability that records every payload instead of acting on it.
+///
+/// Registered in place of the real `files.v1` handler on a "raw" client, so a
+/// test can speak the protocol by hand: send a hostile offer, read what the
+/// desktop replies, and drive the data stream itself. Without this, every
+/// test would be limited to what the well-behaved implementation is willing
+/// to send — which is precisely not what a security test wants.
+pub struct CapturingCapability {
+    id: String,
+    tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+}
+
+#[async_trait::async_trait]
+impl anyflow_core::capability::Capability for CapturingCapability {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn on_message(
+        &self,
+        _ctx: &anyflow_core::capability::CapabilityContext,
+        payload: &[u8],
+    ) -> Result<()> {
+        let _ = self.tx.send(payload.to_vec());
+        Ok(())
+    }
+}
+
+/// The raw side of a client: what the desktop said, undigested.
+pub struct Captured {
+    rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
+}
+
+impl Captured {
+    /// Waits for the next `files.v1` message from the desktop.
+    pub async fn next_control(&self, timeout: Duration) -> pb::FileControl {
+        let mut rx = self.rx.lock().await;
+        let payload = tokio::time::timeout(timeout, rx.recv())
+            .await
+            .expect("the desktop said nothing in time")
+            .expect("the capture channel closed");
+        <pb::FileControl as prost::Message>::decode(&payload[..]).expect("decodable FileControl")
+    }
+
+    /// Discards everything received so far.
+    ///
+    /// Needed after a test deliberately provokes a burst of replies, so the
+    /// next assertion reads a fresh message rather than the backlog.
+    pub async fn drain(&self) {
+        let mut rx = self.rx.lock().await;
+        while rx.try_recv().is_ok() {}
+    }
+
+    /// Waits for the next message, returning `None` if the desktop stays
+    /// quiet. Used to assert that something did *not* happen.
+    pub async fn next_control_or_silence(&self, timeout: Duration) -> Option<pb::FileControl> {
+        let mut rx = self.rx.lock().await;
+        let payload = tokio::time::timeout(timeout, rx.recv()).await.ok()??;
+        <pb::FileControl as prost::Message>::decode(&payload[..]).ok()
+    }
+}
+
+pub use anyflow_proto::v1::capabilities as pb;
+
+/// Sends one `files.v1` control message over a live session.
+pub async fn send_files_control(session: &ConnectedSession, body: pb::file_control::Body) -> bool {
+    let payload =
+        <pb::FileControl as prost::Message>::encode_to_vec(&pb::FileControl { body: Some(body) });
+    session
+        .handle
+        .send_capability(anyflow_core::capability::OutboundMessage {
+            capability_id: "files.v1".to_string(),
+            payload,
+        })
+        .await
+}
+
+/// Writes a file of `size` pseudo-random-but-deterministic bytes.
+///
+/// Deterministic so a hash mismatch in a test is reproducible, and not all
+/// zeros so a truncation or an off-by-one is actually visible in the digest.
+pub fn write_sample_file(path: &std::path::Path, size: usize) -> Vec<u8> {
+    let bytes = write_sample_bytes(size);
+    std::fs::write(path, &bytes).expect("write sample");
+    bytes
+}
+
+/// The same deterministic bytes, without touching the filesystem.
+pub fn write_sample_bytes(size: usize) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(size);
+    let mut x: u32 = 0x9e37_79b9;
+    for _ in 0..size {
+        x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        bytes.push((x >> 24) as u8);
+    }
+    bytes
+}
+
+pub fn sha256_of(bytes: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).into()
 }

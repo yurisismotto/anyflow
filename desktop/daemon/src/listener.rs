@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyflow_core::error::Error;
 use anyflow_core::session::{self, SessionHost};
-use anyflow_core::tls;
+use anyflow_core::tls::{self, NegotiatedProtocol};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
@@ -219,18 +219,37 @@ async fn handle_connection(
         .await
         .map_err(|_| Error::Protocol("TLS handshake timed out"))??;
 
-    // The identity comes from the completed handshake, never from anything
-    // the peer asserts later.
-    let fingerprint = {
+    // The identity and the connection's *kind* both come from the completed
+    // handshake, never from anything the peer asserts afterwards.
+    let (fingerprint, protocol) = {
         let (_, conn) = tls.get_ref();
-        tls::peer_fingerprint(conn)?
+        (tls::peer_fingerprint(conn)?, tls::negotiated_protocol(conn))
     };
 
     tracing::debug!(
         peer_addr = %addr,
         peer = %fingerprint.to_display_short(),
+        protocol = ?protocol,
         "TLS established"
     );
+
+    match protocol {
+        Some(NegotiatedProtocol::Data) => {
+            // A bulk data stream. It shares this listener, this port and this
+            // pinned identity with the control session, and shares nothing
+            // else: no HELLO, no envelope, no capability dispatch. Which
+            // transfer it is for, and whether it may have it, is decided by
+            // `files.v1` from the transfer's single-use challenge.
+            return handle_data_stream(tls, fingerprint, state).await;
+        }
+        Some(NegotiatedProtocol::Control) => {}
+        None => {
+            // No ALPN, or one we do not speak. Failing closed matters here:
+            // treating an absent ALPN as "probably a control session" would
+            // hand the handshake path to any client that omitted it.
+            return Err(Error::Protocol("peer negotiated no known ALPN protocol"));
+        }
+    }
 
     let host: Arc<dyn SessionHost> = state.clone();
     let (established, envelope_state) =
@@ -244,4 +263,29 @@ async fn handle_connection(
     );
 
     session::run_session(tls, host, established, envelope_state).await
+}
+
+/// Serves one data stream.
+///
+/// Deliberately short. Everything that decides whether these bytes may flow
+/// lives in `files.v1`; the listener's only jobs are to establish the peer's
+/// pinned identity and to hand the socket over. In particular it does **not**
+/// consult the trust store here — `accept_data_stream` re-checks the grant
+/// itself, so there is one place that decision is made rather than two that
+/// could drift apart.
+async fn handle_data_stream(
+    tls: tokio_rustls::server::TlsStream<TcpStream>,
+    fingerprint: anyflow_core::Fingerprint,
+    state: Arc<DaemonState>,
+) -> Result<(), Error> {
+    let Some(transfers) = state.transfers.clone() else {
+        return Err(Error::Protocol("file transfer is not enabled"));
+    };
+    transfers
+        .accept_data_stream(
+            fingerprint,
+            Box::new(tls),
+            anyflow_core::session::PROTOCOL_VERSION_MAX,
+        )
+        .await
 }

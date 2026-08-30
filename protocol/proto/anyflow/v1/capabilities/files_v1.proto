@@ -1,0 +1,247 @@
+syntax = "proto3";
+
+package anyflow.v1.capabilities;
+
+// Java options are for the Android build; prost ignores them. Both sides
+// compile these exact files, so the wire format cannot drift.
+option java_package = "io.github.yurisismotto.anyflow.proto.capabilities";
+option java_outer_classname = "FilesV1Proto";
+option java_multiple_files = true;
+
+// Capability id: "files.v1"
+//
+// This schema describes TWO different channels, and the split is the whole
+// design (see ADR-0012 and ADR-0013).
+//
+//   * `FileControl` travels as the opaque `payload` of a CapabilityMessage on
+//     the ordinary control session. It carries metadata and decisions only —
+//     never file bytes. Every message here fits in a few hundred bytes, so
+//     MAX_FRAME_LEN stays at 64 KiB and keeps doing its job.
+//
+//   * `DataStreamAuth` / `DataStreamReady` are the first two frames of a
+//     *separate* TLS 1.3 connection that carries nothing but the file's
+//     bytes. They are not Envelopes and never appear on the control session.
+//
+// File bytes are never carried by any message in this file.
+
+// ---------------------------------------------------------------------------
+// Why a transfer fails
+// ---------------------------------------------------------------------------
+
+// Sent to the peer, so it must stay free of local detail: no paths, no
+// filenames, no errno strings. It says what happened in a vocabulary the
+// other side can act on, and nothing more (principle 17).
+enum TransferFailureReason {
+  TRANSFER_FAILURE_REASON_UNSPECIFIED = 0;
+  // The human said no.
+  TRANSFER_FAILURE_REASON_DECLINED_BY_USER = 1;
+  // The peer has no `files.v1` grant here.
+  TRANSFER_FAILURE_REASON_NOT_AUTHORIZED = 2;
+  // Concurrency limit reached.
+  TRANSFER_FAILURE_REASON_TOO_MANY_TRANSFERS = 3;
+  // Larger than the receiver's configured ceiling.
+  TRANSFER_FAILURE_REASON_TOO_LARGE = 4;
+  // The offer's metadata was malformed, oversized, or unusable — for
+  // instance a filename that sanitizes to nothing.
+  TRANSFER_FAILURE_REASON_BAD_METADATA = 5;
+  // An offer, an acceptance, or the data stream took too long.
+  TRANSFER_FAILURE_REASON_TIMED_OUT = 6;
+  // SHA-256 mismatch, or a byte count that disagreed with the offer.
+  TRANSFER_FAILURE_REASON_INTEGRITY = 7;
+  // The receiver could not write the file locally.
+  TRANSFER_FAILURE_REASON_STORAGE = 8;
+  // The data stream broke, or the session ended mid-transfer.
+  TRANSFER_FAILURE_REASON_TRANSPORT = 9;
+  // A human cancelled a transfer that was already running.
+  TRANSFER_FAILURE_REASON_CANCELLED_BY_USER = 10;
+  // The peer's pairing was revoked while the transfer was in flight.
+  TRANSFER_FAILURE_REASON_REVOKED = 11;
+  // No such transfer, or it is no longer in a state that allows this.
+  TRANSFER_FAILURE_REASON_UNKNOWN_TRANSFER = 12;
+}
+
+// ---------------------------------------------------------------------------
+// Control messages
+// ---------------------------------------------------------------------------
+
+// Offers one file. Metadata only: the bytes follow on the data stream, and
+// only if the receiver accepts.
+message FileOffer {
+  // Exactly 16 cryptographically random bytes, generated per transfer.
+  //
+  // NOT the envelope's `message_id`: an id whose lifecycle is one frame
+  // cannot also name something that outlives many frames, and reusing it
+  // would tie a transfer's identity to the replay window's bookkeeping.
+  //
+  // Unpredictability matters but is not load-bearing on its own: a guessed
+  // id still fails the data stream's MAC (see DataStreamAuth).
+  bytes transfer_id = 1;
+
+  // UNTRUSTED, attacker-controlled. The receiver treats this as a *hint* and
+  // derives its own name from it: sanitized to a basename, length-capped, and
+  // never used to select a directory. See `files.v1` in PROTOCOL.md.
+  //
+  // A sender must send a basename. There is deliberately no field for a path,
+  // relative or absolute, so there is nothing here that could name a location
+  // on the receiver.
+  string filename = 2;
+
+  // Exact size of the file in bytes. The receiver enforces it in both
+  // directions: a stream that delivers more, or fewer, fails.
+  uint64 size_bytes = 3;
+
+  // Advisory only, and untrusted. Never used to decide what to do with the
+  // file, only to label it. Empty when unknown.
+  string mime_type = 4;
+
+  // Exactly 32 bytes: SHA-256 over the complete file. Known before the first
+  // byte arrives, which is what lets the receiver verify rather than trust.
+  bytes sha256 = 5;
+
+  // Sender's wall clock. Informational only, exactly as in the Envelope:
+  // never an input to an authorization, expiry or ordering decision.
+  int64 timestamp_unix_ms = 6;
+
+  // Deliberately no `stream_challenge` here. An offer exists before anyone
+  // has agreed to anything, and a challenge present at that point would let
+  // a peer open the data stream before the receiving human had accepted.
+  // See FileReady.
+}
+
+// The receiver agrees to take the file.
+//
+// `stream_challenge` is set when — and only when — the accepting peer is also
+// the one that accepts data-stream connections (the desktop daemon; see
+// ADR-0013). That is the Android-to-Fedora case, where the desktop is both
+// the receiver and the stream acceptor, so one message can do both jobs.
+message FileAccept {
+  bytes transfer_id = 1;
+
+  // Single-use 32-byte challenge for the data stream. Empty when the
+  // accepting peer is the one that dials — FileReady carries it then.
+  //
+  // Secret: it is the MAC key that authenticates the data stream. Never
+  // logged, and it never leaves the control session's TLS.
+  bytes stream_challenge = 2;
+}
+
+// The data-stream acceptor is ready to be dialled for this transfer.
+//
+// Sent in the Fedora-to-Android case, where the desktop is the *sender* and
+// so is not the peer that emits FileAccept. Something still has to carry the
+// challenge, and it must not be the offer.
+//
+// The rule that unifies the two cases: **the peer that accepts data-stream
+// connections issues the challenge in whichever control message it sends at
+// the moment the transfer becomes active** — FileAccept when it is the
+// receiver, FileReady when it is the sender. Consequences worth stating:
+//
+//   * a challenge never exists before both sides have agreed, so the stream
+//     cannot be opened ahead of the receiver's approval;
+//   * by the time a dialer holds a challenge, the acceptor has already moved
+//     the transfer into its transferring state, so there is no race in which
+//     a legitimate stream arrives too early and is refused.
+message FileReady {
+  bytes transfer_id = 1;
+  bytes stream_challenge = 2;
+}
+
+// The receiver refuses, before any byte moves.
+message FileReject {
+  bytes transfer_id = 1;
+  TransferFailureReason reason = 2;
+}
+
+// Either side abandons a transfer it had previously agreed to. Valid from
+// the moment an offer exists until the transfer reaches a terminal state.
+message FileCancel {
+  bytes transfer_id = 1;
+  TransferFailureReason reason = 2;
+}
+
+// Sent by the RECEIVER, and only after the received bytes have been hashed
+// and the hash matched. It is the receiver's statement that the file is
+// stored and correct — never the sender's statement that it finished writing.
+message FileComplete {
+  bytes transfer_id = 1;
+}
+
+// Either side reports that a transfer ended badly.
+message FileFailed {
+  bytes transfer_id = 1;
+  TransferFailureReason reason = 2;
+}
+
+// The `files.v1` capability payload. Carried inside CapabilityMessage.payload,
+// which the transport treats as opaque bytes.
+message FileControl {
+  oneof body {
+    FileOffer offer = 1;
+    FileAccept accept = 2;
+    FileReject reject = 3;
+    FileCancel cancel = 4;
+    FileComplete complete = 5;
+    FileFailed failed = 6;
+    FileReady ready = 7;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Data stream handshake
+// ---------------------------------------------------------------------------
+//
+// These two messages are exchanged over a dedicated TLS 1.3 connection that
+// negotiated ALPN "anyflow-data/1". They are length-prefixed exactly like an
+// Envelope but are NOT Envelopes: no sequence number, no replay window, no
+// capability dispatch. After DataStreamReady the connection carries raw file
+// bytes and nothing else.
+
+// First frame on a data stream, sent by the dialer.
+message DataStreamAuth {
+  // Must equal the control session's negotiated protocol version.
+  uint32 protocol_version = 1;
+
+  // Which transfer this stream is for.
+  bytes transfer_id = 2;
+
+  // Proof that the dialer is the peer that negotiated this transfer on the
+  // control session:
+  //
+  //   mac = HMAC-SHA256(
+  //       key = stream_challenge,
+  //       msg = "anyflow/files.v1/data-stream/v1"
+  //             || len_prefixed(acceptor_identity_fingerprint)
+  //             || len_prefixed(dialer_identity_fingerprint)
+  //             || len_prefixed(transfer_id))
+  //
+  // The construction mirrors the pairing proof. What each binding buys:
+  //
+  //   * the CHALLENGE is single-use, random, and was delivered only inside
+  //     the control session's TLS — so a stream cannot be replayed, and
+  //     knowing a transfer_id is not enough to open one (it is not a bearer
+  //     token);
+  //   * the two FINGERPRINTS bind the proof to this exact pair of pinned
+  //     identities, so it is worthless against another machine and cannot be
+  //     replayed by another device;
+  //   * the TRANSFER_ID binds it to one transfer, so a stream authorized for
+  //     one file cannot be attached to another.
+  //
+  // The acceptor additionally requires that the TLS peer certificate of this
+  // connection is the same pinned identity that negotiated the transfer. The
+  // MAC is defence in depth on top of that, not a replacement for it.
+  bytes mac = 3;
+}
+
+enum DataStreamStatus {
+  DATA_STREAM_STATUS_UNSPECIFIED = 0;
+  DATA_STREAM_STATUS_READY = 1;
+  DATA_STREAM_STATUS_REJECTED = 2;
+}
+
+// Second frame on a data stream, sent by the acceptor. On READY, bytes begin
+// immediately afterwards, flowing in whichever direction the transfer was
+// negotiated for.
+message DataStreamReady {
+  DataStreamStatus status = 1;
+  TransferFailureReason reason = 2;
+}

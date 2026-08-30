@@ -12,7 +12,16 @@
 //! # terminal 3
 //! cargo run -p anyflow-daemon --example fake_phone -- pair '<payload>'
 //! cargo run -p anyflow-daemon --example fake_phone -- connect
+//!
+//! # files.v1: send a file to the desktop, or sit and receive one
+//! anyflow grant <device> files.v1
+//! cargo run -p anyflow-daemon --example fake_phone -- send ~/photo.jpg
+//! cargo run -p anyflow-daemon --example fake_phone -- receive
 //! ```
+//!
+//! For `files.v1` it plays the **dialer**, exactly as a phone does: it opens
+//! the data stream in both directions of transfer and proves the challenge
+//! the desktop issued.
 //!
 //! Its identity is stored under `--data-dir` (default:
 //! `/tmp/anyflow-fake-phone`) so that "reconnect without pairing again" can
@@ -22,6 +31,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyflow_capability_battery::{BatteryCapability, BatteryReading, BatteryState};
+use anyflow_capability_files::{
+    DataStreamDialer, DataStreamIo, Destination, FilesAuthorizer, FilesCapability, FilesConfig,
+    IncomingOffer, StreamRole, TransferApproval, TransferManager,
+};
 use anyflow_core::capability::CapabilityRegistry;
 use anyflow_core::error::{PairingError, Result};
 use anyflow_core::qr::QrPayload;
@@ -38,6 +51,203 @@ struct PhoneHost {
     info: v1::DeviceInfo,
     registry: CapabilityRegistry,
     store: Mutex<Store>,
+}
+
+impl PhoneHost {
+    /// The TLS client config a data stream dials with.
+    ///
+    /// Built from the same identity and the same pinned fingerprint as the
+    /// control session; only the ALPN differs.
+    async fn identity_config(
+        self: Arc<Self>,
+        pinned: Fingerprint,
+    ) -> anyhow::Result<Arc<rustls::ClientConfig>> {
+        let store = self.store.lock().await;
+        Ok(anyflow_core::tls::data_stream_client_config(
+            store.identity(),
+            pinned,
+        )?)
+    }
+}
+
+/// Opens data streams to the desktop. A phone always dials.
+struct PhoneDialer {
+    address: std::net::SocketAddr,
+    pinned: Fingerprint,
+    identity: Arc<rustls::ClientConfig>,
+}
+
+#[async_trait::async_trait]
+impl DataStreamDialer for PhoneDialer {
+    async fn dial(&self, _peer: &Fingerprint) -> Result<Box<dyn DataStreamIo>> {
+        let connector = TlsConnector::from(Arc::clone(&self.identity));
+        let tcp = tokio::net::TcpStream::connect(self.address)
+            .await
+            .map_err(anyflow_core::Error::Io)?;
+        let _ = tcp.set_nodelay(true);
+        let name = rustls_pki_types::ServerName::try_from("anyflow.invalid")
+            .map_err(|_| anyflow_core::Error::Protocol("bad static server name"))?;
+        let tls = connector
+            .connect(name, tcp)
+            .await
+            .map_err(anyflow_core::Error::Io)?;
+        let _ = self.pinned;
+        Ok(Box::new(tls))
+    }
+}
+
+/// A demo tool has no human to ask, so it accepts. The real phone shows a
+/// prompt; the desktop daemon declines unless started with an explicit flag.
+struct AcceptEverything;
+
+#[async_trait::async_trait]
+impl TransferApproval for AcceptEverything {
+    async fn confirm_receive(&self, offer: &IncomingOffer) -> bool {
+        println!(
+            "accepting {} ({} bytes) from {}",
+            offer.filename,
+            offer.size_bytes,
+            offer.peer.to_display_short()
+        );
+        true
+    }
+}
+
+struct AlwaysAuthorized;
+
+#[async_trait::async_trait]
+impl FilesAuthorizer for AlwaysAuthorized {
+    async fn is_authorized(&self, _peer: &Fingerprint) -> bool {
+        true
+    }
+}
+
+/// Connects, then either offers a file or waits to be offered one, printing
+/// progress until every transfer has settled.
+async fn run_files(
+    host: Arc<PhoneHost>,
+    transfers: Arc<TransferManager>,
+    address: std::net::SocketAddr,
+    pinned: Fingerprint,
+    to_send: Option<std::path::PathBuf>,
+) -> anyhow::Result<()> {
+    let client_config = {
+        let store = host.store.lock().await;
+        anyflow_core::tls::client_config(store.identity(), pinned)?
+    };
+
+    let connector = TlsConnector::from(client_config);
+    let tcp = tokio::net::TcpStream::connect(address).await?;
+    tcp.set_nodelay(true)?;
+    let name = rustls_pki_types::ServerName::try_from("anyflow.invalid")?;
+    let mut tls = connector.connect(name, tcp).await?;
+
+    let session_host: Arc<dyn SessionHost> = host.clone();
+    let handshake = session::connect_handshake(&mut tls, &session_host, pinned, None).await?;
+    let (established, state) = match handshake {
+        ClientHandshake::Established(e, s) => (e, s),
+        ClientHandshake::PairingRequired => {
+            anyhow::bail!("the daemon does not know this device; run `pair` first")
+        }
+    };
+
+    println!(
+        "session established with {}, capabilities: {:?}",
+        established.peer.to_display_short(),
+        established.negotiated_capabilities
+    );
+    if !established
+        .negotiated_capabilities
+        .iter()
+        .any(|c| c == "files.v1")
+    {
+        anyhow::bail!(
+            "files.v1 was not granted. Run: anyflow grant <device> files.v1, \
+             then reconnect."
+        );
+    }
+
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let notifier: Arc<dyn SessionHost> = Arc::new(Notifier {
+        inner: session_host,
+        tx: Mutex::new(Some(ready_tx)),
+    });
+
+    let task =
+        tokio::spawn(async move { session::run_session(tls, notifier, established, state).await });
+    let handle = ready_rx.await?;
+
+    // Progress, printed as it happens.
+    let mut events = transfers.subscribe();
+    let printer = tokio::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            let snapshot = event.0;
+            match snapshot.percentage() {
+                Some(pct) => println!(
+                    "  {} {} {}% ({}/{}) [{}]",
+                    snapshot.id,
+                    snapshot.filename,
+                    pct,
+                    snapshot.bytes_transferred,
+                    snapshot.size_bytes,
+                    snapshot.state
+                ),
+                None => println!(
+                    "  {} {} [{}]",
+                    snapshot.id, snapshot.filename, snapshot.state
+                ),
+            }
+            if let Some(path) = snapshot.stored_at {
+                println!("  stored at {}", path.display());
+            }
+        }
+    });
+
+    if let Some(path) = to_send {
+        let id = transfers
+            .offer_file(established_peer(&handle), path)
+            .await?;
+        println!("offered transfer {id}");
+    }
+
+    // Wait until nothing is in flight any more, or the hold window expires.
+    let hold = Duration::from_secs(
+        std::env::var("FAKE_PHONE_HOLD_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30),
+    );
+    let deadline = tokio::time::Instant::now() + hold;
+    loop {
+        let snapshot = transfers.snapshot().await;
+        let settled = !snapshot.is_empty() && snapshot.iter().all(|t| t.state.is_terminal());
+        if settled || tokio::time::Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    for snapshot in transfers.snapshot().await {
+        println!(
+            "final: {} {} {} {}",
+            snapshot.id,
+            snapshot.filename,
+            snapshot.state,
+            snapshot
+                .failure
+                .map(|f| f.to_string())
+                .unwrap_or_else(|| "-".into())
+        );
+    }
+
+    printer.abort();
+    handle.shutdown().await;
+    let _ = task.await;
+    Ok(())
+}
+
+fn established_peer(handle: &SessionHandle) -> Fingerprint {
+    handle.peer()
 }
 
 #[async_trait::async_trait]
@@ -112,8 +322,24 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let battery_state = Arc::new(BatteryState::default());
+
+    // files.v1, in the dialer role. The download directory is under the fake
+    // phone's own data dir so a demo never writes into the operator's real
+    // Downloads folder.
+    let downloads = std::path::PathBuf::from(&data_dir).join("downloads");
+    let transfers = TransferManager::new(
+        StreamRole::Dialer,
+        store.identity().fingerprint(),
+        FilesConfig {
+            destination: Destination::new(downloads.clone()),
+            ..FilesConfig::default()
+        },
+        Arc::new(AcceptEverything),
+    );
+
     let registry = CapabilityRegistry::builder()
         .register(Arc::new(BatteryCapability::new(Arc::clone(&battery_state))))
+        .register(Arc::new(FilesCapability::new(Arc::clone(&transfers))))
         .build();
 
     // Presented as an Android device so the demo output reads the way the
@@ -128,6 +354,10 @@ async fn main() -> anyhow::Result<()> {
         registry,
         store: Mutex::new(store),
     });
+
+    // Trusts whatever the desktop is. A demo tool, not a policy: the real
+    // phone reads its own trust store here.
+    transfers.set_authorizer(Arc::new(AlwaysAuthorized)).await;
 
     match command {
         "pair" => {
@@ -145,6 +375,39 @@ async fn main() -> anyhow::Result<()> {
                 payload.fingerprint.to_display_short()
             );
             run(host, address, payload.fingerprint, Some(token)).await
+        }
+        "send" | "receive" => {
+            let (fingerprint, address) = {
+                let store = host.store.lock().await;
+                let peer = store
+                    .peers()
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("not paired yet; run `pair` first"))?;
+                let address: std::net::SocketAddr = std::env::var("FAKE_PHONE_ADDR")
+                    .unwrap_or_else(|_| "127.0.0.1:55432".to_string())
+                    .parse()?;
+                (peer.fingerprint, address)
+            };
+
+            transfers
+                .set_dialer(Arc::new(PhoneDialer {
+                    address,
+                    pinned: fingerprint,
+                    identity: Arc::clone(&host).identity_config(fingerprint).await?,
+                }))
+                .await;
+            transfers.spawn_reaper();
+
+            let to_send = if command == "send" {
+                Some(std::path::PathBuf::from(args.get(2).ok_or_else(|| {
+                    anyhow::anyhow!("usage: fake_phone send <file>")
+                })?))
+            } else {
+                println!("waiting for a file in {}", downloads.display());
+                None
+            };
+
+            run_files(host, transfers, address, fingerprint, to_send).await
         }
         "connect" => {
             let (fingerprint, address) = {
@@ -167,7 +430,10 @@ async fn main() -> anyhow::Result<()> {
             run(host, address, fingerprint, None).await
         }
         _ => {
-            eprintln!("usage: fake_phone pair '<qr payload>' | connect [addr:port]");
+            eprintln!(
+                "usage: fake_phone pair '<qr payload>' | connect [addr:port] \
+                 | send <file> | receive"
+            );
             std::process::exit(2);
         }
     }

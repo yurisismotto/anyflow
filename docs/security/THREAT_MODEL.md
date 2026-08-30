@@ -138,13 +138,38 @@ user then accepts at the prompt will pair. The prompt is the last line.
 
 ### T8 — Malicious files, path traversal
 
-*Not applicable in this Sprint*: there is no file transfer. Recorded here
-because the decisions that make it tractable were taken now — capabilities are
-separately granted, payloads are opaque to the transport and validated at the
-capability boundary, and `MAX_FRAME_LEN` is 64 KiB. When `files.v1` arrives it
-must: write only inside a dedicated directory, never trust a peer-supplied
-path or filename, resolve and re-check the final path after canonicalisation,
-and refuse symlinks and absolute paths.
+**Applicable since `files.v1`.** The commitments recorded here before the
+feature existed are all met; see [FILES.md](../architecture/FILES.md).
+
+* **Write only inside a dedicated directory.** `<XDG downloads>/AnyFlow` on
+  Fedora (mode 0700), `Download/AnyFlow` via MediaStore on Android. The
+  directory is chosen by the receiver and cannot be influenced by a peer.
+* **Never trust a peer-supplied filename.** `sanitize` reduces it to a bare
+  name: everything up to the last `/` **or** `\` is dropped, control
+  characters and NUL are stripped, trailing dots and spaces go, `.` and `..`
+  and Windows device names are rejected outright, and the result is capped at
+  255 bytes on a character boundary. A name that sanitizes to nothing is
+  rejected, never renamed — inventing a name would hide the attack.
+* **No path is transmitted at all.** `FileOffer` has no path field, relative
+  or absolute, so there is nothing a peer could set that names a location.
+* **Re-check the final path.** The joined path's parent is asserted to be the
+  destination directory before anything is created.
+* **Refuse symlinks.** Every file is created with `O_EXCL`, so a symlink
+  planted in the download directory causes the open to fail rather than be
+  followed. A duplicate name is numbered — `photo (1).jpg` — by *creating* the
+  reservation, not by testing-then-creating, which closes the race in which
+  two transfers both see a name free.
+* **Nothing unverified is ever presented as a file.** Bytes land in a hidden
+  `.part` file (or an invisible `IS_PENDING` MediaStore row), are hashed, and
+  are promoted only if SHA-256 matches the offer. A failed hash deletes the
+  partial file.
+
+Residual risk: AnyFlow does not inspect file *content*. A paired, granted,
+human-approved peer can send a file that is malicious when opened. That is out
+of scope for a transfer tool, and the mitigations are the grant (off by
+default), the per-transfer human approval, and the fact that a received file
+is never executed, opened or dispatched on by AnyFlow itself — `mime_type` is
+a label and is never an input to a decision.
 
 ### T9 — URL scheme attacks
 
@@ -173,6 +198,15 @@ side effects).
 * The scanned QR text is never echoed to the screen on a parse failure.
 * Fingerprints and peer addresses *are* logged: both are public values and are
   needed to diagnose a connection.
+* `files.v1` adds three rules of its own. `StreamChallenge`'s `Debug` prints
+  `<redacted>` and it is zeroed on drop — it is a MAC key. `TransferId`'s
+  `Display` prints only the first 8 hex characters, so reaching for the
+  obvious formatter cannot put a full id in a log. And only the **sanitized**
+  filename is ever logged: the raw peer-supplied string is attacker-controlled
+  and could forge log lines, so it does not reach a log at any level, nor a
+  screen.
+* Failure reasons sent to a peer come from a fixed enum, so a local path or an
+  errno string cannot escape through that channel.
 * The daemon logs to stderr, which journald captures under the user's own
   session.
 
@@ -246,6 +280,46 @@ The identity **fingerprint is deliberately not published**, so an observer
 cannot enumerate who trusts whom. `--no-mdns` disables advertising entirely
 today; a per-network toggle is the proper fix and is on the roadmap.
 
+### T19 — A data stream opened by the wrong peer, or for the wrong transfer
+
+**New with `files.v1`.** File bytes travel on a second TLS connection
+(ADR-0013), which raises a question the control session never had: TLS proves
+*which device* is on a socket, but not *which transfer* the socket is for.
+
+* An **unknown** peer completes TLS (the listener cannot pin a stranger) and
+  is then refused: the grant check runs before the transfer record is even
+  looked at, so it learns nothing about which transfer ids exist.
+* A **different paired** peer is refused because the transfer's TLS identity
+  must equal the one that negotiated it.
+* A **guessed transfer id** is worthless: the id is not a bearer token, and
+  the dialer must prove a single-use 32-byte challenge with an HMAC bound to
+  both fingerprints and the id.
+* A **replayed** authentication frame finds the challenge already consumed.
+* A **revoked** peer is refused, including mid-copy: the grant is re-checked
+  when the stream authenticates and periodically while it runs.
+
+Refusals are generic on the wire, so a prober cannot distinguish "no such
+transfer" from "bad MAC".
+
+Residual risk: an attacker who already controls one of the two devices can
+read a challenge from the control session's plaintext. This is not a
+weakening — on a compromised device they could use the legitimate code path —
+and the threat model has never claimed to defend a device against itself.
+
+### T20 — A transfer that never ends
+
+**New with `files.v1`.** A data stream is a separate TCP connection, so it does
+*not* die when its control session does. Without handling, a transfer whose
+peer vanished would keep running, or sit in `TRANSFERRING` forever while
+holding a partial file and a concurrency slot.
+
+A per-transfer reaper ends any transfer whose control session has closed
+(`FAILED`, reason `TRANSPORT`), whose state deadline has passed
+(`TIMED_OUT`), or whose peer has lost its grant (`REVOKED`). Every path
+deletes the partial file. Offers, acceptances, stream opens, idle streams and
+the post-send verdict all have explicit bounds, and concurrency is capped per
+peer.
+
 ## 4. Assumptions
 
 1. The OS CSPRNG is sound on both platforms.
@@ -263,6 +337,20 @@ by prose. See `desktop/core/tests/pairing.rs`,
 an unpaired device gets nothing, a different certificate is rejected by the
 verifier, a revoked device is refused, a token pairs exactly one device, and a
 replay closes the session.
+
+`files.v1` adds `desktop/daemon/tests/files.rs`, which drives the real
+capability over a real TLS data stream with real pinning. Every refusal in T8,
+T19 and T20 is asserted there rather than described: an ungranted peer, a
+stranger opening a data stream, another paired device attaching to someone
+else's transfer, a guessed transfer id, a replayed authentication, a reused
+transfer id, a path-traversal filename, an absolute path, a hash mismatch, a
+truncated stream, an oversized stream, oversized metadata, a duplicate
+`FILE_COMPLETE`, cancellation, a mid-transfer disconnect, a mid-transfer
+revocation, and two concurrent transfers staying isolated. The filename rules
+and the data-stream MAC are additionally pinned as cross-language contracts:
+`android/app/src/test/.../FilenamesTest.kt` and `StreamAuthTest.kt` assert the
+same cases and the same MAC vector as the Rust suite, so the two
+implementations cannot quietly diverge.
 
 **Never**, in tests or in a debug build, disable certificate validation. There
 is no code path in this repository that does, and adding one would invalidate

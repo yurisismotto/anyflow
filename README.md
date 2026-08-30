@@ -9,15 +9,16 @@ No required cloud. No vendor lock-in. No telemetry by default.
 Devices find each other on the local network, authenticate with pinned public
 keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 
-> **Status: foundation Sprint.** Identity, discovery, pairing, authenticated
-> transport, ping/pong and `battery.v1` are implemented and tested. Clipboard,
-> file transfer, notifications, media control and browser integration are
-> **not** implemented — the architecture is built to receive them, and that is
-> all.
+> **Status: `files.v1` Sprint.** On top of the certified foundation —
+> identity, discovery, pairing, authenticated transport, ping/pong and
+> `battery.v1` — this adds **secure file transfer in both directions**.
+> Clipboard, notifications, media control and browser integration are **not**
+> implemented; the architecture is built to receive them, and that is all.
 >
-> Both modules build and their test suites pass. Pairing has **not** yet been
-> exercised against a physical Android device; see
-> [Known limitations](#known-limitations).
+> Both modules build and their test suites pass. `files.v1` has been exercised
+> end to end against the real daemon binary over real TLS, in both directions,
+> with SHA-256 verification. It has **not** yet been run against a physical
+> Android device; see [Known limitations](#known-limitations).
 
 ## Principles
 
@@ -40,6 +41,7 @@ anyflow/
 │   ├── proto/                 Generated protobuf types
 │   ├── core/                  Identity, pairing, TLS, framing, session
 │   ├── capabilities/battery/  battery.v1
+│   ├── capabilities/files/    files.v1 — transfers, filename safety, stream auth
 │   ├── daemon/                anyflowd
 │   ├── cli/                   anyflow
 │   └── gui/                   (placeholder — GTK4/Libadwaita, later)
@@ -47,9 +49,9 @@ anyflow/
 ├── browser-extension/         (placeholder)
 ├── packaging/fedora/          systemd user unit, RPM spec
 └── docs/
-    ├── architecture/          OVERVIEW.md, PROTOCOL.md
+    ├── architecture/          OVERVIEW.md, PROTOCOL.md, FILES.md
     ├── security/              THREAT_MODEL.md
-    └── adr/                   ADR-0001 … ADR-0010
+    └── adr/                   ADR-0001 … ADR-0013
 ```
 
 ## Running on Fedora
@@ -61,7 +63,7 @@ Rust ([ADR-0004](docs/adr/ADR-0004-protocol-buffers.md)).
 ```bash
 cd desktop
 cargo build --release
-cargo test --workspace          # 79 tests
+cargo test --workspace          # 192 tests
 
 ./target/release/anyflowd   # foreground, or install the user unit
 ```
@@ -83,6 +85,26 @@ anyflow devices             # paired devices
 anyflow ping <device>       # round-trip over the live session
 anyflow unpair <device>     # revoke; takes effect immediately
 ```
+
+File transfer is a separately granted capability and is **never** granted
+automatically — writing a file to your disk is a side effect
+([ADR-0008](docs/adr/ADR-0008-capability-architecture.md)):
+
+```bash
+anyflow grant <device> files.v1     # allow file transfer with this device
+anyflow send <device> ~/photo.jpg   # offer a file; streams progress
+anyflow transfers                   # everything since the daemon started
+anyflow cancel <transfer-prefix>    # stop one mid-flight
+anyflow revoke <device> files.v1    # withdraw; stops transfers already running
+```
+
+Received files land in `<XDG downloads>/AnyFlow`. An existing name is never
+overwritten — `photo.jpg` becomes `photo (1).jpg`. See
+[docs/architecture/FILES.md](docs/architecture/FILES.md).
+
+The daemon has no terminal, so it cannot prompt: it **declines** incoming
+files and logs why. `anyflowd --accept-files-without-asking` is the documented
+escape hatch for an unattended test rig.
 
 `<device>` is a device id or a fingerprint prefix of at least 8 characters. An
 ambiguous prefix is an error, never a guess.
@@ -156,6 +178,23 @@ implementations cannot drift apart silently:
   the on-device behaviour of the Keystore, the foreground service and mDNS
   browsing is unverified. `desktop/daemon/examples/fake_phone.rs` is a test
   client, not a phone, and must never be reported as one.
+* **`files.v1` has not run against a physical phone.** It is exercised end to
+  end against the real `anyflowd` binary over real TLS, in both directions,
+  with SHA-256 verification — but by `fake_phone`, which is a test client and
+  must never be reported as a phone. The Android send and receive paths
+  (Sharesheet intent handling, `ContentResolver` reads, MediaStore writes) are
+  covered by unit and instrumented tests but have not been run on a device.
+* **Widening a capability grant takes effect on the next connection.** A
+  session's effective capability set is fixed at handshake time, so after
+  `anyflow grant … files.v1` the phone must reconnect. *Narrowing* is
+  immediate, including against a transfer already running — the asymmetry
+  fails in the safe direction, but it is a rough edge.
+* **No resume.** A transfer interrupted by a disconnect fails and its partial
+  file is deleted. The receiver already knows the expected size and digest, so
+  resume is tractable, but it needs durable partial state that this version
+  deliberately does not keep.
+* **One file per share.** `ACTION_SEND_MULTIPLE` is registered so AnyFlow
+  appears for multi-select, but only the first item is sent.
 * The trust store's persistence path is not covered by the local JVM unit
   tests: it needs a real `Context` and `filesDir`. Its pure logic is tested;
   the file I/O is not.

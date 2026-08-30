@@ -123,6 +123,17 @@ object TlsFactory {
     const val ALPN_PROTOCOL = "anyflow/1"
 
     /**
+     * ALPN for a `files.v1` bulk data stream (ADR-0012, ADR-0013).
+     *
+     * A data stream is a second TLS 1.3 connection to the *same* port with
+     * the *same* pinned identity. ALPN is what tells the desktop which of the
+     * two it just accepted, before a single application byte is read. It is
+     * not a weaker connection — it is the same connection carrying different
+     * traffic.
+     */
+    const val ALPN_DATA_PROTOCOL = "anyflow-data/1"
+
+    /**
      * Builds a socket factory that will accept exactly one server identity.
      */
     fun sslContext(identity: DeviceIdentity, pinned: Fingerprint): SSLContext {
@@ -145,10 +156,10 @@ object TlsFactory {
      * the "TLSv1.3" context: if the platform ever hands back a context that
      * enables more, this narrows it again.
      */
-    fun harden(socket: SSLSocket) {
+    fun harden(socket: SSLSocket, alpn: String = ALPN_PROTOCOL) {
         socket.enabledProtocols = arrayOf("TLSv1.3")
         socket.sslParameters = socket.sslParameters.apply {
-            applicationProtocols = arrayOf(ALPN_PROTOCOL)
+            applicationProtocols = arrayOf(alpn)
             // Endpoint identification is left off deliberately: it verifies
             // hostnames, and hostnames are not identity in this protocol
             // (principle 6). The pinning check in PinnedTrustManager is

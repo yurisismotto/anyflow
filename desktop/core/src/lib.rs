@@ -33,10 +33,22 @@ pub use fingerprint::Fingerprint;
 /// Advertised over mDNS, so a conflicting deployment can simply use another.
 pub const DEFAULT_PORT: u16 = 55432;
 
-/// ALPN identifier. Negotiated by both ends, so a client that reaches an
-/// unrelated TLS service (or vice versa) fails fast during the handshake
-/// instead of exchanging garbage frames.
+/// ALPN identifier for the control session. Negotiated by both ends, so a
+/// client that reaches an unrelated TLS service (or vice versa) fails fast
+/// during the handshake instead of exchanging garbage frames.
 pub const ALPN_PROTOCOL: &[u8] = b"anyflow/1";
+
+/// ALPN identifier for a bulk data stream (see ADR-0012, ADR-0013).
+///
+/// A data stream is a second TLS 1.3 connection to the *same* port, with the
+/// *same* mutual authentication and the *same* pinned identities. ALPN is
+/// what tells the listener which of the two it just accepted, before a single
+/// application byte is read.
+///
+/// Sharing the port is deliberate: it means file transfer inherits the
+/// listener, the discovery record and the dual-stack binding that are already
+/// certified, and adds no second thing to find, firewall or advertise.
+pub const ALPN_DATA_PROTOCOL: &[u8] = b"anyflow-data/1";
 
 /// DNS-SD service type used for LAN discovery.
 pub const SERVICE_TYPE: &str = "_anyflow._tcp.local.";

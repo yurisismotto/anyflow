@@ -49,9 +49,34 @@ async fn pairing_then_ping_pong_then_battery() {
     assert!(phone.is_trusted(&server.fingerprint).await);
 
     // --- capabilities were negotiated -------------------------------------
+    //
+    // This is the *mutually supported* set, which is not the same as what the
+    // phone is allowed to do. `files.v1` appears here because both sides
+    // implement it, and is nevertheless not granted: the desktop's auto-grant
+    // policy covers `battery.v1` only, because writing files is a side effect
+    // (ADR-0008). The two lists being different is the point.
     assert_eq!(
         session.negotiated_capabilities,
-        vec!["battery.v1".to_string()]
+        vec!["battery.v1".to_string(), "files.v1".to_string()]
+    );
+
+    let granted: Vec<String> = {
+        let store = server.state.store.lock().await;
+        store
+            .peer_record(&phone.fingerprint)
+            .map(|p| {
+                p.granted_capabilities
+                    .iter()
+                    .filter(|(_, g)| **g)
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        granted,
+        vec!["battery.v1".to_string()],
+        "advertising files.v1 must not grant it"
     );
 
     // --- ping / pong ------------------------------------------------------
@@ -112,7 +137,7 @@ async fn a_paired_device_reconnects_without_pairing_again() {
 
     assert_eq!(
         second.negotiated_capabilities,
-        vec!["battery.v1".to_string()]
+        vec!["battery.v1".to_string(), "files.v1".to_string()]
     );
     assert!(second.handle.ping(Duration::from_secs(5)).await.is_some());
     second.close().await;
