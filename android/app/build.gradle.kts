@@ -88,4 +88,11 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // Instrumented tests. The Keystore regression can only be proved on a
+    // real device: the whole failure was the TEE refusing an operation, and
+    // no JVM stand-in has a TEE to refuse it.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }

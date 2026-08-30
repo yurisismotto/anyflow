@@ -11,7 +11,6 @@ use anyflow_core::capability::CapabilityRegistry;
 use anyflow_core::store::Store;
 use anyflow_daemon::{control, listener, mdns, server, state::DaemonState};
 use clap::Parser;
-use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 #[derive(Parser, Debug)]
@@ -102,9 +101,14 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(DaemonState::new(store, registry, battery_state));
 
     // ---- listeners --------------------------------------------------------
-    let tcp = TcpListener::bind(("0.0.0.0", port)).await?;
-    let bound_port = tcp.local_addr()?.port();
-    tracing::info!(port = bound_port, "listening");
+    let bound = listener::bind_endpoints(port)?;
+    let bound_port = bound.port;
+    tracing::info!(
+        port = bound_port,
+        families = %bound.families,
+        sockets = bound.listeners.len(),
+        "listening"
+    );
 
     let socket_path = control::control_socket_path();
     let control_listener = server::bind(&socket_path)?;
@@ -115,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("mDNS advertisement disabled");
         None
     } else {
-        match mdns::Advertisement::publish(&device_id, &device_name, bound_port) {
+        match mdns::Advertisement::publish(&device_id, &device_name, bound_port, bound.families) {
             Ok(a) => Some(a),
             Err(e) => {
                 // Not fatal: pairing by QR carries explicit addresses, so the
@@ -127,8 +131,9 @@ async fn main() -> anyhow::Result<()> {
     };
 
     state.set_listen_port(bound_port);
+    state.set_listen_families(bound.families);
 
-    let net = tokio::spawn(listener::run(tcp, acceptor, Arc::clone(&state)));
+    let net = tokio::spawn(listener::run(bound.listeners, acceptor, Arc::clone(&state)));
     let ctl = tokio::spawn(server::run(control_listener, Arc::clone(&state)));
 
     tokio::select! {

@@ -36,9 +36,20 @@ import javax.net.ssl.SSLSocket
 /** Outcome of an attempt to reach a desktop. */
 sealed interface ConnectResult {
     data class Established(val connection: PeerConnection) : ConnectResult
+
     /** The desktop does not know us and we had no pairing token to offer. */
     data object PairingRequired : ConnectResult
-    data class Failed(val reason: String, val cause: Throwable? = null) : ConnectResult
+
+    /**
+     * The attempt failed. [kind] is what reconnection acts on: a transport
+     * failure is retried promptly, a security failure slowly, and a
+     * revocation not at all.
+     */
+    data class Failed(
+        val reason: String,
+        val kind: FailureKind = FailureKind.TRANSPORT,
+        val cause: Throwable? = null,
+    ) : ConnectResult
 }
 
 /**
@@ -77,13 +88,18 @@ class PeerConnection private constructor(
     }
 
     /**
-     * Runs the session until the connection ends.
+     * Runs the session until the connection ends, returning a short
+     * description of why it ended.
      *
      * Reads and writes live on separate coroutines with a channel between
      * them: the blocking frame read is never interrupted part-way, which
      * would desynchronise the stream.
+     *
+     * The returned reason exists so the reconnect coordinator can log why a
+     * session stopped rather than merely that it did. It is never sent to a
+     * peer.
      */
-    suspend fun run(scope: CoroutineScope) = withContext(Dispatchers.IO) {
+    suspend fun run(scope: CoroutineScope): String = withContext(Dispatchers.IO) {
         val writer = scope.launch(Dispatchers.IO) {
             try {
                 for (envelope in outbound) {
@@ -101,29 +117,43 @@ class PeerConnection private constructor(
             }
         }
 
+        var ending = "closed"
         try {
             while (isActive) {
                 val envelope = try {
                     Framing.read(input)
                 } catch (e: EOFException) {
+                    ending = "peer closed the connection"
+                    break
+                } catch (e: java.net.SocketTimeoutException) {
+                    // Nothing has arrived for SESSION_IDLE_TIMEOUT_MS. The
+                    // desktop probes an idle link once a minute, so silence
+                    // this long means the link is gone even though the socket
+                    // has not been closed — the half-open case that a phone
+                    // leaving Wi-Fi range produces. Ending here is what lets
+                    // the reconnect loop start over.
+                    ending = "peer stopped responding"
                     break
                 }
 
                 if (envelope.protocolVersion != protocolVersion) {
                     Log.w(TAG, "peer changed protocol version mid-connection; closing")
+                    ending = "protocol version changed"
                     break
                 }
                 guard.admit(envelope)?.let { reason ->
                     // Replay or duplication is fatal, not something to skip: a
                     // well-behaved peer never produces one.
                     Log.w(TAG, "closing session: $reason")
-                    return@withContext close(writer)
+                    close(writer)
+                    return@withContext "replay protection: $reason"
                 }
 
                 when (envelope.bodyCase) {
                     Envelope.BodyCase.PING -> {
                         if (envelope.ping.payload.size() > MAX_PING_PAYLOAD) {
                             Log.w(TAG, "oversized ping payload; closing")
+                            ending = "oversized ping"
                             break
                         }
                         send(
@@ -156,20 +186,26 @@ class PeerConnection private constructor(
                     Envelope.BodyCase.CAPABILITY_ANNOUNCE -> Unit
                     Envelope.BodyCase.ERROR -> {
                         Log.w(TAG, "peer error code=${envelope.error.code} fatal=${envelope.error.fatal}")
-                        if (envelope.error.fatal) break
+                        if (envelope.error.fatal) {
+                            ending = "peer reported a fatal error"
+                            break
+                        }
                     }
 
                     else -> {
                         Log.w(TAG, "unexpected message on an established session; closing")
+                        ending = "unexpected message"
                         break
                     }
                 }
             }
         } catch (e: Exception) {
             Log.d(TAG, "session ended: ${e.javaClass.simpleName}")
+            ending = e.javaClass.simpleName
         } finally {
             close(writer)
         }
+        ending
     }
 
     private suspend fun close(writer: kotlinx.coroutines.Job) {
@@ -229,8 +265,19 @@ class PeerConnection private constructor(
                 // A pinning failure lands here. It is reported as an ordinary
                 // failure to the UI, but it is never retried against a
                 // different key and never bypassed.
+                //
+                // The cause is logged because a swallowed TLS error is
+                // undiagnosable in the field. The exception carries no key
+                // material: PinnedTrustManager's message contains only
+                // fingerprints, which are public.
+                Log.w(TAG, "TLS failed to ${address.hostString}:${address.port}", e)
+                val kind = FailureClassifier.classify(e)
                 return@withContext ConnectResult.Failed(
-                    "could not establish a trusted connection",
+                    when (kind) {
+                        FailureKind.SECURITY -> "the computer did not present the pinned identity"
+                        else -> "could not establish a trusted connection"
+                    },
+                    kind,
                     e,
                 )
             }
@@ -241,7 +288,11 @@ class PeerConnection private constructor(
                 )
             } catch (e: Exception) {
                 runCatching { socket.close() }
-                ConnectResult.Failed("handshake failed: ${e.javaClass.simpleName}", e)
+                ConnectResult.Failed(
+                    "handshake failed: ${e.javaClass.simpleName}",
+                    FailureClassifier.classify(e),
+                    e,
+                )
             }
         }
 
@@ -315,7 +366,10 @@ class PeerConnection private constructor(
             val claimed = Fingerprint.fromHex(ack.device.identityFingerprint)
                 ?: return ConnectResult.Failed("malformed fingerprint in HELLO_ACK")
             if (!claimed.contentEquals(pinned)) {
-                return ConnectResult.Failed("HELLO_ACK identity does not match the pinned key")
+                return ConnectResult.Failed(
+                    "HELLO_ACK identity does not match the pinned key",
+                    FailureKind.SECURITY,
+                )
             }
 
             val version = ack.negotiatedProtocolVersion
@@ -323,7 +377,12 @@ class PeerConnection private constructor(
                 HelloStatus.HELLO_STATUS_VERSION_UNSUPPORTED ->
                     return ConnectResult.Failed("no mutually supported protocol version")
                 HelloStatus.HELLO_STATUS_REJECTED ->
-                    return ConnectResult.Failed("this device's pairing was revoked")
+                    // Terminal: retrying cannot help and only a human can
+                    // change the answer.
+                    return ConnectResult.Failed(
+                        "this device's pairing was revoked",
+                        FailureKind.REVOKED,
+                    )
                 HelloStatus.HELLO_STATUS_TRUSTED -> {
                     if (version !in Protocol.VERSION_MIN..Protocol.VERSION_MAX) {
                         return ConnectResult.Failed("desktop selected an unsupported version")
@@ -391,7 +450,10 @@ class PeerConnection private constructor(
                 token, pinned, identity.fingerprint, nonce,
             )
             if (!PairingProof.verify(expected, response.confirmation.toByteArray())) {
-                return ConnectResult.Failed("the computer did not prove it knew the pairing code")
+                return ConnectResult.Failed(
+                    "the computer did not prove it knew the pairing code",
+                    FailureKind.SECURITY,
+                )
             }
 
             return established(
@@ -413,8 +475,13 @@ class PeerConnection private constructor(
             capabilities: List<String>,
             version: Int,
         ): ConnectResult {
-            // No read timeout once established: an idle connection is normal.
-            socket.soTimeout = 0
+            // An idle connection is normal, so the timeout is not a deadline
+            // for useful traffic — it is a liveness bound. The desktop probes
+            // a quiet link once a minute, so nothing at all for three minutes
+            // means the link is gone. Leaving this at 0, as it was, meant a
+            // phone that lost Wi-Fi without the socket closing sat in `read`
+            // forever believing it was connected.
+            socket.soTimeout = Protocol.SESSION_IDLE_TIMEOUT_MS
             return ConnectResult.Established(
                 PeerConnection(
                     socket, input, output, factory, guard, registry,

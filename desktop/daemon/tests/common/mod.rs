@@ -16,7 +16,9 @@ use anyflow_core::capability::CapabilityRegistry;
 use anyflow_core::error::{PairingError, Result};
 use anyflow_core::identity::LocalIdentity;
 use anyflow_core::pairing::PairingToken;
-use anyflow_core::session::{self, ClientHandshake, PeerStatus, SessionHandle, SessionHost};
+use anyflow_core::session::{
+    self, ClientHandshake, PeerStatus, SessionHandle, SessionHost, SessionId,
+};
 use anyflow_core::store::Store;
 use anyflow_core::Fingerprint;
 use anyflow_daemon::state::DaemonState;
@@ -43,11 +45,25 @@ pub struct TestServer {
     pub state: Arc<DaemonState>,
     pub fingerprint: Fingerprint,
     pub battery: Arc<BatteryState>,
+    /// Which address families this server's listener actually accepts on.
+    pub families: anyflow_daemon::listener::Families,
     _dir: tempfile::TempDir,
 }
 
 impl TestServer {
+    /// A server on IPv4 loopback. The default for tests that do not care
+    /// about address families.
     pub async fn start() -> Self {
+        Self::start_inner(false).await
+    }
+
+    /// A server bound the way the real daemon binds, so both address
+    /// families are exercised where the host has them.
+    pub async fn start_dual_stack() -> Self {
+        Self::start_inner(true).await
+    }
+
+    async fn start_inner(dual_stack: bool) -> Self {
         init_crypto();
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open(dir.path()).expect("store");
@@ -63,12 +79,26 @@ impl TestServer {
 
         let state = Arc::new(DaemonState::new(store, registry, Arc::clone(&battery)));
 
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let addr = listener.local_addr().expect("addr");
+        let (listeners, addr, families) = if dual_stack {
+            let bound = anyflow_daemon::listener::bind_endpoints(0).expect("bind");
+            let addr = SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, bound.port));
+            (bound.listeners, addr, bound.families)
+        } else {
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let addr = listener.local_addr().expect("addr");
+            (
+                vec![listener],
+                addr,
+                anyflow_daemon::listener::Families {
+                    ipv4: true,
+                    ipv6: false,
+                },
+            )
+        };
 
         let accept_state = Arc::clone(&state);
         tokio::spawn(async move {
-            let _ = anyflow_daemon::listener::run(listener, acceptor, accept_state).await;
+            let _ = anyflow_daemon::listener::run(listeners, acceptor, accept_state).await;
         });
 
         Self {
@@ -76,6 +106,7 @@ impl TestServer {
             state,
             fingerprint,
             battery,
+            families,
             _dir: dir,
         }
     }
@@ -305,8 +336,8 @@ impl SessionHost for HandleNotifier {
         }
         self.inner.on_established(peer, handle).await;
     }
-    async fn on_closed(&self, peer: &Fingerprint) {
-        self.inner.on_closed(peer).await;
+    async fn on_closed(&self, peer: &Fingerprint, session_id: SessionId) {
+        self.inner.on_closed(peer, session_id).await;
     }
 }
 

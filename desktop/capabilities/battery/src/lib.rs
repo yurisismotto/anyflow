@@ -13,7 +13,11 @@ mod upower;
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
+
+/// `tokio::time::Instant`, not `std::time::Instant`, so that the age of a
+/// reading is measured on the same clock as everything else that times out —
+/// and so that a test can age one without waiting.
+use tokio::time::Instant;
 
 use anyflow_core::capability::{Capability, CapabilityContext, OutboundMessage};
 use anyflow_core::error::{Error, Result};

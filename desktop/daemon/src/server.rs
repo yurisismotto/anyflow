@@ -9,7 +9,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
 use crate::control::{
-    BatteryReport, ConnectionReport, DeviceReport, Event, Request, Response, StatusReport,
+    BatteryReport, ConnectionReport, DeviceReport, DeviceState, Event, Request, Response,
+    StatusReport, BATTERY_STALE_AFTER_SECS,
 };
 use crate::state::DaemonState;
 
@@ -114,27 +115,62 @@ async fn send<W: AsyncWriteExt + Unpin, T: serde::Serialize>(
     Ok(())
 }
 
+/// Builds a battery report, marking it stale rather than presenting an old
+/// reading as though it were current.
+fn battery_report(
+    state: &Arc<DaemonState>,
+    peer: &anyflow_core::Fingerprint,
+) -> Option<BatteryReport> {
+    state.battery.get(peer).map(|b| {
+        let age_secs = b.received_at.elapsed().as_secs();
+        BatteryReport {
+            percentage: b.reading.percentage,
+            charging_state: format!("{:?}", b.reading.charging_state),
+            age_secs,
+            stale: age_secs >= BATTERY_STALE_AFTER_SECS,
+        }
+    })
+}
+
+/// The state of a device that currently has a session.
+///
+/// Derived from how long the *session* has been silent, never from the age of
+/// a capability's last reading. Those are different questions and conflating
+/// them gets both answers wrong: a link that is idle but answering its
+/// liveness probes is perfectly healthy even though no battery update has
+/// arrived in an hour, while a half-open socket is dead however recently its
+/// last reading came in. `Stale` here means at least one probe has gone
+/// unanswered, which is the real early warning.
+fn live_state(handle: &anyflow_core::session::SessionHandle) -> DeviceState {
+    if handle.is_stale() {
+        DeviceState::Stale
+    } else {
+        DeviceState::Connected
+    }
+}
+
 async fn build_status(state: &Arc<DaemonState>) -> StatusReport {
     let info = state.device_info();
     let fingerprint = anyflow_core::Fingerprint::from_hex(&info.identity_fingerprint).ok();
 
     let mut connections = Vec::new();
     for handle in state.session_handles().await {
-        let battery = state.battery.get(&handle.peer()).map(|b| BatteryReport {
-            percentage: b.reading.percentage,
-            charging_state: format!("{:?}", b.reading.charging_state),
-            age_secs: b.received_at.elapsed().as_secs(),
-        });
+        let battery = battery_report(state, &handle.peer());
         connections.push(ConnectionReport {
             device_id: handle.device_id().to_string(),
             device_name: handle.device_name().to_string(),
             fingerprint_short: handle.peer().to_display_short(),
             negotiated_capabilities: handle.negotiated_capabilities().to_vec(),
+            state: live_state(&handle),
+            silent_secs: handle.silent_for().as_secs(),
             battery,
+            session_id: handle.id(),
         });
     }
 
+    let devices = build_devices(state).await;
     let listen_port = state.listen_port().await;
+    let listen_families = state.listen_families();
     let store = state.store.lock().await;
     StatusReport {
         device_name: store.settings().device_name.clone(),
@@ -144,27 +180,56 @@ async fn build_status(state: &Arc<DaemonState>) -> StatusReport {
             .map(|f| f.to_display_short())
             .unwrap_or_default(),
         listen_port,
+        listen_families,
         protocol_version_min: anyflow_core::session::PROTOCOL_VERSION_MIN,
         protocol_version_max: anyflow_core::session::PROTOCOL_VERSION_MAX,
         capabilities: state.registry.advertised(),
         paired_devices: store.peers().filter(|p| !p.revoked).count(),
         connections,
+        devices,
         pairing_active: state.pairing_remaining().await.is_some(),
     }
 }
 
 async fn build_devices(state: &Arc<DaemonState>) -> Vec<DeviceReport> {
-    let connected: Vec<_> = state
-        .session_handles()
-        .await
-        .into_iter()
-        .map(|h| h.peer())
-        .collect();
+    // Collected before taking the store lock: `last_seen` has its own lock,
+    // and nesting them in two different orders elsewhere would be a deadlock
+    // waiting to happen.
+    let mut rows = Vec::new();
+    {
+        let store = state.store.lock().await;
+        for p in store.peers() {
+            rows.push(p.clone());
+        }
+    }
 
-    let store = state.store.lock().await;
-    store
-        .peers()
-        .map(|p| DeviceReport {
+    let mut out = Vec::with_capacity(rows.len());
+    for p in rows {
+        let session = state.session_for(&p.fingerprint).await;
+        let is_connected = session.is_some();
+        let battery = if is_connected {
+            battery_report(state, &p.fingerprint)
+        } else {
+            // Telemetry is forgotten when a peer disconnects (see the
+            // battery capability), so there is deliberately nothing to show
+            // here. That is what makes "offline but 57%" impossible.
+            None
+        };
+
+        let device_state = match (&session, p.revoked) {
+            (_, true) => DeviceState::Revoked,
+            (Some(handle), false) => live_state(handle),
+            (None, false) => DeviceState::Disconnected,
+        };
+        let silent_secs = session.as_ref().map(|h| h.silent_for().as_secs());
+
+        let last_seen_secs_ago = state
+            .last_seen(&p.fingerprint)
+            .await
+            .and_then(|t| t.elapsed().ok())
+            .map(|d| d.as_secs());
+
+        out.push(DeviceReport {
             device_id: p.device_id.clone(),
             device_name: p.device_name.clone(),
             platform: match anyflow_proto::v1::Platform::try_from(p.platform) {
@@ -182,9 +247,15 @@ async fn build_devices(state: &Arc<DaemonState>) -> Vec<DeviceReport> {
                 .map(|(k, _)| k.clone())
                 .collect(),
             revoked: p.revoked,
-            connected: connected.contains(&p.fingerprint),
-        })
-        .collect()
+            paired: !p.revoked,
+            connected: is_connected,
+            state: device_state,
+            silent_secs,
+            last_seen_secs_ago,
+            battery,
+        });
+    }
+    out
 }
 
 async fn do_ping(state: &Arc<DaemonState>, device: &str) -> Response {
@@ -225,7 +296,7 @@ async fn do_unpair(state: &Arc<DaemonState>, device: &str) -> Response {
             if let Some(handle) = state.session_for(&fingerprint).await {
                 handle.shutdown().await;
             }
-            state.unregister_session(&fingerprint).await;
+            state.drop_session(&fingerprint).await;
             Response::Ok {
                 message: format!("revoked {}", fingerprint.to_display_short()),
             }
@@ -366,22 +437,44 @@ fn render_qr(payload: &str) -> Option<String> {
 ///
 /// These are hints only. If they are all wrong the phone falls back to mDNS,
 /// and if that is wrong too the connection simply fails the pinned-key check.
+///
+/// Both families are offered, so a phone that reaches this machine over IPv6
+/// is not forced through mDNS to find that out. Link-local IPv6 is excluded
+/// on purpose: a `fe80::` address is meaningless without the zone index of
+/// the interface it belongs to, and a QR code carries no zone.
 fn local_addresses(port: u16) -> Vec<std::net::SocketAddr> {
     use std::net::{IpAddr, SocketAddr};
 
-    let mut out = Vec::new();
     // `getifaddrs` would need a libc dependency; reading the routing table
     // via a connected UDP socket is the standard trick and needs no crate.
     // No packet is sent: `connect` on UDP only selects a route.
-    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        if sock.connect("192.0.2.1:9").is_ok() {
-            if let Ok(SocketAddr::V4(local)) = sock.local_addr() {
-                let ip = IpAddr::V4(*local.ip());
-                if !local.ip().is_loopback() {
-                    out.push(SocketAddr::new(ip, port));
-                }
-            }
+    fn route_to(bind: &str, probe: &str) -> Option<IpAddr> {
+        let sock = std::net::UdpSocket::bind(bind).ok()?;
+        sock.connect(probe).ok()?;
+        Some(sock.local_addr().ok()?.ip())
+    }
+
+    let mut out = Vec::new();
+
+    // 192.0.2.0/24 and 2001:db8::/32 are the reserved documentation ranges:
+    // nothing is ever routed to them, which is exactly what we want from an
+    // address used only to ask the kernel which interface it would pick.
+    if let Some(ip @ IpAddr::V4(v4)) = route_to("0.0.0.0:0", "192.0.2.1:9") {
+        if !v4.is_loopback() && !v4.is_unspecified() {
+            out.push(SocketAddr::new(ip, port));
         }
     }
+    if let Some(ip @ IpAddr::V6(v6)) = route_to("[::]:0", "[2001:db8::1]:9") {
+        let usable = !v6.is_loopback() && !v6.is_unspecified() && !is_link_local_v6(&v6);
+        if usable {
+            out.push(SocketAddr::new(ip, port));
+        }
+    }
+
     out
+}
+
+/// `Ipv6Addr::is_unicast_link_local` is still unstable, so test the prefix.
+fn is_link_local_v6(ip: &std::net::Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfe80
 }

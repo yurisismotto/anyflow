@@ -8,6 +8,7 @@ import android.os.Build
 import android.util.Log
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -41,6 +42,22 @@ class Discovery(context: Context) {
      * A multicast lock is held for the duration: without it, Wi-Fi hardware
      * filters multicast packets while the screen is off and discovery
      * silently stops finding anything.
+     *
+     * ## This flow completes; it does not fail
+     *
+     * `NsdManager` refuses to start discovery for reasons that are entirely
+     * routine — most often `FAILURE_MAX_LIMIT` or `FAILURE_ALREADY_ACTIVE`
+     * when requests have been made faster than the platform tears the old
+     * ones down, which is exactly what a retry loop does. This used to close
+     * the flow with an exception, which propagated out of the collector, out
+     * of the reconnect loop, and ended the connection job for good: the
+     * process stayed alive with no scheduled retry and no error anywhere.
+     *
+     * A responder that will not start is a discovery result of "nothing
+     * found", not a failure of the caller. So the flow completes normally and
+     * the reason is logged. Callers must still be able to survive an
+     * exception from here — nothing in a coroutine is exception-proof by
+     * construction — but they will not routinely be handed one.
      */
     fun browse(): Flow<Found> = callbackFlow {
         val lock = wifi.createMulticastLock("anyflow-discovery").apply {
@@ -48,12 +65,21 @@ class Discovery(context: Context) {
             acquire()
         }
 
-        val resolveListener = object : NsdManager.ResolveListener {
+        // `NsdManager.resolveService` throws IllegalArgumentException if the
+        // same listener object is handed to it while an earlier resolve is
+        // still outstanding — from a platform callback thread, where nothing
+        // catches it and the process dies. A listener per service, retired
+        // when it answers, is the documented way to avoid that.
+        val resolving = ConcurrentHashMap<String, Boolean>()
+
+        fun resolveListenerFor(key: String) = object : NsdManager.ResolveListener {
             override fun onResolveFailed(info: NsdServiceInfo?, errorCode: Int) {
+                resolving.remove(key)
                 Log.d(TAG, "resolve failed: $errorCode")
             }
 
             override fun onServiceResolved(info: NsdServiceInfo) {
+                resolving.remove(key)
                 val attributes = info.attributes ?: emptyMap()
                 val deviceId = attributes["id"]?.toString(Charsets.UTF_8)
                     ?.takeIf { it.length <= 64 && it.all { c -> c.isHex() } }
@@ -73,19 +99,40 @@ class Discovery(context: Context) {
             override fun onDiscoveryStarted(serviceType: String?) = Unit
             override fun onDiscoveryStopped(serviceType: String?) = Unit
             override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) {
-                close(IllegalStateException("could not start discovery: $errorCode"))
+                // Completes the flow rather than failing it. See the class
+                // note above: failing here is what used to kill the caller's
+                // reconnect loop permanently.
+                Log.w(TAG, "could not start discovery: error $errorCode")
+                close()
             }
             override fun onStopDiscoveryFailed(serviceType: String?, errorCode: Int) = Unit
             override fun onServiceLost(info: NsdServiceInfo?) = Unit
 
             override fun onServiceFound(info: NsdServiceInfo) {
                 if (info.serviceType?.contains(SERVICE_TYPE_SHORT) != true) return
+                val key = "${info.serviceName}.${info.serviceType}"
+                if (resolving.putIfAbsent(key, true) != null) return
                 @Suppress("DEPRECATION")
-                nsd.resolveService(info, resolveListener)
+                runCatching { nsd.resolveService(info, resolveListenerFor(key)) }
+                    .onFailure {
+                        resolving.remove(key)
+                        Log.d(TAG, "resolve rejected: ${it.javaClass.simpleName}")
+                    }
             }
         }
 
-        nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        // Starting discovery can itself throw on some platform versions.
+        // Same rule as a start failure: no services found, not a broken
+        // caller.
+        val started = runCatching {
+            nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        }
+        if (started.isFailure) {
+            Log.w(TAG, "discovery could not start: ${started.exceptionOrNull()?.javaClass?.simpleName}")
+            runCatching { if (lock.isHeld) lock.release() }
+            close()
+            return@callbackFlow
+        }
 
         awaitClose {
             runCatching { nsd.stopServiceDiscovery(discoveryListener) }

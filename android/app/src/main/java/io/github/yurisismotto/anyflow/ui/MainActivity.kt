@@ -159,6 +159,10 @@ private fun MainScreen(
                             is AnyFlowApp.ConnectionState.Connecting -> "Connecting…"
                             is AnyFlowApp.ConnectionState.Connected ->
                                 "Connected to ${s.deviceName} (${s.fingerprintShort})"
+                            // Shown separately from Error so the user can see
+                            // that the app is still working on it.
+                            is AnyFlowApp.ConnectionState.Retrying ->
+                                "Reconnecting in ${s.inSeconds}s (${s.reason})"
                             is AnyFlowApp.ConnectionState.Error -> "Error: ${s.message}"
                         },
                     )

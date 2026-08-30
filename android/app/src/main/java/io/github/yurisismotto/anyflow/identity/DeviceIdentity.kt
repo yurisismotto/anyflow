@@ -57,8 +57,20 @@ class DeviceIdentity private constructor(
 
     companion object {
         private const val TAG = "DeviceIdentity"
-        private const val KEY_ALIAS = "anyflow-identity-v1"
+        private const val KEY_ALIAS = "anyflow-identity-v2"
+
+        /**
+         * The v1 alias, kept only so its key can be deleted.
+         *
+         * v1 keys were generated without [KeyProperties.DIGEST_NONE] and are
+         * therefore unusable for TLS client authentication (see [generateWith]).
+         * Keystore authorisations are immutable, so such a key cannot be
+         * repaired: the only remedy is to generate a new one under a new
+         * alias. A v1 key never completed a pairing, so nothing is lost.
+         */
+        private const val KEY_ALIAS_V1 = "anyflow-identity-v1"
         private const val KEYSTORE = "AndroidKeyStore"
+
 
         /**
          * Loads the existing identity, generating one on first run.
@@ -87,6 +99,14 @@ class DeviceIdentity private constructor(
         }
 
         private fun generate(deviceId: String): DeviceIdentity {
+            // A v1 key, if present, is unusable and will never be used again.
+            // Removing it keeps the keystore honest rather than leaving a
+            // permanently broken entry behind.
+            runCatching {
+                KeyStore.getInstance(KEYSTORE).apply { load(null) }
+                    .deleteEntry(KEY_ALIAS_V1)
+            }
+
             // Try StrongBox first, fall back to the TEE. StrongBox is absent
             // on many devices and throws only at generation time, so the
             // fallback has to be a catch rather than a capability query.
@@ -108,11 +128,9 @@ class DeviceIdentity private constructor(
                 KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
             )
                 .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-                .setDigests(
-                    KeyProperties.DIGEST_SHA256,
-                    KeyProperties.DIGEST_SHA384,
-                    KeyProperties.DIGEST_SHA512,
-                )
+                // See [KeyDigests] for why NONE is in that list and what
+                // breaks without it.
+                .setDigests(*KeyDigests.REQUIRED)
                 // No biometric or lock-screen gate: the connection must be
                 // able to re-establish while the phone is in a pocket. The
                 // key is still confined to the TEE.

@@ -71,6 +71,39 @@ const DEDUP_WINDOW: usize = 1024;
 /// cap, `PING` would be a free amplification and memory primitive.
 const MAX_PING_PAYLOAD: usize = 64;
 
+// ---------------------------------------------------------------------------
+// Liveness
+// ---------------------------------------------------------------------------
+//
+// A TCP connection whose peer walks out of Wi-Fi range is not closed: no FIN
+// and no RST is ever sent, so `read` simply blocks forever and the session
+// looks perfectly healthy from the inside. That is how a dead session ends up
+// listed as `connected` (the "zombie session" defect). Linux's own TCP
+// keepalive would eventually notice, but its default first probe is two hours
+// away, which is not a useful answer for a phone on a home network.
+//
+// So the session probes at the protocol layer. It costs one 30-odd byte frame
+// per minute on an otherwise idle link, which is nothing next to the Wi-Fi
+// radio already being awake for the foreground-service connection.
+
+/// How often the session checks whether it has heard from the peer lately.
+const LIVENESS_TICK: Duration = Duration::from_secs(15);
+
+/// After this much silence, send a PING to find out whether the peer is
+/// still there. Any inbound frame — including the peer's own PING — resets it.
+const LIVENESS_PROBE_AFTER: Duration = Duration::from_secs(60);
+
+/// After this much silence the session is declared dead and closed. It is
+/// three times [`LIVENESS_PROBE_AFTER`] so that two probes must go unanswered
+/// before a link is given up on: a single lost packet must not drop a session.
+const LIVENESS_DEAD_AFTER: Duration = Duration::from_secs(180);
+
+/// Silence past this point makes a session worth *reporting* as doubtful,
+/// well before [`LIVENESS_DEAD_AFTER`] acts on it. It is longer than
+/// [`LIVENESS_PROBE_AFTER`] so that a healthy idle link, which answers its
+/// probe, never flickers into doubt.
+pub const LIVENESS_STALE_AFTER: Duration = Duration::from_secs(90);
+
 /// What the trust store says about a peer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PeerStatus {
@@ -121,7 +154,25 @@ pub trait SessionHost: Send + Sync + 'static {
 
     /// Notifies the host that a session became fully established.
     async fn on_established(&self, _peer: &Fingerprint, _handle: SessionHandle) {}
-    async fn on_closed(&self, _peer: &Fingerprint) {}
+
+    /// Notifies the host that a session ended.
+    ///
+    /// `session_id` identifies *which* session ended, and hosts must use it.
+    /// A peer that reconnects before its previous socket has finished dying
+    /// produces two overlapping sessions for one fingerprint; a host that
+    /// unregistered by fingerprint alone would let the older session's late
+    /// close evict the newer, live one and report the device as offline while
+    /// it is connected.
+    async fn on_closed(&self, _peer: &Fingerprint, _session_id: SessionId) {}
+}
+
+/// Identifies one session, distinctly from any other session with the same
+/// peer. Process-local and never sent on the wire.
+pub type SessionId = u64;
+
+fn next_session_id() -> SessionId {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A command sent into a running session from outside.
@@ -135,16 +186,53 @@ pub enum Command {
 /// Outside-world handle to a live session.
 #[derive(Clone)]
 pub struct SessionHandle {
+    id: SessionId,
     peer: Fingerprint,
     device_id: String,
     device_name: String,
     negotiated_capabilities: Arc<Vec<String>>,
     commands: mpsc::Sender<Command>,
+    /// When the session began, and how long ago the last frame arrived,
+    /// as milliseconds since that start. Shared with the running loop so
+    /// callers can ask how live a session is without messaging it.
+    started: tokio::time::Instant,
+    last_inbound_ms: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl SessionHandle {
+    /// Which session this is. Two sessions with the same peer never share one.
+    pub fn id(&self) -> SessionId {
+        self.id
+    }
+
     pub fn peer(&self) -> Fingerprint {
         self.peer
+    }
+
+    /// False once the session's message loop has stopped receiving commands,
+    /// which happens as soon as it ends for any reason.
+    pub fn is_live(&self) -> bool {
+        !self.commands.is_closed()
+    }
+
+    /// How long since anything at all arrived from the peer.
+    ///
+    /// This, not the age of some capability's last reading, is what says
+    /// whether a session is healthy. An idle link answering its liveness
+    /// probes is perfectly alive even though nothing has changed on it; a
+    /// link whose battery happens not to have moved is not sick.
+    pub fn silent_for(&self) -> Duration {
+        let last = Duration::from_millis(
+            self.last_inbound_ms
+                .load(std::sync::atomic::Ordering::Relaxed),
+        );
+        self.started.elapsed().saturating_sub(last)
+    }
+
+    /// True once silence has passed [`LIVENESS_STALE_AFTER`], meaning at
+    /// least one liveness probe has gone unanswered.
+    pub fn is_stale(&self) -> bool {
+        self.silent_for() >= LIVENESS_STALE_AFTER
     }
     pub fn device_id(&self) -> &str {
         &self.device_id
@@ -358,8 +446,26 @@ where
     let mut factory = EnvelopeFactory::new(version);
     let status = host.lookup_peer(&peer_fingerprint).await;
 
+    // A revoked device is refused — unless the owner has deliberately opened a
+    // pairing window, in which case it may pair again from scratch.
+    //
+    // Revocation must be permanent against the *device*, not against the
+    // person holding it. Refusing a revoked fingerprint unconditionally made
+    // revocation irreversible: the phone could never be paired again, because
+    // it was rejected before it was ever offered the chance to prove it holds
+    // a fresh token. That is a foot-gun, not a security property.
+    //
+    // Nothing is weakened by letting it through here. It takes the same path
+    // as a device that was never known: it must present a proof of the
+    // single-use token that was generated seconds ago, and a human at the
+    // desktop must confirm its fingerprint. Reachability still grants
+    // nothing, and a revoked device with no pairing window open is still
+    // rejected outright.
+    let treat_as_unknown =
+        matches!(status, PeerStatus::Revoked) && host.pairing_mode_active().await;
+
     match status {
-        PeerStatus::Revoked => {
+        PeerStatus::Revoked if !treat_as_unknown => {
             let ack = factory.build_reply(
                 v1::envelope::Body::HelloAck(v1::HelloAck {
                     device: Some(local_info),
@@ -414,7 +520,15 @@ where
             ))
         }
 
-        PeerStatus::Unknown => {
+        PeerStatus::Unknown | PeerStatus::Revoked => {
+            if matches!(status, PeerStatus::Revoked) {
+                tracing::info!(
+                    peer = %peer_fingerprint.to_display_short(),
+                    "a revoked device is pairing again; it must prove the new \
+                     token and be confirmed by hand"
+                );
+            }
+
             let active = host.pairing_mode_active().await;
             let nonce = if active {
                 crate::pairing::generate_nonce()?.to_vec()
@@ -612,12 +726,18 @@ where
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(32);
     let (cap_tx, mut cap_rx) = mpsc::channel::<OutboundMessage>(32);
 
+    let session_id = next_session_id();
+    let started = tokio::time::Instant::now();
+    let last_inbound_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let handle = SessionHandle {
+        id: session_id,
         peer: established.peer,
         device_id: established.device.device_id.clone(),
         device_name: established.device.device_name.clone(),
         negotiated_capabilities: Arc::new(established.negotiated_capabilities.clone()),
         commands: cmd_tx,
+        started,
+        last_inbound_ms: Arc::clone(&last_inbound_ms),
     };
 
     let registry = host.registry();
@@ -638,6 +758,20 @@ where
     host.on_established(&established.peer, handle.clone()).await;
 
     let mut pending_ping: Option<(Vec<u8>, Instant, oneshot::Sender<Duration>)> = None;
+
+    // Liveness. `last_inbound` is reset by *any* frame from the peer, so a
+    // busy session never probes and an idle one probes once a minute.
+    //
+    // `tokio::time::Instant`, not `std::time::Instant`: it is the same clock
+    // the interval below runs on, so the two cannot disagree — and it lets a
+    // test drive three minutes of silence without waiting three minutes.
+    let mut last_inbound = started;
+    let mut liveness = tokio::time::interval(LIVENESS_TICK);
+    liveness.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The first tick of a tokio interval completes immediately; consume it so
+    // the first real check happens one tick from now.
+    liveness.tick().await;
+
     let result = loop {
         tokio::select! {
             // Biased so that inbound traffic is always drained before new
@@ -651,6 +785,11 @@ where
                     Some(Err(Error::Closed)) | None => break Ok(()),
                     Some(Err(e)) => break Err(e),
                 };
+                last_inbound = tokio::time::Instant::now();
+                last_inbound_ms.store(
+                    (last_inbound - started).as_millis() as u64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
 
                 if env.protocol_version != established.protocol_version {
                     break Err(Error::Protocol("protocol version changed mid-connection"));
@@ -772,6 +911,35 @@ where
                 }
             }
 
+            _ = liveness.tick() => {
+                let silent_for = last_inbound.elapsed();
+                if silent_for >= LIVENESS_DEAD_AFTER {
+                    // Nothing has arrived for long enough that two probes
+                    // went unanswered. The socket is half-open: the peer is
+                    // gone but the kernel has no way to know it. Ending the
+                    // session here is what stops it being reported as live.
+                    tracing::info!(
+                        peer = %established.peer.to_display_short(),
+                        silent_secs = silent_for.as_secs(),
+                        "peer stopped responding; closing session"
+                    );
+                    break Err(Error::Protocol("peer stopped responding"));
+                }
+                if silent_for >= LIVENESS_PROBE_AFTER {
+                    let mut payload = [0u8; 8];
+                    let _ = rand::rngs::OsRng.try_fill_bytes(&mut payload);
+                    let env = factory.build(v1::envelope::Body::Ping(v1::Ping {
+                        payload: payload.to_vec(),
+                    }));
+                    // A probe carries no reply channel: the PONG is not
+                    // matched to anything, it only has to arrive, and any
+                    // frame at all is proof enough that the peer is there.
+                    if let Err(e) = framing::write_envelope(&mut writer, &env).await {
+                        break Err(e);
+                    }
+                }
+            }
+
             else => break Ok(()),
         }
     };
@@ -781,7 +949,7 @@ where
             let _ = cap.on_peer_disconnected(&established.peer).await;
         }
     }
-    host.on_closed(&established.peer).await;
+    host.on_closed(&established.peer, session_id).await;
     reader_task.abort();
     let _ = writer.shutdown().await;
 

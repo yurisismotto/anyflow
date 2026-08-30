@@ -9,7 +9,9 @@
 use std::collections::HashMap;
 
 use anyflow_core::discovery;
-use mdns_sd::{ServiceDaemon, ServiceInfo};
+use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
+
+use crate::listener::Families;
 
 /// Live advertisement. Dropping this withdraws the record.
 pub struct Advertisement {
@@ -18,8 +20,30 @@ pub struct Advertisement {
 }
 
 impl Advertisement {
-    pub fn publish(device_id: &str, device_name: &str, port: u16) -> anyhow::Result<Self> {
+    /// Publishes the service record.
+    ///
+    /// `families` says which address families the TCP listener actually
+    /// accepts on, and the record is restricted to match. Advertising an
+    /// address the daemon cannot accept on is worse than advertising nothing:
+    /// the phone dials it, the connection is refused, and the failure looks
+    /// identical to the computer being asleep. That is exactly the defect
+    /// this parameter exists to prevent.
+    pub fn publish(
+        device_id: &str,
+        device_name: &str,
+        port: u16,
+        families: Families,
+    ) -> anyhow::Result<Self> {
         let daemon = ServiceDaemon::new()?;
+
+        if !families.ipv6 {
+            // No AAAA records and no IPv6 responder: nothing here can be
+            // reached over IPv6, so nothing here claims to be.
+            daemon.disable_interface(IfKind::IPv6)?;
+        }
+        if !families.ipv4 {
+            daemon.disable_interface(IfKind::IPv4)?;
+        }
 
         let properties: HashMap<String, String> = discovery::build_txt(device_id, device_name)
             .into_iter()
@@ -46,7 +70,12 @@ impl Advertisement {
         let fullname = service.get_fullname().to_string();
         daemon.register(service)?;
 
-        tracing::info!(port, "advertising {}", anyflow_core::SERVICE_TYPE);
+        tracing::info!(
+            port,
+            families = %families,
+            "advertising {}",
+            anyflow_core::SERVICE_TYPE
+        );
         Ok(Self { daemon, fullname })
     }
 }

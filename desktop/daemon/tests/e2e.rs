@@ -266,6 +266,119 @@ async fn a_revoked_device_cannot_re_pair_without_a_new_token() {
     );
 }
 
+/// Revocation must be reversible by the owner, or `anyflow unpair` is a
+/// permanent brick rather than a control.
+///
+/// The defect this covers was found on real hardware during G17: a revoked
+/// fingerprint was refused at HELLO, *before* it could be offered a pairing
+/// nonce, so the phone could never pair again through the documented flow —
+/// scanning a fresh QR just produced "this device's pairing was revoked"
+/// forever. The trust store was always willing to take it back; the handshake
+/// never let it get that far.
+#[tokio::test]
+async fn a_revoked_device_can_pair_again_when_the_owner_opens_a_new_window() {
+    let server = TestServer::start().await;
+    let phone = TestClient::new("Galaxy S25");
+
+    let token = server.open_pairing(TTL).await;
+    phone
+        .connect(server.addr, server.fingerprint, Some(&token))
+        .await
+        .expect("pair")
+        .close()
+        .await;
+    server.state.end_pairing().await;
+
+    {
+        let mut store = server.state.store.lock().await;
+        store.revoke_peer(&phone.fingerprint).expect("revoke");
+    }
+
+    // While no window is open it stays out. Revocation is still revocation.
+    let err = phone
+        .connect(server.addr, server.fingerprint, None)
+        .await
+        .expect_err("a revoked device must be refused with no window open");
+    assert!(matches!(err, Error::NotAuthorized), "{err:?}");
+
+    // The owner runs `anyflow pair` again and confirms at the terminal.
+    let fresh = server.open_pairing(TTL).await;
+    let session = phone
+        .connect(server.addr, server.fingerprint, Some(&fresh))
+        .await
+        .expect("a revoked device must be able to pair again");
+
+    {
+        let store = server.state.store.lock().await;
+        let record = store.peer_record(&phone.fingerprint).expect("record");
+        assert!(!record.revoked, "pairing again clears the revocation");
+        assert!(
+            record.granted_capabilities.values().any(|g| *g),
+            "and restores the grants the auto-grant policy allows"
+        );
+    }
+
+    session.close().await;
+}
+
+/// Letting a revoked device back in must cost it a full pairing ceremony,
+/// not merely the existence of an open window.
+#[tokio::test]
+async fn a_revoked_device_still_needs_the_right_token_and_a_human() {
+    let server = TestServer::start().await;
+    let phone = TestClient::new("Galaxy S25");
+
+    let token = server.open_pairing(TTL).await;
+    phone
+        .connect(server.addr, server.fingerprint, Some(&token))
+        .await
+        .expect("pair")
+        .close()
+        .await;
+    server.state.end_pairing().await;
+    {
+        let mut store = server.state.store.lock().await;
+        store.revoke_peer(&phone.fingerprint).expect("revoke");
+    }
+
+    // A window is open, but the device offers the old, consumed token.
+    server.open_pairing(TTL).await;
+    let err = phone
+        .connect(server.addr, server.fingerprint, Some(&token))
+        .await
+        .expect_err("a stale token must not readmit a revoked device");
+    assert!(matches!(err, Error::Pairing(_)), "{err:?}");
+    {
+        let store = server.state.store.lock().await;
+        assert!(
+            store
+                .peer_record(&phone.fingerprint)
+                .expect("record")
+                .revoked,
+            "a failed attempt must leave the revocation in place"
+        );
+    }
+    server.state.end_pairing().await;
+
+    // A window whose operator declines must not readmit it either.
+    let fresh = server.open_pairing_with(TTL, false).await;
+    let err = phone
+        .connect(server.addr, server.fingerprint, Some(&fresh))
+        .await
+        .expect_err("a declined confirmation must not readmit a revoked device");
+    assert!(matches!(err, Error::Pairing(_)), "{err:?}");
+    {
+        let store = server.state.store.lock().await;
+        assert!(
+            store
+                .peer_record(&phone.fingerprint)
+                .expect("record")
+                .revoked,
+            "declining leaves the device revoked"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Pairing failure modes, over the wire
 // ---------------------------------------------------------------------------

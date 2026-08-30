@@ -37,3 +37,6 @@ anyhow = "1"
 tempfile = "3"
 rustls-pki-types = "1"
 prost = "0.14.3"
+# `test-util` gives the tests a virtual clock. Liveness is measured in
+# minutes; a suite that waited them out in real time would never be run.
+tokio = { version = "1", features = ["full", "test-util"] }

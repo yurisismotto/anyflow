@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use anyflow_core::capability::CapabilityRegistry;
 use anyflow_core::error::{PairingError, Result};
 use anyflow_core::pairing::PairingSession;
-use anyflow_core::session::{PeerStatus, SessionHandle, SessionHost};
+use anyflow_core::session::{PeerStatus, SessionHandle, SessionHost, SessionId};
 use anyflow_core::store::{Store, TrustedPeer};
 use anyflow_core::Fingerprint;
 use anyflow_proto::v1;
@@ -35,12 +35,20 @@ pub struct DaemonState {
 
     sessions: RwLock<HashMap<Fingerprint, SessionHandle>>,
 
+    /// When each peer's last session ended, for reporting a device as
+    /// disconnected-since rather than merely absent. In memory only: it is
+    /// operational display data, not something worth writing to disk.
+    last_seen: RwLock<HashMap<Fingerprint, SystemTime>>,
+
     device_info: v1::DeviceInfo,
 
     /// The port actually bound at startup, which is not necessarily the one
     /// in settings: a `--port` override or a port-0 bind both change it, and
     /// advertising the wrong one would hand out a QR code nobody can dial.
     listen_port: std::sync::atomic::AtomicU16,
+
+    /// The address families the listener really accepts on, for reporting.
+    listen_families: std::sync::OnceLock<String>,
 }
 
 impl DaemonState {
@@ -57,8 +65,10 @@ impl DaemonState {
             pairing: Mutex::new(None),
             confirm_tx: Mutex::new(None),
             sessions: RwLock::new(HashMap::new()),
+            last_seen: RwLock::new(HashMap::new()),
             device_info,
             listen_port: std::sync::atomic::AtomicU16::new(0),
+            listen_families: std::sync::OnceLock::new(),
         }
     }
 
@@ -66,6 +76,20 @@ impl DaemonState {
     pub fn set_listen_port(&self, port: u16) {
         self.listen_port
             .store(port, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Records which address families the listener accepts on.
+    pub fn set_listen_families(&self, families: crate::listener::Families) {
+        let _ = self.listen_families.set(families.to_string());
+    }
+
+    /// The address families the listener accepts on, or `"unknown"` before
+    /// the listener has reported in.
+    pub fn listen_families(&self) -> String {
+        self.listen_families
+            .get()
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string())
     }
 
     /// The bound port, falling back to the configured one before the
@@ -109,12 +133,65 @@ impl DaemonState {
             .map(|s| s.remaining())
     }
 
+    /// Registers a session as *the* session for its peer.
+    ///
+    /// One peer means one session. When a phone reconnects after a network
+    /// drop its previous socket is often still half-open on this side, so a
+    /// second session arrives while the first has not noticed it is dead.
+    /// The older one is shut down here rather than left to time out, so the
+    /// daemon never holds two sessions with one device.
     pub async fn register_session(&self, handle: SessionHandle) {
-        self.sessions.write().await.insert(handle.peer(), handle);
+        let displaced = {
+            let mut sessions = self.sessions.write().await;
+            sessions.insert(handle.peer(), handle)
+        };
+        if let Some(old) = displaced {
+            tracing::info!(
+                peer = %old.peer().to_display_short(),
+                session = old.id(),
+                "replaced by a newer session; closing the old one"
+            );
+            // Not awaited under the map lock: `shutdown` waits on the old
+            // session's command channel, and that session may itself be
+            // trying to take the same lock to unregister.
+            tokio::spawn(async move { old.shutdown().await });
+        }
     }
 
-    pub async fn unregister_session(&self, peer: &Fingerprint) {
-        self.sessions.write().await.remove(peer);
+    /// Removes a session, but only if it is still the registered one.
+    ///
+    /// The `session_id` check is the whole point: a superseded session's
+    /// close arrives *after* its replacement registered, and removing by
+    /// fingerprint alone would evict the live session and report a connected
+    /// device as offline.
+    pub async fn unregister_session(&self, peer: &Fingerprint, session_id: SessionId) {
+        let mut sessions = self.sessions.write().await;
+        if sessions.get(peer).is_some_and(|h| h.id() == session_id) {
+            sessions.remove(peer);
+            drop(sessions);
+            self.last_seen
+                .write()
+                .await
+                .insert(*peer, SystemTime::now());
+        }
+    }
+
+    /// Removes whatever session a peer has, regardless of its id. Used by
+    /// revocation, where the intent is "this device has no session, full
+    /// stop" rather than "this particular session ended".
+    pub async fn drop_session(&self, peer: &Fingerprint) {
+        let removed = self.sessions.write().await.remove(peer);
+        if removed.is_some() {
+            self.last_seen
+                .write()
+                .await
+                .insert(*peer, SystemTime::now());
+        }
+    }
+
+    /// When this peer's last session ended, if one ever did in this run.
+    pub async fn last_seen(&self, peer: &Fingerprint) -> Option<SystemTime> {
+        self.last_seen.read().await.get(peer).copied()
     }
 
     pub async fn session_handles(&self) -> Vec<SessionHandle> {
@@ -287,7 +364,7 @@ impl SessionHost for DaemonState {
         self.register_session(handle).await;
     }
 
-    async fn on_closed(&self, peer: &Fingerprint) {
-        self.unregister_session(peer).await;
+    async fn on_closed(&self, peer: &Fingerprint, session_id: SessionId) {
+        self.unregister_session(peer, session_id).await;
     }
 }

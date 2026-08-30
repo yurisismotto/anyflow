@@ -6,7 +6,9 @@
 
 use std::time::Duration;
 
-use anyflow_daemon::control::{control_socket_path, Event, Request, Response};
+use anyflow_daemon::control::{
+    control_socket_path, BatteryReport, DeviceReport, Event, Request, Response,
+};
 use clap::{Parser, Subcommand};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -72,7 +74,10 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
             println!("AnyFlow");
             println!("  device      {} ({})", s.device_name, s.device_id);
             println!("  fingerprint {}", s.fingerprint_short);
-            println!("  listening   port {}", s.listen_port);
+            println!(
+                "  listening   port {} ({})",
+                s.listen_port, s.listen_families
+            );
             println!(
                 "  protocol    v{}..v{}",
                 s.protocol_version_min, s.protocol_version_max
@@ -82,27 +87,13 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
             if s.pairing_active {
                 println!("  pairing     window OPEN");
             }
-            if s.connections.is_empty() {
-                println!("\n  no active connections");
+
+            if s.devices.is_empty() {
+                println!("\n  no paired devices. Run: anyflow pair");
             } else {
-                println!("\n  active connections:");
-                for c in &s.connections {
-                    println!(
-                        "    {} [{}]  caps: {}",
-                        c.device_name,
-                        c.fingerprint_short,
-                        if c.negotiated_capabilities.is_empty() {
-                            "-".to_string()
-                        } else {
-                            c.negotiated_capabilities.join(", ")
-                        }
-                    );
-                    if let Some(b) = &c.battery {
-                        println!(
-                            "      battery {}% ({}, {}s ago)",
-                            b.percentage, b.charging_state, b.age_secs
-                        );
-                    }
+                println!("\n  devices:");
+                for d in &s.devices {
+                    print_device(d, "    ");
                 }
             }
         }
@@ -111,25 +102,8 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
                 println!("no paired devices. Run: anyflow pair");
                 return Ok(());
             }
-            for d in devices {
-                let flag = if d.revoked {
-                    "revoked"
-                } else if d.connected {
-                    "connected"
-                } else {
-                    "offline"
-                };
-                println!("{}  {} [{}]", d.device_name, d.device_id, flag);
-                println!("   platform    {}", d.platform);
-                println!("   fingerprint {}", d.fingerprint_short);
-                println!(
-                    "   granted     {}",
-                    if d.granted_capabilities.is_empty() {
-                        "-".to_string()
-                    } else {
-                        d.granted_capabilities.join(", ")
-                    }
-                );
+            for d in &devices {
+                print_device(d, "   ");
             }
         }
         Response::Pong { rtt_ms } => println!("pong in {rtt_ms} ms"),
@@ -140,6 +114,67 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Prints one device, keeping "paired", "connected" and "last known battery"
+/// visibly separate.
+///
+/// They are three different facts and conflating them is how a dead session
+/// ends up displayed as a live one. `paired` comes from the trust store,
+/// `state` from whether a session exists right now, and a battery reading is
+/// shown only with its age and only while a session is live.
+fn print_device(d: &DeviceReport, indent: &str) {
+    println!("{indent}{}  {}", d.device_name, d.device_id);
+    println!("{indent}   platform    {}", d.platform);
+    println!("{indent}   fingerprint {}", d.fingerprint_short);
+    println!("{indent}   paired      {}", yes_no(d.paired));
+    println!("{indent}   connected   {}", yes_no(d.connected));
+    println!("{indent}   state       {}", d.state);
+    if let Some(secs) = d.silent_secs {
+        println!("{indent}   last frame  {} ago", human_duration(secs));
+    }
+    if let Some(secs) = d.last_seen_secs_ago {
+        if !d.connected {
+            println!("{indent}   last seen   {} ago", human_duration(secs));
+        }
+    }
+    println!(
+        "{indent}   granted     {}",
+        if d.granted_capabilities.is_empty() {
+            "-".to_string()
+        } else {
+            d.granted_capabilities.join(", ")
+        }
+    );
+    if let Some(b) = &d.battery {
+        println!("{indent}   battery     {}", battery_line(b));
+    }
+}
+
+fn battery_line(b: &BatteryReport) -> String {
+    format!(
+        "{}% ({}, {} old{})",
+        b.percentage,
+        b.charging_state,
+        human_duration(b.age_secs),
+        if b.stale { "; STALE" } else { "" },
+    )
+}
+
+fn yes_no(v: bool) -> &'static str {
+    if v {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+fn human_duration(secs: u64) -> String {
+    match secs {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3600 => format!("{}m{:02}s", s / 60, s % 60),
+        s => format!("{}h{:02}m", s / 3600, (s % 3600) / 60),
+    }
 }
 
 /// Runs an interactive pairing session.
@@ -204,9 +239,15 @@ async fn pair(stream: UnixStream, ttl: Option<u64>) -> anyhow::Result<()> {
 }
 
 async fn read_yes_no() -> bool {
+    use std::io::Write as _;
     use tokio::io::AsyncBufReadExt;
-    let mut stdout = tokio::io::stdout();
-    let _ = stdout.flush().await;
+
+    // The prompt is written with `print!`, so it sits in `std::io::stdout`'s
+    // line buffer with no newline to push it out. Flushing tokio's stdout
+    // here would flush a different handle and leave the question invisible:
+    // the operator would see the fingerprint, no prompt, and a silent
+    // decline 60 seconds later. Flush the handle the prompt was written to.
+    let _ = std::io::stdout().flush();
 
     let mut line = String::new();
     let mut reader = BufReader::new(tokio::io::stdin());

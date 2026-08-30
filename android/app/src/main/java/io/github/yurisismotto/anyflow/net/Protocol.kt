@@ -15,6 +15,17 @@ object Protocol {
     /** Handshake read timeout, in milliseconds. */
     const val HANDSHAKE_TIMEOUT_MS = 15_000
 
+    /**
+     * How long an established session tolerates hearing nothing at all.
+     *
+     * Must match `LIVENESS_DEAD_AFTER` in `anyflow_core::session`, and must
+     * stay comfortably above the desktop's 60-second probe interval so that a
+     * single lost packet never drops a healthy session. Its purpose is to
+     * notice a half-open socket: a phone leaving Wi-Fi range sends no FIN, so
+     * without this the read blocks forever and the session looks alive.
+     */
+    const val SESSION_IDLE_TIMEOUT_MS = 180_000
+
     fun negotiateVersion(peerMin: Int, peerMax: Int): Int? {
         val chosen = minOf(peerMax, VERSION_MAX)
         val floor = maxOf(peerMin, VERSION_MIN)

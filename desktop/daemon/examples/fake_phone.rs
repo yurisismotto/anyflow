@@ -301,7 +301,7 @@ impl SessionHost for Notifier {
         }
         self.inner.on_established(peer, handle).await;
     }
-    async fn on_closed(&self, peer: &Fingerprint) {
-        self.inner.on_closed(peer).await;
+    async fn on_closed(&self, peer: &Fingerprint, session_id: anyflow_core::session::SessionId) {
+        self.inner.on_closed(peer, session_id).await;
     }
 }

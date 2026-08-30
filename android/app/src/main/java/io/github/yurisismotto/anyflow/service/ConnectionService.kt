@@ -19,13 +19,14 @@ import androidx.lifecycle.lifecycleScope
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.R
 import io.github.yurisismotto.anyflow.net.ConnectResult
+import io.github.yurisismotto.anyflow.net.ConnectionCoordinator
+import io.github.yurisismotto.anyflow.net.DialResult
+import io.github.yurisismotto.anyflow.net.Endpoints
+import io.github.yurisismotto.anyflow.net.FailureKind
+import io.github.yurisismotto.anyflow.net.LinkState
 import io.github.yurisismotto.anyflow.net.PeerConnection
+import io.github.yurisismotto.anyflow.store.TrustStore
 import io.github.yurisismotto.anyflow.ui.MainActivity
-import java.net.InetSocketAddress
-import kotlin.math.min
-import kotlin.math.pow
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -45,31 +46,43 @@ import kotlinx.coroutines.launch
  *
  * ## Playing by the rules
  *
- * * The service runs only while the user has the connection enabled *and*
- *   there is a usable network. It stops otherwise, rather than idling.
- * * Reconnection is driven by `ConnectivityManager` callbacks plus capped
- *   exponential backoff. There is no wakelock-and-spin loop, no alarm
- *   hammering, and nothing that fights Doze.
+ * * The service runs only while the user has the connection enabled. It stops
+ *   otherwise, rather than idling.
+ * * Reconnection is capped exponential backoff with jitter, driven by
+ *   [ConnectionCoordinator]. `ConnectivityManager` callbacks can bring a
+ *   pending retry forward but are never the only thing that schedules one.
+ *   There is no wakelock-and-spin loop, no alarm hammering, and nothing that
+ *   fights Doze.
  * * No `START_STICKY` resurrection games and no boot receiver: if the system
- *   stops us, we stay stopped until the user or a network event brings us
- *   back.
+ *   stops us, we stay stopped until the user brings us back.
+ *
+ * ## This class does not decide when to retry
+ *
+ * It owns the notification, the network callback and the platform lifecycle,
+ * and it hands the coordinator two functions: where to dial and how. Keeping
+ * the retry policy in one place — and out of the component that has four
+ * different callback threads — is what fixes the loop that used to die.
  */
 class ConnectionService : LifecycleService() {
 
     private lateinit var connectivity: ConnectivityManager
-    private var connectionJob: Job? = null
+    private var coordinator: ConnectionCoordinator? = null
+
+    /** The session currently running, so a lost network can end it promptly. */
+    @Volatile
     private var currentConnection: PeerConnection? = null
-    private var attempt = 0
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            // A new network is the one moment a retry is actually likely to
-            // succeed, so reset the backoff rather than waiting it out.
-            attempt = 0
-            ensureConnecting()
+            coordinator?.onNetworkAvailable("wifi-or-ethernet")
         }
 
         override fun onLost(network: Network) {
+            coordinator?.onNetworkLost("wifi-or-ethernet")
+            // Closing the socket makes the blocked read fail now instead of
+            // waiting out the idle timeout. It does not cancel anything: the
+            // coordinator sees an ordinary session end and schedules a retry
+            // exactly as it would for any other failure.
             currentConnection?.disconnect()
         }
     }
@@ -89,6 +102,8 @@ class ConnectionService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
 
         if (intent?.action == ACTION_STOP) {
+            // An explicit stop is not a failure and must never be retried.
+            coordinator?.stop("user asked to disconnect")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -102,80 +117,126 @@ class ConnectionService : LifecycleService() {
             .build()
         runCatching { connectivity.registerNetworkCallback(request, networkCallback) }
 
-        ensureConnecting()
+        // Idempotent: a second start (the user pressing Connect again, or the
+        // system redelivering) must not produce a second connection loop.
+        ensureCoordinator().start()
 
         // Not sticky: being restarted by the system without the user asking
         // is exactly the background behaviour we are avoiding.
         return START_NOT_STICKY
     }
 
-    private fun ensureConnecting() {
-        if (connectionJob?.isActive == true) return
+    @Synchronized
+    private fun ensureCoordinator(): ConnectionCoordinator =
+        coordinator ?: ConnectionCoordinator(
+            scope = lifecycleScope,
+            endpoints = ::endpointsFor,
+            dial = ::dial,
+            log = { event -> Log.i(TAG, event.toString()) },
+            onState = ::onLinkState,
+        ).also { coordinator = it }
 
-        connectionJob = lifecycleScope.launch {
-            val app = application as AnyFlowApp
-            val peer = app.trustStore.peers().firstOrNull()
-            if (peer == null) {
-                Log.i(TAG, "no paired computer; stopping")
-                stopSelf()
-                return@launch
+    /** Where to dial this round. Empty when there is nothing to dial. */
+    private suspend fun endpointsFor(round: Int) =
+        pairedPeer()?.let { app.candidateAddresses(it, round) } ?: emptyList()
+
+    /**
+     * One dial, translated into the vocabulary the coordinator retries on.
+     *
+     * The distinction that matters: a transport failure is the network having
+     * a bad day and is retried promptly; a security failure means the peer is
+     * not the pinned identity and is retried slowly and never re-trusted; a
+     * revocation is not retried at all.
+     */
+    private suspend fun dial(address: java.net.InetSocketAddress): DialResult {
+        val peer = pairedPeer() ?: return DialResult.Terminal("no paired computer")
+
+        return when (val result = app.connect(peer, address)) {
+            is ConnectResult.Established -> DialResult.Established {
+                val connection = result.connection
+                currentConnection = connection
+                updateNotification(getString(R.string.notif_connected, peer.deviceName))
+                // Remember only an address that actually worked, so the fast
+                // path stays the one that was proven, not merely advertised.
+                runCatching {
+                    app.trustStore.rememberAddresses(
+                        peer.fingerprint,
+                        listOf(Endpoints.format(address)),
+                    )
+                }
+                try {
+                    connection.run(lifecycleScope)
+                } finally {
+                    currentConnection = null
+                }
             }
 
-            while (true) {
-                val candidates = app.candidateAddresses(peer)
-                var connected = false
+            // The computer forgot us. Retrying cannot help and only the user
+            // can fix it, so this ends the loop rather than backing off.
+            is ConnectResult.PairingRequired ->
+                DialResult.Terminal("the computer no longer knows this device")
 
-                for (address in candidates) {
-                    when (val result = app.connect(peer, address)) {
-                        is ConnectResult.Established -> {
-                            attempt = 0
-                            connected = true
-                            currentConnection = result.connection
-                            updateNotification(
-                                getString(R.string.notif_connected, peer.deviceName),
-                            )
-                            app.trustStore.rememberAddresses(
-                                peer.fingerprint,
-                                listOf("${address.hostString}:${address.port}"),
-                            )
-                            // Blocks until the session ends.
-                            result.connection.run(lifecycleScope)
-                            currentConnection = null
-                            break
-                        }
-                        is ConnectResult.PairingRequired -> {
-                            // The computer forgot us. Retrying cannot help and
-                            // only the user can fix it.
-                            Log.i(TAG, "the computer no longer trusts this device; stopping")
-                            stopSelf()
-                            return@launch
-                        }
-                        is ConnectResult.Failed -> {
-                            Log.d(TAG, "connection attempt failed: ${result.reason}")
-                        }
-                    }
-                }
-
-                if (!connected) {
-                    attempt += 1
-                }
-                updateNotification(getString(R.string.notif_connecting))
-
-                // Capped exponential backoff. The cap matters: an uncapped
-                // retry loop is a battery bug, and a too-short one is a
-                // different battery bug.
-                val delayMs = min(
-                    MAX_BACKOFF_MS,
-                    (BASE_BACKOFF_MS * 2.0.pow(attempt.coerceAtMost(6))).toLong(),
-                )
-                delay(delayMs)
+            is ConnectResult.Failed -> when (result.kind) {
+                FailureKind.REVOKED -> DialResult.Terminal(result.reason)
+                FailureKind.SECURITY -> DialResult.Security(result.reason)
+                FailureKind.TRANSPORT -> DialResult.Transient(result.reason)
             }
         }
     }
 
+    private fun onLinkState(state: LinkState) {
+        val app = app
+        when (state) {
+            is LinkState.Connecting -> {
+                app.publishConnectionState(AnyFlowApp.ConnectionState.Connecting)
+                updateNotification(getString(R.string.notif_connecting))
+            }
+
+            is LinkState.Connected -> {
+                val peer = pairedPeer()
+                app.publishConnectionState(
+                    if (peer == null) {
+                        AnyFlowApp.ConnectionState.Connecting
+                    } else {
+                        AnyFlowApp.ConnectionState.Connected(
+                            peer.deviceName,
+                            peer.fingerprint.toDisplayShort(),
+                        )
+                    },
+                )
+            }
+
+            is LinkState.RetryWait -> {
+                // The UI says "trying again", not "connected": a session that
+                // ended must never keep looking live.
+                app.publishConnectionState(
+                    AnyFlowApp.ConnectionState.Retrying(state.reason, state.delayMs / 1000),
+                )
+                updateNotification(getString(R.string.notif_connecting))
+            }
+
+            is LinkState.GaveUp -> {
+                app.publishConnectionState(AnyFlowApp.ConnectionState.Error(state.reason))
+                // Nothing left to try, so holding a foreground service — and
+                // its notification — would be claiming work we are not doing.
+                lifecycleScope.launch { stopSelf() }
+            }
+
+            is LinkState.Stopped ->
+                app.publishConnectionState(AnyFlowApp.ConnectionState.Idle)
+        }
+    }
+
+    private val app: AnyFlowApp get() = application as AnyFlowApp
+
+    private fun pairedPeer(): TrustStore.TrustedPeer? =
+        runCatching { app.trustStore.peers().firstOrNull() }.getOrNull()
+
     override fun onDestroy() {
+        // Being destroyed is an explicit end, not a failure: stop first so
+        // nothing schedules a retry into a scope that is going away.
+        coordinator?.stop("service destroyed")
         currentConnection?.disconnect()
-        connectionJob?.cancel()
         runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         super.onDestroy()
     }
@@ -195,7 +256,7 @@ class ConnectionService : LifecycleService() {
 
     private fun updateNotification(text: String) {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(text))
+        runCatching { manager.notify(NOTIFICATION_ID, buildNotification(text)) }
     }
 
     private fun buildNotification(text: String): Notification {
@@ -228,8 +289,6 @@ class ConnectionService : LifecycleService() {
         private const val TAG = "ConnectionService"
         private const val CHANNEL_ID = "connection"
         private const val NOTIFICATION_ID = 1
-        private const val BASE_BACKOFF_MS = 2_000L
-        private const val MAX_BACKOFF_MS = 5 * 60_000L
 
         const val ACTION_STOP = "io.github.yurisismotto.anyflow.STOP"
 
