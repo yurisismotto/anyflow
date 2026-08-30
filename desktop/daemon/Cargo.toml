@@ -1,0 +1,42 @@
+[package]
+name = "anyflow-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "anyflowd"
+path = "src/main.rs"
+
+[features]
+default = ["upower"]
+upower = ["anyflow-capability-battery/upower"]
+
+[dependencies]
+anyflow-core = { version = "0.1.0", path = "../core" }
+anyflow-proto = { version = "0.1.0", path = "../proto" }
+anyflow-capability-battery = { version = "0.1.0", path = "../capabilities/battery" }
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+mdns-sd = "0.15"
+clap = { version = "4", features = ["derive"] }
+qrcode = { version = "0.14", default-features = false }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
+rustls-pki-types = "1"
+prost = "0.14.3"
+# `test-util` gives the tests a virtual clock. Liveness is measured in
+# minutes; a suite that waited them out in real time would never be run.
+tokio = { version = "1", features = ["full", "test-util"] }

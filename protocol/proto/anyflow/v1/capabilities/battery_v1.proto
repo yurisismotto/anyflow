@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package anyflow.v1.capabilities;
+
+// Java options are for the Android build; prost ignores them. Both sides
+// compile these exact files, so the wire format cannot drift.
+option java_package = "io.github.yurisismotto.anyflow.proto.capabilities";
+option java_outer_classname = "BatteryV1Proto";
+option java_multiple_files = true;
+
+// Capability id: "battery.v1"
+//
+// Carried as the opaque `payload` of a CapabilityMessage. The transport does
+// not know this schema exists; only the battery capability handler does.
+
+enum ChargingState {
+  CHARGING_STATE_UNSPECIFIED = 0;
+  CHARGING_STATE_DISCHARGING = 1;
+  CHARGING_STATE_CHARGING = 2;
+  CHARGING_STATE_FULL = 3;
+  CHARGING_STATE_NOT_CHARGING = 4;
+}
+
+message BatteryState {
+  // 0..=100. Values outside the range are rejected by the receiver.
+  uint32 percentage = 1;
+  ChargingState charging_state = 2;
+  // Sender's wall clock when the reading was taken. Informational: used only
+  // to show "as of X" in a UI and to drop out-of-order updates within a
+  // connection. Never a security input.
+  int64 timestamp_unix_ms = 3;
+}

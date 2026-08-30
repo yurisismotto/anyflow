@@ -1,0 +1,22 @@
+# Rust
+/desktop/target/
+**/*.rs.bk
+
+# Android / Gradle
+/android/.gradle/
+/android/.kotlin/
+/android/build/
+/android/app/build/
+/android/local.properties
+/android/.idea/
+*.apk
+*.aab
+
+# Editors
+.vscode/
+*.swp
+
+# Runtime state — never commit an identity or a trust store
+*.key
+state.json
+trust-store.json

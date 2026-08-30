@@ -1,0 +1,16 @@
+[package]
+name = "anyflow-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+prost = "0.14.3"
+
+[build-dependencies]
+prost-build = "0.14.3"
+protox = "0.9.1"
