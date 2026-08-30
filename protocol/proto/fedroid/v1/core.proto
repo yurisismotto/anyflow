@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package fedroid.v1;
+
+// Java options are for the Android build; prost ignores them. Both sides
+// compile these exact files, so the wire format cannot drift.
+option java_package = "dev.fedroid.bridge.proto";
+option java_outer_classname = "CoreProto";
+option java_multiple_files = true;
+
+// ---------------------------------------------------------------------------
+// Device identity
+// ---------------------------------------------------------------------------
+
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_ANDROID = 1;
+  PLATFORM_LINUX = 2;
+}
+
+// Public description of a device. Note what is NOT here: no IP address, no
+// hostname, no MAC address. Those are routing hints at best and are never part
+// of identity (principle 6).
+message DeviceInfo {
+  // Random, persistent, 128-bit opaque identifier, lowercase hex.
+  // Stable across IP/hostname changes. NOT a credential.
+  string device_id = 1;
+  // User-facing label. Untrusted, attacker-controlled string: must be
+  // sanitized and length-capped before display.
+  string device_name = 2;
+  Platform platform = 3;
+  // SHA-256 over the DER SubjectPublicKeyInfo of the device identity key,
+  // lowercase hex. This is the value that is pinned. We fingerprint the SPKI
+  // rather than the certificate so that a certificate can be rotated (e.g.
+  // on expiry) without breaking an existing pairing.
+  string identity_fingerprint = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Handshake
+// ---------------------------------------------------------------------------
+
+// First message sent by the initiator once the TLS handshake completes.
+message Hello {
+  DeviceInfo device = 1;
+  // Inclusive range of protocol versions the sender can speak. The responder
+  // selects min(max_a, max_b) and rejects if that is below either minimum.
+  uint32 min_protocol_version = 2;
+  uint32 max_protocol_version = 3;
+  // Capability ids the sender is willing to use, e.g. ["battery.v1"].
+  // Advertising a capability is not the same as being allowed to use it:
+  // the receiver applies its own per-peer permissions on top.
+  repeated string capabilities = 4;
+}
+
+enum HelloStatus {
+  HELLO_STATUS_UNSPECIFIED = 0;
+  // Peer is a known, trusted device. Capability traffic is allowed.
+  HELLO_STATUS_TRUSTED = 1;
+  // Peer is unknown. Only PAIR_REQUEST is accepted, and only while the
+  // responder is in pairing mode.
+  HELLO_STATUS_PAIRING_REQUIRED = 2;
+  // No mutually supported protocol version.
+  HELLO_STATUS_VERSION_UNSUPPORTED = 3;
+  // Peer is known but its pairing was revoked, or it is explicitly blocked.
+  HELLO_STATUS_REJECTED = 4;
+}
+
+message HelloAck {
+  DeviceInfo device = 1;
+  HelloStatus status = 2;
+  // The version both sides will use for the rest of this connection.
+  uint32 negotiated_protocol_version = 3;
+  repeated string capabilities = 4;
+  // Present only when status == PAIRING_REQUIRED: a fresh, single-use,
+  // 32-byte random challenge that the pairing proof must be bound to.
+  bytes pairing_nonce = 5;
+}
+
+// ---------------------------------------------------------------------------
+// Pairing
+// ---------------------------------------------------------------------------
+
+// Sent by the device that scanned the QR code.
+//
+// `proof` = HMAC-SHA256(
+//     key = pairing_token,
+//     msg = "fedroid-bridge/pairing-proof/v1"
+//           || len_prefixed(responder_identity_fingerprint)
+//           || len_prefixed(initiator_identity_fingerprint)
+//           || len_prefixed(pairing_nonce))
+//
+// The proof binds the short-lived pairing token to BOTH TLS identities and to
+// a server-chosen nonce. Consequences:
+//   * it cannot be replayed to a different responder (different fingerprint),
+//   * it cannot be replayed by a different initiator (different fingerprint),
+//   * it cannot be replayed at all (nonce is single-use, token is consumed).
+//
+// The token itself is never sent over the wire.
+message PairRequest {
+  bytes proof = 1;
+}
+
+enum PairStatus {
+  PAIR_STATUS_UNSPECIFIED = 0;
+  PAIR_STATUS_ACCEPTED = 1;
+  // Proof did not verify, or the token was already used / expired.
+  PAIR_STATUS_REJECTED = 2;
+  // The human declined the confirmation prompt.
+  PAIR_STATUS_DECLINED_BY_USER = 3;
+  // Responder is not currently in pairing mode.
+  PAIR_STATUS_NOT_IN_PAIRING_MODE = 4;
+  // Too many failed attempts; pairing mode has been aborted.
+  PAIR_STATUS_RATE_LIMITED = 5;
+}
+
+message PairResponse {
+  PairStatus status = 1;
+  // Present only on ACCEPTED. Same construction as PairRequest.proof but with
+  // the domain separator "fedroid-bridge/pairing-confirm/v1". Lets the
+  // initiator confirm the responder also knew the token.
+  bytes confirmation = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Capabilities, liveness, errors
+// ---------------------------------------------------------------------------
+
+// Re-announce capabilities mid-connection (e.g. after a permission change).
+message CapabilityAnnounce {
+  repeated string capabilities = 1;
+}
+
+message Ping {
+  // Echoed back verbatim in Pong. Bounded to 64 bytes by the session layer.
+  bytes payload = 1;
+}
+
+message Pong {
+  bytes payload = 1;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_PROTOCOL_VIOLATION = 1;
+  ERROR_CODE_UNSUPPORTED_VERSION = 2;
+  ERROR_CODE_UNSUPPORTED_CAPABILITY = 3;
+  ERROR_CODE_NOT_AUTHORIZED = 4;
+  ERROR_CODE_MALFORMED = 5;
+  ERROR_CODE_INTERNAL = 6;
+  ERROR_CODE_RATE_LIMITED = 7;
+}
+
+message Error {
+  ErrorCode code = 1;
+  // Human-readable, non-sensitive. MUST NOT contain user content
+  // (clipboard, file names, URLs) or secrets. See principle 17.
+  string message = 2;
+  // If the error is fatal the sender closes the connection after sending.
+  bool fatal = 3;
+}

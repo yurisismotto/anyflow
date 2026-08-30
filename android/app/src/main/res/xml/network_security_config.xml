@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext traffic is disabled app-wide. The app opens exactly one kind of
+  socket: a TLS 1.3 connection whose peer key is pinned in code (see
+  PinnedTrustManager). This config is a second, declarative barrier so that an
+  accidental plain-HTTP call anywhere in the app or a future dependency fails
+  at the platform level rather than silently working.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

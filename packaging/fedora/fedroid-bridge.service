@@ -1,0 +1,39 @@
+[Unit]
+Description=Fedroid Bridge — local device continuity daemon
+Documentation=https://github.com/yuri/fedroid-bridge
+# Wait for a usable network, but do not fail without one: the daemon retries
+# and mDNS comes and goes with the link.
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/fedroid-bridge
+Restart=on-failure
+RestartSec=5
+
+# The daemon never needs privileges. It binds a port above 1024, writes only
+# under $XDG_DATA_HOME, and talks to a socket in $XDG_RUNTIME_DIR.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# The one directory it must write.
+StateDirectory=fedroid-bridge
+ReadWritePaths=%h/.local/share/fedroid-bridge
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+# LAN only. No other address families are needed, and denying the rest turns a
+# hypothetical bug into a failed syscall.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=default.target

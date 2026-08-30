@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "proto",
+    "core",
+    "daemon",
+    "cli",
+    "capabilities/battery",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+repository = "https://github.com/yuri/fedroid-bridge"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
