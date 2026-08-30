@@ -42,7 +42,7 @@ const CERT_VALIDITY_DAYS: i64 = 3650;
 pub struct LocalIdentity {
     device_id: String,
     device_name: String,
-    platform: fedroid_proto::v1::Platform,
+    platform: anyflow_proto::v1::Platform,
     cert_der: CertificateDer<'static>,
     key_pkcs8_der: Vec<u8>,
     fingerprint: Fingerprint,
@@ -50,7 +50,7 @@ pub struct LocalIdentity {
 
 impl LocalIdentity {
     /// Generates a brand-new identity. Called once, on first run.
-    pub fn generate(device_name: &str, platform: fedroid_proto::v1::Platform) -> Result<Self> {
+    pub fn generate(device_name: &str, platform: anyflow_proto::v1::Platform) -> Result<Self> {
         let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
             .map_err(|_| Error::Certificate("failed to generate P-256 keypair"))?;
         let device_id = random_device_id()?;
@@ -68,7 +68,7 @@ impl LocalIdentity {
     pub fn from_parts(
         device_id: String,
         device_name: String,
-        platform: fedroid_proto::v1::Platform,
+        platform: anyflow_proto::v1::Platform,
         cert_der: Vec<u8>,
         key_pkcs8_der: Vec<u8>,
     ) -> Result<Self> {
@@ -95,7 +95,7 @@ impl LocalIdentity {
             .map_err(|_| Error::Certificate("bad certificate parameters"))?;
 
         let mut dn = rcgen::DistinguishedName::new();
-        dn.push(rcgen::DnType::CommonName, format!("fedroid:{device_id}"));
+        dn.push(rcgen::DnType::CommonName, format!("anyflow:{device_id}"));
         params.distinguished_name = dn;
 
         params.not_before = rcgen::date_time_ymd(2020, 1, 1);
@@ -133,7 +133,7 @@ impl LocalIdentity {
         self.device_name = name;
     }
 
-    pub fn platform(&self) -> fedroid_proto::v1::Platform {
+    pub fn platform(&self) -> anyflow_proto::v1::Platform {
         self.platform
     }
 
@@ -154,8 +154,8 @@ impl LocalIdentity {
     }
 
     /// The public `DeviceInfo` this device puts on the wire.
-    pub fn device_info(&self) -> fedroid_proto::v1::DeviceInfo {
-        fedroid_proto::v1::DeviceInfo {
+    pub fn device_info(&self) -> anyflow_proto::v1::DeviceInfo {
+        anyflow_proto::v1::DeviceInfo {
             device_id: self.device_id.clone(),
             device_name: self.device_name.clone(),
             platform: self.platform as i32,

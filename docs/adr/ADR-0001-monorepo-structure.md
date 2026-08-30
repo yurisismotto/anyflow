@@ -4,7 +4,7 @@
 
 ## Context
 
-Fedroid Bridge is two independent implementations — Kotlin on Android, Rust on
+AnyFlow is two independent implementations — Kotlin on Android, Rust on
 Fedora — that must agree exactly on a wire protocol, a pairing MAC
 construction and a fingerprint definition. Any drift between them shows up as
 "pairing mysteriously fails", which is among the hardest classes of bug to
@@ -19,7 +19,7 @@ One repository, with the protocol definitions as a shared top-level directory
 that both builds compile directly:
 
 ```
-fedroid-bridge/
+anyflow/
 ├── protocol/proto/          # single source of truth, compiled by both sides
 ├── desktop/                 # Rust workspace
 │   ├── proto/  core/  daemon/  cli/  capabilities/  gui/
@@ -31,7 +31,7 @@ fedroid-bridge/
 
 The Rust side is a Cargo workspace rooted at `desktop/`, with crate
 directories named for their role (`daemon/`, `cli/`) rather than prefixed
-(`fedroid-daemon/`), so the tree matches the intended layout while staying
+(`anyflow-daemon/`), so the tree matches the intended layout while staying
 idiomatic Cargo.
 
 `android/app/build.gradle.kts` points its proto source set at

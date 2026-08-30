@@ -62,6 +62,91 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyflow-capability-battery"
+version = "0.1.0"
+dependencies = [
+ "anyflow-core",
+ "anyflow-proto",
+ "async-trait",
+ "prost",
+ "tokio",
+ "tracing",
+ "zbus",
+]
+
+[[package]]
+name = "anyflow-cli"
+version = "0.1.0"
+dependencies = [
+ "anyflow-core",
+ "anyflow-daemon",
+ "anyhow",
+ "clap",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "anyflow-core"
+version = "0.1.0"
+dependencies = [
+ "anyflow-proto",
+ "async-trait",
+ "bytes",
+ "data-encoding",
+ "hmac",
+ "prost",
+ "rand",
+ "rcgen",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "x509-parser",
+ "zeroize",
+]
+
+[[package]]
+name = "anyflow-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyflow-capability-battery",
+ "anyflow-core",
+ "anyflow-proto",
+ "anyhow",
+ "async-trait",
+ "clap",
+ "mdns-sd",
+ "prost",
+ "qrcode",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "anyflow-proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-build",
+ "protox",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -397,91 +482,6 @@ name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
-
-[[package]]
-name = "fedroid-capability-battery"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "fedroid-core",
- "fedroid-proto",
- "prost",
- "tokio",
- "tracing",
- "zbus",
-]
-
-[[package]]
-name = "fedroid-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "fedroid-core",
- "fedroid-daemon",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "fedroid-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "data-encoding",
- "fedroid-proto",
- "hmac",
- "prost",
- "rand",
- "rcgen",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "sha2",
- "subtle",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-rustls",
- "tracing",
- "x509-parser",
- "zeroize",
-]
-
-[[package]]
-name = "fedroid-daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "fedroid-capability-battery",
- "fedroid-core",
- "fedroid-proto",
- "mdns-sd",
- "prost",
- "qrcode",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-rustls",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "fedroid-proto"
-version = "0.1.0"
-dependencies = [
- "prost",
- "prost-build",
- "protox",
-]
 
 [[package]]
 name = "find-msvc-tools"

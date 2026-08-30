@@ -5,13 +5,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use fedroid_core::capability::CapabilityRegistry;
-use fedroid_core::error::{PairingError, Result};
-use fedroid_core::pairing::PairingSession;
-use fedroid_core::session::{PeerStatus, SessionHandle, SessionHost};
-use fedroid_core::store::{Store, TrustedPeer};
-use fedroid_core::Fingerprint;
-use fedroid_proto::v1;
+use anyflow_core::capability::CapabilityRegistry;
+use anyflow_core::error::{PairingError, Result};
+use anyflow_core::pairing::PairingSession;
+use anyflow_core::session::{PeerStatus, SessionHandle, SessionHost};
+use anyflow_core::store::{Store, TrustedPeer};
+use anyflow_core::Fingerprint;
+use anyflow_proto::v1;
 use tokio::sync::{oneshot, Mutex, RwLock};
 
 /// A pending "is this device you?" question waiting on a human.
@@ -24,11 +24,11 @@ pub struct ConfirmRequest {
 pub struct DaemonState {
     pub store: Mutex<Store>,
     pub registry: CapabilityRegistry,
-    pub battery: Arc<fedroid_capability_battery::BatteryState>,
+    pub battery: Arc<anyflow_capability_battery::BatteryState>,
 
     /// The single open pairing window, if any.
     pairing: Mutex<Option<PairingSession>>,
-    /// Where to send confirmation questions. Present only while a `fedroid
+    /// Where to send confirmation questions. Present only while a `anyflow
     /// pair` control session is attached: with no operator watching there is
     /// nobody to answer, and auto-accepting would defeat the whole point.
     confirm_tx: Mutex<Option<tokio::sync::mpsc::Sender<ConfirmRequest>>>,
@@ -47,7 +47,7 @@ impl DaemonState {
     pub fn new(
         store: Store,
         registry: CapabilityRegistry,
-        battery: Arc<fedroid_capability_battery::BatteryState>,
+        battery: Arc<anyflow_capability_battery::BatteryState>,
     ) -> Self {
         let device_info = store.identity().device_info();
         Self {
@@ -269,7 +269,7 @@ impl SessionHost for DaemonState {
 
         let peer = TrustedPeer {
             device_id: device.device_id.clone(),
-            device_name: fedroid_core::discovery::sanitize_device_name(&device.device_name),
+            device_name: anyflow_core::discovery::sanitize_device_name(&device.device_name),
             platform: device.platform,
             fingerprint: *fingerprint,
             paired_at_unix: SystemTime::now()

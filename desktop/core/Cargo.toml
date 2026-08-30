@@ -1,5 +1,5 @@
 [package]
-name = "fedroid-core"
+name = "anyflow-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,7 +12,7 @@ workspace = true
 async-trait = "0.1.92"
 bytes = "1.12.1"
 data-encoding = "2.11.1"
-fedroid-proto = { version = "0.1.0", path = "../proto" }
+anyflow-proto = { version = "0.1.0", path = "../proto" }
 hmac = "0.12.1"
 prost = "0.14.3"
 rand = "0.9.5"

@@ -1,7 +1,7 @@
 //! Test harness: a full second device, over real TLS, in-process.
 //!
 //! Nothing here weakens security to make tests pass. The client uses the same
-//! `fedroid_core::tls::client_config` as production code, with real
+//! `anyflow_core::tls::client_config` as production code, with real
 //! certificate pinning. Tests that expect a rejection get one from the actual
 //! verifier, not from a stub.
 
@@ -11,16 +11,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fedroid_capability_battery::{BatteryCapability, BatteryState};
-use fedroid_core::capability::CapabilityRegistry;
-use fedroid_core::error::{PairingError, Result};
-use fedroid_core::identity::LocalIdentity;
-use fedroid_core::pairing::PairingToken;
-use fedroid_core::session::{self, ClientHandshake, PeerStatus, SessionHandle, SessionHost};
-use fedroid_core::store::Store;
-use fedroid_core::Fingerprint;
-use fedroid_daemon::state::DaemonState;
-use fedroid_proto::v1;
+use anyflow_capability_battery::{BatteryCapability, BatteryState};
+use anyflow_core::capability::CapabilityRegistry;
+use anyflow_core::error::{PairingError, Result};
+use anyflow_core::identity::LocalIdentity;
+use anyflow_core::pairing::PairingToken;
+use anyflow_core::session::{self, ClientHandshake, PeerStatus, SessionHandle, SessionHost};
+use anyflow_core::store::Store;
+use anyflow_core::Fingerprint;
+use anyflow_daemon::state::DaemonState;
+use anyflow_proto::v1;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
@@ -58,7 +58,7 @@ impl TestServer {
             .register(Arc::new(BatteryCapability::new(Arc::clone(&battery))))
             .build();
 
-        let tls = fedroid_core::tls::server_config(store.identity()).expect("server config");
+        let tls = anyflow_core::tls::server_config(store.identity()).expect("server config");
         let acceptor = TlsAcceptor::from(tls);
 
         let state = Arc::new(DaemonState::new(store, registry, Arc::clone(&battery)));
@@ -68,7 +68,7 @@ impl TestServer {
 
         let accept_state = Arc::clone(&state);
         tokio::spawn(async move {
-            let _ = fedroid_daemon::listener::run(listener, acceptor, accept_state).await;
+            let _ = anyflow_daemon::listener::run(listener, acceptor, accept_state).await;
         });
 
         Self {
@@ -209,11 +209,11 @@ impl TestClient {
         addr: SocketAddr,
         pinned: Fingerprint,
     ) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
-        let config = fedroid_core::tls::client_config(&self.identity, pinned)?;
+        let config = anyflow_core::tls::client_config(&self.identity, pinned)?;
         let connector = TlsConnector::from(config);
         let tcp = TcpStream::connect(addr).await?;
         // The name is irrelevant: our verifier pins the key and ignores it.
-        let name = rustls_pki_types::ServerName::try_from("fedroid.invalid").expect("static name");
+        let name = rustls_pki_types::ServerName::try_from("anyflow.invalid").expect("static name");
         Ok(connector.connect(name, tcp).await?)
     }
 
@@ -243,7 +243,7 @@ impl TestClient {
                 });
 
                 let handle = ready_rx.await.map_err(|_| {
-                    fedroid_core::Error::Protocol("session ended before it started")
+                    anyflow_core::Error::Protocol("session ended before it started")
                 })?;
 
                 Ok(ConnectedSession {
@@ -253,7 +253,7 @@ impl TestClient {
                 })
             }
             ClientHandshake::PairingRequired => {
-                Err(fedroid_core::Error::Pairing(PairingError::NotInPairingMode))
+                Err(anyflow_core::Error::Pairing(PairingError::NotInPairingMode))
             }
         }
     }

@@ -13,7 +13,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
 license = "Apache-2.0"
-repository = "https://github.com/yuri/fedroid-bridge"
+repository = "https://github.com/yurisismotto/anyflow"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

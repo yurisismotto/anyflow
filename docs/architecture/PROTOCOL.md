@@ -1,4 +1,4 @@
-# Fedroid Bridge protocol — v1
+# AnyFlow protocol — v1
 
 ## Invariants
 
@@ -60,7 +60,7 @@ connection.
 ```
 Phone                                        Fedora
   │                                             │
-  │──── TCP + TLS 1.3 (mutual, ALPN fedroid/1) ─│
+  │──── TCP + TLS 1.3 (mutual, ALPN anyflow/1) ─│
   │     phone pins the desktop SPKI             │
   │     desktop proves possession of its key    │
   │     desktop learns the phone's SPKI         │
@@ -97,12 +97,12 @@ is open. **Anything else closes the connection**, including a `PING`.
 ## Pairing proof
 
 ```
-proof        = HMAC-SHA256(token, "fedroid-bridge/pairing-proof/v1"
+proof        = HMAC-SHA256(token, "anyflow/pairing-proof/v1"
                                   ‖ len32(responder_fp) ‖ responder_fp
                                   ‖ len32(initiator_fp) ‖ initiator_fp
                                   ‖ len32(nonce)        ‖ nonce)
 
-confirmation = HMAC-SHA256(token, "fedroid-bridge/pairing-confirm/v1" ‖ …)
+confirmation = HMAC-SHA256(token, "anyflow/pairing-confirm/v1" ‖ …)
 ```
 
 * `token` — 20 raw bytes (the base32 in the QR, decoded)
@@ -131,7 +131,7 @@ A violation is fatal. A correct peer never produces one.
 ## QR payload
 
 ```
-fedroidb1:<responder-fingerprint-hex>:<token-base32>:<device-id>:<addr>[,<addr>…]
+anyflow1:<responder-fingerprint-hex>:<token-base32>:<device-id>:<addr>[,<addr>…]
 ```
 
 Maximum 512 bytes. The fingerprint is the load-bearing field: it is pinned
@@ -164,5 +164,5 @@ Held in memory only, dropped on disconnect. Never persisted.
 
 ## mDNS
 
-`_fedroid-bridge._tcp.local.`, TXT: `v=1`, `pv=1-1`, `id=<hex>`, `dn=<name>`.
+`_anyflow._tcp.local.`, TXT: `v=1`, `pv=1-1`, `id=<hex>`, `dn=<name>`.
 The fingerprint is **not** published. See ADR-0005.

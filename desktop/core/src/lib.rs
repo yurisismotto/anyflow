@@ -1,4 +1,4 @@
-//! Fedroid Bridge core: identity, pairing, transport and the capability model.
+//! AnyFlow core: identity, pairing, transport and the capability model.
 //!
 //! This crate is deliberately free of any daemon, CLI or GUI concerns. It has
 //! no global state and does no logging of user content. Everything it needs
@@ -36,7 +36,7 @@ pub const DEFAULT_PORT: u16 = 55432;
 /// ALPN identifier. Negotiated by both ends, so a client that reaches an
 /// unrelated TLS service (or vice versa) fails fast during the handshake
 /// instead of exchanging garbage frames.
-pub const ALPN_PROTOCOL: &[u8] = b"fedroid/1";
+pub const ALPN_PROTOCOL: &[u8] = b"anyflow/1";
 
 /// DNS-SD service type used for LAN discovery.
-pub const SERVICE_TYPE: &str = "_fedroid-bridge._tcp.local.";
+pub const SERVICE_TYPE: &str = "_anyflow._tcp.local.";

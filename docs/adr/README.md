@@ -15,3 +15,5 @@ alternatives that were actually considered, and what the decision costs.
 | [0008](ADR-0008-capability-architecture.md) | Capability-based protocol architecture | Accepted |
 | [0009](ADR-0009-android-background-execution.md) | Android background execution | Accepted |
 | [0010](ADR-0010-protocol-envelope-and-framing.md) | Protocol envelope and framing | Accepted |
+| [0011](ADR-0011-project-naming-and-wire-identifiers.md) | Project naming and wire identifiers | Accepted |
+| [0012](ADR-0012-bulk-transfer-and-frame-limit.md) | Bulk transfer and the 64 KiB frame limit | Accepted |

@@ -6,32 +6,30 @@
 //!
 //! ```bash
 //! # terminal 1
-//! fedroid-bridge
+//! anyflowd
 //! # terminal 2
-//! fedroid pair                       # copy the payload it prints
+//! anyflow pair                       # copy the payload it prints
 //! # terminal 3
-//! cargo run -p fedroid-daemon --example fake_phone -- pair '<payload>'
-//! cargo run -p fedroid-daemon --example fake_phone -- connect
+//! cargo run -p anyflow-daemon --example fake_phone -- pair '<payload>'
+//! cargo run -p anyflow-daemon --example fake_phone -- connect
 //! ```
 //!
 //! Its identity is stored under `--data-dir` (default:
-//! `/tmp/fedroid-fake-phone`) so that "reconnect without pairing again" can
+//! `/tmp/anyflow-fake-phone`) so that "reconnect without pairing again" can
 //! actually be demonstrated across runs.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use fedroid_capability_battery::{BatteryCapability, BatteryReading, BatteryState};
-use fedroid_core::capability::CapabilityRegistry;
-use fedroid_core::error::{PairingError, Result};
-use fedroid_core::qr::QrPayload;
-use fedroid_core::session::{
-    self, ClientHandshake, PeerStatus, SessionHandle, SessionHost,
-};
-use fedroid_core::store::Store;
-use fedroid_core::Fingerprint;
-use fedroid_proto::v1;
-use fedroid_proto::v1::capabilities::ChargingState;
+use anyflow_capability_battery::{BatteryCapability, BatteryReading, BatteryState};
+use anyflow_core::capability::CapabilityRegistry;
+use anyflow_core::error::{PairingError, Result};
+use anyflow_core::qr::QrPayload;
+use anyflow_core::session::{self, ClientHandshake, PeerStatus, SessionHandle, SessionHost};
+use anyflow_core::store::Store;
+use anyflow_core::Fingerprint;
+use anyflow_proto::v1;
+use anyflow_proto::v1::capabilities::ChargingState;
 use tokio::sync::Mutex;
 use tokio_rustls::TlsConnector;
 
@@ -82,7 +80,7 @@ impl SessionHost for PhoneHost {
         version: u32,
     ) -> Result<()> {
         let mut store = self.store.lock().await;
-        store.add_peer(fedroid_core::store::TrustedPeer {
+        store.add_peer(anyflow_core::store::TrustedPeer {
             device_id: device.device_id.clone(),
             device_name: device.device_name.clone(),
             platform: device.platform,
@@ -105,10 +103,13 @@ async fn main() -> anyhow::Result<()> {
         .install_default()
         .map_err(|_| anyhow::anyhow!("crypto provider already installed"))?;
 
-    let data_dir = std::env::var("FAKE_PHONE_DIR")
-        .unwrap_or_else(|_| "/tmp/fedroid-fake-phone".to_string());
+    let data_dir =
+        std::env::var("FAKE_PHONE_DIR").unwrap_or_else(|_| "/tmp/anyflow-fake-phone".to_string());
     let store = Store::open(&data_dir)?;
-    println!("fake phone identity: {}", store.identity().fingerprint().to_display_short());
+    println!(
+        "fake phone identity: {}",
+        store.identity().fingerprint().to_display_short()
+    );
 
     let battery_state = Arc::new(BatteryState::default());
     let registry = CapabilityRegistry::builder()
@@ -130,9 +131,9 @@ async fn main() -> anyhow::Result<()> {
 
     match command {
         "pair" => {
-            let raw = args.get(2).ok_or_else(|| {
-                anyhow::anyhow!("usage: fake_phone pair '<qr payload>'")
-            })?;
+            let raw = args
+                .get(2)
+                .ok_or_else(|| anyhow::anyhow!("usage: fake_phone pair '<qr payload>'"))?;
             let payload = QrPayload::parse(raw)?;
             let address = *payload
                 .addresses
@@ -159,7 +160,10 @@ async fn main() -> anyhow::Result<()> {
                     .parse()?;
                 (peer.fingerprint, address)
             };
-            println!("connecting to {} at {address}", fingerprint.to_display_short());
+            println!(
+                "connecting to {} at {address}",
+                fingerprint.to_display_short()
+            );
             run(host, address, fingerprint, None).await
         }
         _ => {
@@ -173,17 +177,17 @@ async fn run(
     host: Arc<PhoneHost>,
     address: std::net::SocketAddr,
     pinned: Fingerprint,
-    token: Option<fedroid_core::pairing::PairingToken>,
+    token: Option<anyflow_core::pairing::PairingToken>,
 ) -> anyhow::Result<()> {
     let identity_config = {
         let store = host.store.lock().await;
-        fedroid_core::tls::client_config(store.identity(), pinned)?
+        anyflow_core::tls::client_config(store.identity(), pinned)?
     };
 
     let connector = TlsConnector::from(identity_config);
     let tcp = tokio::net::TcpStream::connect(address).await?;
     tcp.set_nodelay(true)?;
-    let name = rustls_pki_types::ServerName::try_from("fedroid.invalid")?;
+    let name = rustls_pki_types::ServerName::try_from("anyflow.invalid")?;
     let mut tls = connector.connect(name, tcp).await?;
     println!("TLS established and server identity pinned");
 
@@ -213,9 +217,7 @@ async fn run(
     });
 
     let task =
-        tokio::spawn(
-            async move { session::run_session(tls, notifier, established, state).await },
-        );
+        tokio::spawn(async move { session::run_session(tls, notifier, established, state).await });
 
     let handle = ready_rx.await?;
 
@@ -231,11 +233,13 @@ async fn run(
             charging_state: ChargingState::Charging,
             peer_timestamp_unix_ms: 0,
         };
-        handle.send_capability(BatteryCapability::encode(&reading)).await;
+        handle
+            .send_capability(BatteryCapability::encode(&reading))
+            .await;
         println!("sent battery.v1: 87% charging");
     }
 
-    // Stay connected briefly so `fedroid status` can be run against a live
+    // Stay connected briefly so `anyflow status` can be run against a live
     // session in another terminal.
     tokio::time::sleep(Duration::from_secs(
         std::env::var("FAKE_PHONE_HOLD_SECS")

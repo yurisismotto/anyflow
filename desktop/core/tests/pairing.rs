@@ -2,11 +2,11 @@
 
 use std::time::Duration;
 
-use fedroid_core::error::PairingError;
-use fedroid_core::pairing::{
+use anyflow_core::error::PairingError;
+use anyflow_core::pairing::{
     self, PairingSession, PairingToken, MAX_FAILED_ATTEMPTS, NONCE_LEN, TOKEN_LEN,
 };
-use fedroid_core::Fingerprint;
+use anyflow_core::Fingerprint;
 
 fn fp(byte: u8) -> Fingerprint {
     Fingerprint::from_hex(&format!("{byte:02x}").repeat(32)).expect("valid fingerprint")
@@ -251,4 +251,60 @@ fn nonces_are_unique() {
     let b = pairing::generate_nonce().expect("b");
     assert_ne!(a, b);
     assert_eq!(a.len(), NONCE_LEN);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-language known-answer vector
+// ---------------------------------------------------------------------------
+//
+// This is the contract between `anyflow_core::pairing` and Kotlin's
+// `io.github.yurisismotto.anyflow.pairing.PairingProof`. The identical vector
+// lives in `android/app/src/test/.../PairingProofTest.kt`. If either side
+// changes the domain separator, the field order or the length prefixing, one
+// of the two tests fails instead of pairing mysteriously breaking on a real
+// phone.
+//
+// The expected digests were derived independently of both implementations,
+// directly from the construction documented in `pairing.rs`:
+//
+//   HMAC-SHA256(key = token,
+//               msg = domain || len32be(responder) || responder
+//                            || len32be(initiator) || initiator
+//                            || len32be(nonce)     || nonce)
+
+/// token = 00 01 02 ... 13
+fn vector_token() -> PairingToken {
+    let bytes: Vec<u8> = (0u8..20).collect();
+    let b32 = data_encoding::BASE32_NOPAD.encode(&bytes);
+    PairingToken::from_base32(&b32).expect("fixed test token")
+}
+
+/// nonce[i] = i * 3 (mod 256)
+fn vector_nonce() -> [u8; NONCE_LEN] {
+    let mut n = [0u8; NONCE_LEN];
+    for (i, b) in n.iter_mut().enumerate() {
+        *b = (i as u8).wrapping_mul(3);
+    }
+    n
+}
+
+#[test]
+fn proof_matches_the_cross_language_known_answer() {
+    let proof = pairing::compute_proof(&vector_token(), &fp(1), &fp(2), &vector_nonce());
+    assert_eq!(
+        data_encoding::HEXLOWER.encode(&proof),
+        "97385308e28f98d2adc2c9b9fdd4c9ec80709608861343c28774b50aa0c2b527",
+        "pairing proof diverged from the Kotlin implementation"
+    );
+}
+
+#[test]
+fn confirmation_matches_the_cross_language_known_answer() {
+    let confirmation =
+        pairing::compute_confirmation(&vector_token(), &fp(1), &fp(2), &vector_nonce());
+    assert_eq!(
+        data_encoding::HEXLOWER.encode(&confirmation),
+        "8d914525f557aad15203eda571e48535756b366cd5670e0507ba6ca051b7c218",
+        "pairing confirmation diverged from the Kotlin implementation"
+    );
 }

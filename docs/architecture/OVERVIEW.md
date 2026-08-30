@@ -5,11 +5,11 @@
 ```
         Fedora                                    Android
 ┌───────────────────────┐                 ┌───────────────────────┐
-│  fedroid (CLI)        │                 │  Compose UI           │
+│  anyflow (CLI)        │                 │  Compose UI           │
 │        │              │                 │        │              │
 │  unix socket, JSON    │                 │  ConnectionService    │
 │        │              │                 │  (connectedDevice FGS)│
-│  fedroid-bridge       │                 │        │              │
+│  anyflowd             │                 │        │              │
 │  ┌─────────────────┐  │   TLS 1.3       │  ┌──────────────────┐ │
 │  │ session         │◀─┼─────────────────┼─▶│ PeerConnection   │ │
 │  │ capabilities    │  │   mutual auth   │  │ capabilities     │ │
@@ -26,13 +26,13 @@ The phone always initiates. The desktop always listens. See ADR-0005.
 
 | Crate | Depends on | Role |
 | --- | --- | --- |
-| `fedroid-proto` | — | Generated protobuf types |
-| `fedroid-core` | proto | Identity, pairing, TLS, framing, session, capability registry |
-| `fedroid-capability-battery` | core, proto | `battery.v1` |
-| `fedroid-daemon` | core, battery | mDNS, listener, control socket, `SessionHost` |
-| `fedroid-cli` | daemon (types only) | `fedroid` |
+| `anyflow-proto` | — | Generated protobuf types |
+| `anyflow-core` | proto | Identity, pairing, TLS, framing, session, capability registry |
+| `anyflow-capability-battery` | core, proto | `battery.v1` |
+| `anyflow-daemon` | core, battery | mDNS, listener, control socket, `SessionHost` |
+| `anyflow-cli` | daemon (types only) | `anyflow` |
 
-`fedroid-core` has no global state and no I/O policy. Everything it needs from
+`anyflow-core` has no global state and no I/O policy. Everything it needs from
 the host arrives through the `SessionHost` trait, which is why the whole
 protocol can be tested in-process over real TLS with no daemon, no filesystem
 and no human.
@@ -56,7 +56,7 @@ a device name.
 
 Adding a capability touches four things and none of them are the transport:
 
-1. A `.proto` under `protocol/proto/fedroid/v1/capabilities/`.
+1. A `.proto` under `protocol/proto/anyflow/v1/capabilities/`.
 2. `impl Capability` in a new crate under `desktop/capabilities/`.
 3. `class … : Capability` under `android/app/src/main/java/.../capability/`.
 4. Register it, and decide its grant policy — **not** in `auto_grant` unless

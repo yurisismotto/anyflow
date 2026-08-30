@@ -2,12 +2,12 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use fedroid_core::identity::LocalIdentity;
-use fedroid_core::pairing::PairingToken;
-use fedroid_core::qr::QrPayload;
-use fedroid_core::store::{Store, TrustedPeer};
-use fedroid_core::Fingerprint;
-use fedroid_proto::v1::Platform;
+use anyflow_core::identity::LocalIdentity;
+use anyflow_core::pairing::PairingToken;
+use anyflow_core::qr::QrPayload;
+use anyflow_core::store::{Store, TrustedPeer};
+use anyflow_core::Fingerprint;
+use anyflow_proto::v1::Platform;
 
 fn identity() -> LocalIdentity {
     LocalIdentity::generate("Test Device", Platform::Linux).expect("generate identity")
@@ -137,12 +137,12 @@ fn qr_payload_rejects_hostile_input() {
     assert!(QrPayload::parse("").is_err());
     assert!(QrPayload::parse("http://evil.example/").is_err());
     // Right scheme, truncated.
-    assert!(QrPayload::parse("fedroidb1:").is_err());
+    assert!(QrPayload::parse("anyflow1:").is_err());
     // Wrong scheme version.
     let id = identity();
     let token = PairingToken::generate().expect("token");
     let good = QrPayload::encode(&id.fingerprint(), &token, id.device_id(), &[]);
-    assert!(QrPayload::parse(&good.replace("fedroidb1", "fedroidb9")).is_err());
+    assert!(QrPayload::parse(&good.replace("anyflow1", "anyflow9")).is_err());
     // Oversized payload must be refused before parsing.
     assert!(QrPayload::parse(&"a".repeat(100_000)).is_err());
 }
@@ -162,7 +162,7 @@ fn qr_payload_drops_unparseable_addresses_but_keeps_the_rest() {
     let id = identity();
     let token = PairingToken::generate().expect("token");
     let encoded = format!(
-        "fedroidb1:{}:{}:{}:not-an-address,10.0.0.7:55432",
+        "anyflow1:{}:{}:{}:not-an-address,10.0.0.7:55432",
         id.fingerprint().to_hex(),
         token.to_base32(),
         id.device_id()
@@ -380,4 +380,50 @@ fn store_never_persists_message_or_clipboard_content() {
         ],
         "state.json gained a top-level field; confirm it holds no user content"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Cross-language SPKI fingerprint fixtures
+// ---------------------------------------------------------------------------
+//
+// `protocol/testdata/identity-{a,b}.der` are real certificates emitted by
+// `cargo run -p anyflow-core --example gen_test_vectors`. The Kotlin suite
+// reads the same two files and must derive the same fingerprints, which makes
+// "the identity is SHA-256 over the DER SubjectPublicKeyInfo" a checked
+// contract between the two implementations rather than a shared convention.
+//
+// Regenerating the fixtures changes these values; update both sides together.
+
+fn fixture(name: &str) -> Vec<u8> {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../protocol/testdata")
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|e| panic!("missing fixture {}: {e}", path.display()))
+}
+
+const FIXTURE_A_FINGERPRINT: &str =
+    "1b759fb323a5c5260a0f762692d1f42458c5102f68e1e271699f1fa694769821";
+const FIXTURE_B_FINGERPRINT: &str =
+    "f6b9ec37af6fa7cde4ea5377399c067cdfcb09def4d2ac701e11c95521d8efb7";
+
+#[test]
+fn fixture_certificates_have_the_expected_spki_fingerprints() {
+    let a = Fingerprint::from_certificate_der(&fixture("identity-a.der")).expect("fixture a");
+    let b = Fingerprint::from_certificate_der(&fixture("identity-b.der")).expect("fixture b");
+
+    assert_eq!(a.to_hex(), FIXTURE_A_FINGERPRINT);
+    assert_eq!(b.to_hex(), FIXTURE_B_FINGERPRINT);
+    assert_ne!(a, b, "the two fixtures must be different identities");
+}
+
+#[test]
+fn fingerprint_covers_the_public_key_not_the_whole_certificate() {
+    // Same claim the Kotlin suite makes: hashing the certificate bytes must
+    // not accidentally be what `from_certificate_der` does, or reissuing a
+    // certificate would silently break every existing pairing.
+    let der = fixture("identity-a.der");
+    let over_certificate = Fingerprint::from_spki_der(&der);
+    let over_spki = Fingerprint::from_certificate_der(&der).expect("fixture a");
+    assert_ne!(over_certificate, over_spki);
+    assert_eq!(over_spki.to_hex(), FIXTURE_A_FINGERPRINT);
 }

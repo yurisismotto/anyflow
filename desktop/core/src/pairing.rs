@@ -49,8 +49,8 @@ use crate::fingerprint::Fingerprint;
 
 type HmacSha256 = Hmac<Sha256>;
 
-const PROOF_DOMAIN: &[u8] = b"fedroid-bridge/pairing-proof/v1";
-const CONFIRM_DOMAIN: &[u8] = b"fedroid-bridge/pairing-confirm/v1";
+const PROOF_DOMAIN: &[u8] = b"anyflow/pairing-proof/v1";
+const CONFIRM_DOMAIN: &[u8] = b"anyflow/pairing-confirm/v1";
 
 /// 160 bits. Comfortably beyond brute force even without rate limiting, and
 /// it still encodes to a QR code that a phone camera reads instantly.

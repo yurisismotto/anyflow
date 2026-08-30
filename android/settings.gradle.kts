@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "FedroidBridge"
+rootProject.name = "AnyFlow"
 include(":app")

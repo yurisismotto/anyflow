@@ -2,11 +2,11 @@
 
 ## systemd user unit
 
-`fedroid-bridge.service` runs the daemon in the user's session:
+`anyflowd.service` runs the daemon in the user's session:
 
 ```bash
-systemctl --user enable --now fedroid-bridge.service
-journalctl --user -u fedroid-bridge -f
+systemctl --user enable --now anyflowd.service
+journalctl --user -u anyflowd -f
 ```
 
 It is a **user** unit, not a system unit, and it must stay that way. The
@@ -21,7 +21,7 @@ to what a LAN daemon actually needs.
 
 ### Lingering
 
-By default a user unit stops when the last session ends. To keep the bridge
+By default a user unit stops when the last session ends. To keep AnyFlow
 available while logged out:
 
 ```bash
@@ -33,7 +33,7 @@ after logout should be something the user opts into.
 
 ## RPM
 
-`fedroid-bridge.spec` builds both binaries and installs the user unit. It
+`anyflow.spec` builds both binaries and installs the user unit. It
 needs `rust`, `cargo` and `gcc`, and **not** `protobuf-compiler` — the build
 compiles the schema with `protox` in pure Rust (ADR-0004).
 

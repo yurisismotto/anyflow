@@ -9,15 +9,15 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyflow_capability_battery::{BatteryCapability, BatteryReading};
+use anyflow_core::error::PairingError;
+use anyflow_core::identity::LocalIdentity;
+use anyflow_core::pairing::PairingToken;
+use anyflow_core::session::{PeerStatus, SessionHost};
+use anyflow_core::Error;
+use anyflow_proto::v1;
+use anyflow_proto::v1::capabilities::ChargingState;
 use common::{wait_until, TestClient, TestServer};
-use fedroid_capability_battery::{BatteryCapability, BatteryReading};
-use fedroid_core::error::PairingError;
-use fedroid_core::identity::LocalIdentity;
-use fedroid_core::pairing::PairingToken;
-use fedroid_core::session::{PeerStatus, SessionHost};
-use fedroid_core::Error;
-use fedroid_proto::v1;
-use fedroid_proto::v1::capabilities::ChargingState;
 
 const TTL: Duration = Duration::from_secs(30);
 
@@ -179,8 +179,7 @@ async fn a_different_server_identity_is_rejected_by_the_client() {
     let err = phone
         .tls_connect(server.addr, impostor)
         .await
-        .err()
-        .expect("pinning must reject a different identity");
+        .expect_err("pinning must reject a different identity");
 
     // The rejection must come from the certificate verifier during the
     // handshake, not from any later application-layer check. tokio-rustls
@@ -220,7 +219,7 @@ async fn a_revoked_device_is_refused_on_its_next_connection() {
     session.close().await;
     server.state.end_pairing().await;
 
-    // The user runs `fedroid unpair`.
+    // The user runs `anyflow unpair`.
     {
         let mut store = server.state.store.lock().await;
         assert!(store.revoke_peer(&phone.fingerprint).expect("revoke"));
@@ -456,7 +455,7 @@ async fn an_unknown_capability_id_is_refused_without_closing_the_session() {
     assert!(
         session
             .handle
-            .send_capability(fedroid_core::capability::OutboundMessage {
+            .send_capability(anyflow_core::capability::OutboundMessage {
                 capability_id: "clipboard.v1".into(),
                 payload: b"secret".to_vec(),
             })
@@ -485,7 +484,7 @@ async fn a_malformed_capability_payload_does_not_kill_the_session() {
     assert!(
         session
             .handle
-            .send_capability(fedroid_core::capability::OutboundMessage {
+            .send_capability(anyflow_core::capability::OutboundMessage {
                 capability_id: "battery.v1".into(),
                 payload: vec![0xff; 32],
             })

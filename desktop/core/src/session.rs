@@ -45,7 +45,7 @@ use rand::TryRngCore;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::sync::{mpsc, oneshot};
 
-use fedroid_proto::v1;
+use anyflow_proto::v1;
 
 use crate::capability::{CapabilityContext, CapabilityRegistry, OutboundMessage};
 use crate::error::{Error, PairingError, Result};

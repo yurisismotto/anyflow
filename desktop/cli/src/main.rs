@@ -1,4 +1,4 @@
-//! `fedroid` — control the local daemon.
+//! `anyflow` — control the local daemon.
 //!
 //! Talks to the daemon over its Unix control socket. It holds no keys, no
 //! trust store and no protocol logic: if the daemon is not running, every
@@ -6,13 +6,13 @@
 
 use std::time::Duration;
 
+use anyflow_daemon::control::{control_socket_path, Event, Request, Response};
 use clap::{Parser, Subcommand};
-use fedroid_daemon::control::{control_socket_path, Event, Request, Response};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 #[derive(Parser, Debug)]
-#[command(name = "fedroid", about = "Fedroid Bridge control", version)]
+#[command(name = "anyflow", about = "AnyFlow control", version)]
 struct Args {
     #[command(subcommand)]
     command: Command,
@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
     let stream = UnixStream::connect(&path).await.map_err(|e| {
         anyhow::anyhow!(
             "cannot reach the daemon at {} ({e}).\n\
-             Start it with: systemctl --user start fedroid-bridge.service",
+             Start it with: systemctl --user start anyflowd.service",
             path.display()
         )
     })?;
@@ -69,7 +69,7 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
 
     match serde_json::from_str::<Response>(&line)? {
         Response::Status(s) => {
-            println!("Fedroid Bridge");
+            println!("AnyFlow");
             println!("  device      {} ({})", s.device_name, s.device_id);
             println!("  fingerprint {}", s.fingerprint_short);
             println!("  listening   port {}", s.listen_port);
@@ -108,7 +108,7 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
         }
         Response::Devices(devices) => {
             if devices.is_empty() {
-                println!("no paired devices. Run: fedroid pair");
+                println!("no paired devices. Run: anyflow pair");
                 return Ok(());
             }
             for d in devices {
@@ -167,7 +167,7 @@ async fn pair(stream: UnixStream, ttl: Option<u64>) -> anyhow::Result<()> {
                 expires_in_secs,
             } => {
                 println!("{qr_ascii}");
-                println!("Scan this with Fedroid Bridge on your phone.");
+                println!("Scan this with AnyFlow on your phone.");
                 println!("Expires in {expires_in_secs}s. The code is single-use.\n");
                 println!("If your phone cannot scan, the payload is:\n  {payload}\n");
             }
@@ -193,7 +193,7 @@ async fn pair(stream: UnixStream, ttl: Option<u64>) -> anyhow::Result<()> {
                 match status.as_str() {
                     "paired" => println!("\nPaired with {detail}."),
                     "declined" => println!("\nDeclined. {detail} was not paired."),
-                    "expired" => println!("\nPairing window expired. Run `fedroid pair` again."),
+                    "expired" => println!("\nPairing window expired. Run `anyflow pair` again."),
                     other => println!("\nPairing ended: {other} ({detail})"),
                 }
                 return Ok(());

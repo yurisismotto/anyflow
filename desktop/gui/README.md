@@ -3,7 +3,7 @@
 Planned: GTK4 + Libadwaita, talking to the daemon over the same interface the
 CLI uses.
 
-Nothing here yet, deliberately. The daemon and `fedroid` cover this Sprint's
+Nothing here yet, deliberately. The daemon and `anyflow` cover this Sprint's
 acceptance criteria, and a GUI built before the protocol settled would be
 rework.
 

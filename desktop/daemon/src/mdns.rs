@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use fedroid_core::discovery;
+use anyflow_core::discovery;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 
 /// Live advertisement. Dropping this withdraws the record.
@@ -32,7 +32,7 @@ impl Advertisement {
         let hostname = format!("{device_id}.local.");
 
         let service = ServiceInfo::new(
-            fedroid_core::SERVICE_TYPE,
+            anyflow_core::SERVICE_TYPE,
             instance,
             &hostname,
             "",
@@ -46,7 +46,7 @@ impl Advertisement {
         let fullname = service.get_fullname().to_string();
         daemon.register(service)?;
 
-        tracing::info!(port, "advertising {}", fedroid_core::SERVICE_TYPE);
+        tracing::info!(port, "advertising {}", anyflow_core::SERVICE_TYPE);
         Ok(Self { daemon, fullname })
     }
 }

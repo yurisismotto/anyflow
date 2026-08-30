@@ -23,7 +23,7 @@ nothing to validate against, and we have to supply our own notion of identity.
   which requires either a trust-store hit or a valid pairing proof.
 * Only TLS 1.3 is compiled in. Both `verify_tls12_signature` implementations
   return an error unconditionally.
-* ALPN `fedroid/1` on both ends.
+* ALPN `anyflow/1` on both ends.
 * TLS 1.3 session tickets are disabled (`send_tls13_tickets = 0`): resumption
   would let a peer skip a full handshake, and the full handshake is where the
   pinning check lives.
@@ -71,9 +71,53 @@ precisely so there is no such window.
   nobody can reintroduce name-based trust by accident.
 * Certificates expire after ten years. Because the SPKI is pinned, they can be
   reissued from the same key without breaking pairings — but the reissue path
-  is not implemented yet, and is recorded as a debt.
+  is not implemented yet, and is recorded as a debt. See
+  [Certificate renewal](#certificate-renewal) for the intended strategy.
 * No resumption means every reconnection is a full handshake. At the frequency
   connections actually happen, the cost is irrelevant.
+
+## Certificate renewal
+
+Reviewed and deliberately left unimplemented for the foundation Sprint. There
+is no bug that requires rotation now, and building it would be speculative
+work against an event ten years away. What matters today is that the design
+*permits* it, and that the strategy is written down rather than rediscovered
+under time pressure.
+
+**The identity is the key, not the certificate.** A peer is identified by
+`SHA-256(DER SubjectPublicKeyInfo)`. The certificate is a disposable container
+that exists only because TLS requires one; it carries no SANs, no CA chain and
+no authority. Both the trust store and the QR payload record the fingerprint,
+never the certificate.
+
+So renewal is:
+
+1. Keep the existing private key. On Android this is not merely preferred but
+   forced — the key is non-exportable inside the Keystore, and re-issuing is
+   the *only* thing that can be done to it.
+2. Issue a fresh self-signed certificate over that same key, with the same
+   subject and a new validity window.
+3. Replace the stored certificate. Every pinned fingerprint on every paired
+   device still matches, because the SPKI did not change. **No re-pairing.**
+
+The expiry check in both verifiers (`leaf.checkValidity()` on Android, rustls'
+own validity handling on the desktop) is hygiene, not the trust anchor: it
+exists so a forgotten certificate surfaces as a clear error instead of working
+forever. That is exactly why it is safe for renewal to be a local, unilateral
+operation needing no coordination between peers.
+
+**What would break this, and must not be done:** pinning the certificate
+instead of the SPKI, putting anything identity-bearing in the certificate that
+peers rely on, or generating a new key pair during renewal. The last one is
+not renewal at all — it is a new identity, and it correctly requires
+re-pairing.
+
+**When to implement.** Before the first release with a supported upgrade path,
+or whenever certificate generation stops being a fresh-install-only event.
+The trigger to watch is a device whose certificate is within a year of
+`not_after`; a daemon that finds one should reissue at startup. The shared
+test fixtures in `protocol/testdata/` expire in 2036 and will need
+regenerating well before then, which serves as an early reminder.
 
 ## Security implications
 

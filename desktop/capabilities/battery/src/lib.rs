@@ -6,7 +6,7 @@
 //! the phone, and we have no reason to keep one.
 //!
 //! This crate is a worked example of the plugin contract. Note that it does
-//! not appear anywhere in `fedroid-core`'s transport code: the daemon
+//! not appear anywhere in `anyflow-core`'s transport code: the daemon
 //! registers it, and the transport routes to it by id.
 
 mod upower;
@@ -15,10 +15,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use fedroid_core::capability::{Capability, CapabilityContext, OutboundMessage};
-use fedroid_core::error::{Error, Result};
-use fedroid_core::Fingerprint;
-use fedroid_proto::v1::capabilities as pb;
+use anyflow_core::capability::{Capability, CapabilityContext, OutboundMessage};
+use anyflow_core::error::{Error, Result};
+use anyflow_core::Fingerprint;
+use anyflow_proto::v1::capabilities as pb;
 use prost::Message;
 
 pub use upower::UPowerReader;

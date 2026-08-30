@@ -19,7 +19,7 @@ pub struct UPowerReader {
 #[cfg(feature = "upower")]
 mod imp {
     use super::*;
-    use fedroid_proto::v1::capabilities::ChargingState;
+    use anyflow_proto::v1::capabilities::ChargingState;
 
     /// UPower's `DisplayDevice` is the aggregate the desktop shell shows.
     const UPOWER_PATH: &str = "/org/freedesktop/UPower/devices/DisplayDevice";

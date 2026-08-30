@@ -1,5 +1,5 @@
 [package]
-name = "fedroid-capability-battery"
+name = "anyflow-capability-battery"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-fedroid-core = { version = "0.1.0", path = "../../core" }
-fedroid-proto = { version = "0.1.0", path = "../../proto" }
+anyflow-core = { version = "0.1.0", path = "../../core" }
+anyflow-proto = { version = "0.1.0", path = "../../proto" }
 prost = "0.14"
 tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"

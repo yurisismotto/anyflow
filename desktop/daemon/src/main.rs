@@ -1,4 +1,4 @@
-//! `fedroid-bridge` — the user-session daemon.
+//! `anyflowd` — the user-session daemon.
 //!
 //! Runs unprivileged under `systemd --user`. It binds a high TCP port, a Unix
 //! socket in `XDG_RUNTIME_DIR`, and an mDNS responder. It needs no root, no
@@ -6,16 +6,16 @@
 
 use std::sync::Arc;
 
+use anyflow_capability_battery::{BatteryCapability, BatteryState, UPowerReader};
+use anyflow_core::capability::CapabilityRegistry;
+use anyflow_core::store::Store;
+use anyflow_daemon::{control, listener, mdns, server, state::DaemonState};
 use clap::Parser;
-use fedroid_capability_battery::{BatteryCapability, BatteryState, UPowerReader};
-use fedroid_core::capability::CapabilityRegistry;
-use fedroid_core::store::Store;
-use fedroid_daemon::{control, listener, mdns, server, state::DaemonState};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 #[derive(Parser, Debug)]
-#[command(name = "fedroid-bridge", about = "Fedroid Bridge daemon", version)]
+#[command(name = "anyflowd", about = "AnyFlow daemon", version)]
 struct Args {
     /// Data directory (identity and trust store).
     #[arg(long)]
@@ -30,7 +30,7 @@ struct Args {
     #[arg(long)]
     no_mdns: bool,
 
-    /// Log filter, e.g. `info`, `fedroid_core=debug`.
+    /// Log filter, e.g. `info`, `anyflow_core=debug`.
     #[arg(long, default_value = "info")]
     log: String,
 }
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
 
     let data_dir = args
         .data_dir
-        .unwrap_or_else(fedroid_core::store::default_data_dir);
+        .unwrap_or_else(anyflow_core::store::default_data_dir);
     let store = Store::open(&data_dir)?;
 
     // A `--port` override applies to this run only. Silently rewriting the
@@ -96,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(capabilities = ?registry.advertised(), "capabilities registered");
 
     // ---- TLS --------------------------------------------------------------
-    let tls_config = fedroid_core::tls::server_config(store.identity())?;
+    let tls_config = anyflow_core::tls::server_config(store.identity())?;
     let acceptor = TlsAcceptor::from(tls_config);
 
     let state = Arc::new(DaemonState::new(store, registry, battery_state));

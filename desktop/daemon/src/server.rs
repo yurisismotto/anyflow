@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fedroid_core::qr::QrPayload;
+use anyflow_core::qr::QrPayload;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
@@ -116,7 +116,7 @@ async fn send<W: AsyncWriteExt + Unpin, T: serde::Serialize>(
 
 async fn build_status(state: &Arc<DaemonState>) -> StatusReport {
     let info = state.device_info();
-    let fingerprint = fedroid_core::Fingerprint::from_hex(&info.identity_fingerprint).ok();
+    let fingerprint = anyflow_core::Fingerprint::from_hex(&info.identity_fingerprint).ok();
 
     let mut connections = Vec::new();
     for handle in state.session_handles().await {
@@ -144,8 +144,8 @@ async fn build_status(state: &Arc<DaemonState>) -> StatusReport {
             .map(|f| f.to_display_short())
             .unwrap_or_default(),
         listen_port,
-        protocol_version_min: fedroid_core::session::PROTOCOL_VERSION_MIN,
-        protocol_version_max: fedroid_core::session::PROTOCOL_VERSION_MAX,
+        protocol_version_min: anyflow_core::session::PROTOCOL_VERSION_MIN,
+        protocol_version_max: anyflow_core::session::PROTOCOL_VERSION_MAX,
         capabilities: state.registry.advertised(),
         paired_devices: store.peers().filter(|p| !p.revoked).count(),
         connections,
@@ -167,9 +167,9 @@ async fn build_devices(state: &Arc<DaemonState>) -> Vec<DeviceReport> {
         .map(|p| DeviceReport {
             device_id: p.device_id.clone(),
             device_name: p.device_name.clone(),
-            platform: match fedroid_proto::v1::Platform::try_from(p.platform) {
-                Ok(fedroid_proto::v1::Platform::Android) => "android".into(),
-                Ok(fedroid_proto::v1::Platform::Linux) => "linux".into(),
+            platform: match anyflow_proto::v1::Platform::try_from(p.platform) {
+                Ok(anyflow_proto::v1::Platform::Android) => "android".into(),
+                Ok(anyflow_proto::v1::Platform::Linux) => "linux".into(),
                 _ => "unknown".into(),
             },
             fingerprint: p.fingerprint.to_hex(),
@@ -251,7 +251,7 @@ async fn run_pair_session(
 ) -> anyhow::Result<()> {
     let ttl = ttl_secs
         .map(Duration::from_secs)
-        .unwrap_or(fedroid_core::pairing::DEFAULT_TOKEN_TTL);
+        .unwrap_or(anyflow_core::pairing::DEFAULT_TOKEN_TTL);
 
     let (confirm_tx, mut confirm_rx) = tokio::sync::mpsc::channel(1);
     let token_b32 = match state.begin_pairing(ttl, confirm_tx).await {
@@ -272,8 +272,8 @@ async fn run_pair_session(
     let port = state.listen_port().await;
     let addresses = local_addresses(port);
 
-    let fingerprint = fedroid_core::Fingerprint::from_hex(&info.identity_fingerprint)?;
-    let token = fedroid_core::pairing::PairingToken::from_base32(&token_b32)?;
+    let fingerprint = anyflow_core::Fingerprint::from_hex(&info.identity_fingerprint)?;
+    let token = anyflow_core::pairing::PairingToken::from_base32(&token_b32)?;
     let payload = QrPayload::encode(&fingerprint, &token, &info.device_id, &addresses);
     drop(token);
 
@@ -312,7 +312,7 @@ async fn run_pair_session(
             Some(request) = confirm_rx.recv() => {
                 let short = request.fingerprint.to_display_short();
                 send(&mut write, &Event::ConfirmRequest {
-                    device_name: fedroid_core::discovery::sanitize_device_name(
+                    device_name: anyflow_core::discovery::sanitize_device_name(
                         &request.device.device_name,
                     ),
                     device_id: request.device.device_id.clone(),

@@ -16,7 +16,7 @@ between two devices for the first time.
 * **Key: ECDSA P-256.** One key per device, generated on first run.
 * **On Android:** generated inside the Android Keystore, StrongBox when the
   device has a secure element, otherwise the TEE. Non-exportable.
-* **On Fedora:** PKCS#8 DER at `$XDG_DATA_HOME/fedroid-bridge/identity.key`,
+* **On Fedora:** PKCS#8 DER at `$XDG_DATA_HOME/anyflow/identity.key`,
   mode 0600 in a 0700 directory. The daemon **refuses to start** if those
   modes are loose.
 * **Fingerprint: `SHA-256(DER SubjectPublicKeyInfo)`,** lowercase hex. The
@@ -27,7 +27,7 @@ between two devices for the first time.
 ### Pairing
 
 1. Desktop opens a window and generates a 160-bit single-use token.
-2. QR shows `fedroidb1:<desktop-fingerprint>:<token>:<device-id>:<addresses>`.
+2. QR shows `anyflow1:<desktop-fingerprint>:<token>:<device-id>:<addresses>`.
 3. Phone scans, **pins the fingerprint**, then connects.
 4. Desktop replies `PAIRING_REQUIRED` with a fresh 32-byte nonce.
 5. Phone sends `proof = HMAC-SHA256(token, domain ‖ len(desktop_fp) ‖
@@ -106,6 +106,28 @@ also makes the daemon untestable without a session bus.
 non-exportable the way the phone's already is. Deferred, not rejected: it adds
 a hard dependency on a working TPM and a fallback path, which is more than
 this Sprint should carry. Recorded as the top security debt.
+
+*Reviewed again at the close of the foundation Sprint and deliberately left
+deferred.* Making TPM2 a prerequisite now would cost portability — the daemon
+must still run on a machine with no TPM, inside a VM, or on a container host —
+so the work is not "add TPM2" but "add TPM2 **and** keep the file path working
+**and** decide what happens when a sealed key becomes unsealable after a
+firmware update". That is a self-contained piece of work with its own failure
+modes, not a line item in a naming-and-verification Sprint.
+
+What the file path must therefore keep doing, and does today
+(`desktop/core/src/store.rs`):
+
+* the private key is written `0600` inside a `0700` directory, created with
+  those modes rather than relaxed to them afterwards;
+* both modes are **verified on load**, and the daemon refuses to start if the
+  key is group- or world-accessible, rather than warning and continuing;
+* the key is written through a temp file and renamed, so an interrupted write
+  cannot leave a truncated key behind.
+
+This is an honest local-attacker boundary: it stops another user account on
+the same machine, and it does not stop malware running as the user. TPM2 is
+what would move that line, and it stays the top security debt.
 
 ## Consequences
 

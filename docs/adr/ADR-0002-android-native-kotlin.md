@@ -31,7 +31,7 @@ on paper. Rejected: the desktop is Rust, so KMP would mean a third language
 choice or rewriting the daemon in Kotlin/JVM — which would cost the memory
 safety and the small, dependency-light daemon that motivated ADR-0003.
 
-**Rust on Android via JNI, sharing `fedroid-core`.** Genuinely tempting: one
+**Rust on Android via JNI, sharing `anyflow-core`.** Genuinely tempting: one
 implementation of the protocol, no drift. Rejected for this Sprint because the
 private key must live in the Android Keystore and be used for TLS client
 authentication, which means the TLS stack must be Conscrypt, which means the

@@ -1,16 +1,22 @@
-# Fedroid Bridge
+# AnyFlow
 
-Local-first continuity between an Android phone and a Fedora workstation.
+**One flow. Any device.**
 
-No cloud. No account. No telemetry. Devices find each other on the local
-network, authenticate with pinned public keys over TLS 1.3, and only after an
-explicit, human-confirmed pairing.
+Open-source, local-first device continuity.
+
+No required cloud. No vendor lock-in. No telemetry by default.
+
+Devices find each other on the local network, authenticate with pinned public
+keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 
 > **Status: foundation Sprint.** Identity, discovery, pairing, authenticated
 > transport, ping/pong and `battery.v1` are implemented and tested. Clipboard,
 > file transfer, notifications, media control and browser integration are
 > **not** implemented — the architecture is built to receive them, and that is
-> all. The Android module has not yet been compiled; see
+> all.
+>
+> Both modules build and their test suites pass. Pairing has **not** yet been
+> exercised against a physical Android device; see
 > [Known limitations](#known-limitations).
 
 ## Principles
@@ -28,14 +34,14 @@ explicit, human-confirmed pairing.
 ## Layout
 
 ```
-fedroid-bridge/
+anyflow/
 ├── protocol/proto/            Wire format — compiled by BOTH implementations
 ├── desktop/                   Rust workspace
 │   ├── proto/                 Generated protobuf types
 │   ├── core/                  Identity, pairing, TLS, framing, session
 │   ├── capabilities/battery/  battery.v1
-│   ├── daemon/                fedroid-bridge
-│   ├── cli/                   fedroid
+│   ├── daemon/                anyflowd
+│   ├── cli/                   anyflow
 │   └── gui/                   (placeholder — GTK4/Libadwaita, later)
 ├── android/                   Kotlin + Compose app
 ├── browser-extension/         (placeholder)
@@ -48,34 +54,34 @@ fedroid-bridge/
 
 ## Running on Fedora
 
-Needs a Rust toolchain and a C compiler. It does **not** need
-`protobuf-compiler`: the schema is compiled by `protox`, in pure Rust
-([ADR-0004](docs/adr/ADR-0004-protocol-buffers.md)).
+Needs a Rust toolchain and a C compiler (`sudo dnf install gcc`). It does
+**not** need `protobuf-compiler`: the schema is compiled by `protox`, in pure
+Rust ([ADR-0004](docs/adr/ADR-0004-protocol-buffers.md)).
 
 ```bash
 cd desktop
 cargo build --release
 cargo test --workspace          # 79 tests
 
-./target/release/fedroid-bridge   # foreground, or install the user unit
+./target/release/anyflowd   # foreground, or install the user unit
 ```
 
 As a service:
 
 ```bash
-install -Dm0644 packaging/fedora/fedroid-bridge.service \
-    ~/.config/systemd/user/fedroid-bridge.service
-systemctl --user enable --now fedroid-bridge.service
+install -Dm0644 packaging/fedora/anyflowd.service \
+    ~/.config/systemd/user/anyflowd.service
+systemctl --user enable --now anyflowd.service
 ```
 
 Then:
 
 ```bash
-fedroid status              # identity, port, capabilities, live connections
-fedroid pair                # opens a pairing window and prints a QR code
-fedroid devices             # paired devices
-fedroid ping <device>       # round-trip over the live session
-fedroid unpair <device>     # revoke; takes effect immediately
+anyflow status              # identity, port, capabilities, live connections
+anyflow pair                # opens a pairing window and prints a QR code
+anyflow devices             # paired devices
+anyflow ping <device>       # round-trip over the live session
+anyflow unpair <device>     # revoke; takes effect immediately
 ```
 
 `<device>` is a device id or a fingerprint prefix of at least 8 characters. An
@@ -85,12 +91,13 @@ The daemon never needs root.
 
 ## Running on Android
 
-See [android/README.md](android/README.md). Build with
+Needs JDK 21 and Android SDK platform 35. See
+[android/README.md](android/README.md). Build with
 `cd android && ./gradlew :app:assembleDebug`.
 
 ## Pairing
 
-1. On Fedora: `fedroid pair`. A QR code appears; it is valid for 120 seconds
+1. On Fedora: `anyflow pair`. A QR code appears; it is valid for 120 seconds
    and works once.
 2. On the phone: **Scan pairing code**.
 3. The phone pins the computer's key *from the QR*, before opening a socket —
@@ -123,19 +130,35 @@ repository that disables certificate validation.
 ## Testing
 
 ```bash
-cd desktop && cargo test --workspace
+cd desktop && cargo test --workspace     # 81 tests
+cd android && ./gradlew :app:testDebugUnitTest   # 63 tests
 ```
 
-79 tests, including end-to-end pairing over real TLS on loopback and a
+The Rust suite includes end-to-end pairing over real TLS on loopback and a
 hostile-client suite that replays envelopes, duplicates message ids, rewinds
 sequence numbers, claims another device's fingerprint and skips the handshake.
 
+The Android suite covers the same wire rules on the Kotlin side, and checks
+pinning against real certificates emitted by the desktop implementation
+(`protocol/testdata/`).
+
+Two known-answer vectors are asserted by **both** suites, so the
+implementations cannot drift apart silently:
+
+* the pairing proof and confirmation HMACs, and
+* the SPKI fingerprints of the shared certificate fixtures.
+
 ## Known limitations
 
-* **The Android module has never been compiled.** The development environment
-  had no JDK and no Android SDK. The Kotlin mirrors the tested Rust
-  implementation function for function, but expect to fix version pins and
-  possibly some API details on the first real build.
+* **Pairing has never run against a physical phone.** Both sides build, both
+  test suites pass, and the desktop end-to-end suite pairs over real TLS
+  between two processes — but no Android hardware has been in the loop yet, so
+  the on-device behaviour of the Keystore, the foreground service and mDNS
+  browsing is unverified. `desktop/daemon/examples/fake_phone.rs` is a test
+  client, not a phone, and must never be reported as one.
+* The trust store's persistence path is not covered by the local JVM unit
+  tests: it needs a real `Context` and `filesDir`. Its pure logic is tested;
+  the file I/O is not.
 * The desktop private key is protected by filesystem permissions, not by
   hardware. TPM2 sealing is the top security debt
   ([ADR-0006](docs/adr/ADR-0006-device-identity-and-pairing.md)).

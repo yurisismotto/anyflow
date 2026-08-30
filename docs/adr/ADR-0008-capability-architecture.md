@@ -30,7 +30,7 @@ a handler, and a schema the transport knows nothing about.
 * `auto_grant` defaults to `["battery.v1"]` only — read-only telemetry with no
   side effects. Anything with side effects must be granted explicitly.
 
-There is no capability name anywhere in `fedroid-core`'s transport code.
+There is no capability name anywhere in `anyflow-core`'s transport code.
 
 ## Alternatives
 

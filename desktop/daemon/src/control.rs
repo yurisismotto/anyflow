@@ -1,7 +1,7 @@
 //! The daemon's local control interface.
 //!
 //! A newline-delimited JSON protocol over a Unix domain socket in
-//! `$XDG_RUNTIME_DIR/fedroid-bridge/control.sock`.
+//! `$XDG_RUNTIME_DIR/anyflow/control.sock`.
 //!
 //! # Why a Unix socket and not D-Bus
 //!
@@ -123,8 +123,8 @@ pub struct DeviceReport {
 pub fn control_socket_path() -> std::path::PathBuf {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(format!("/tmp/fedroid-bridge-{}", nix_uid())));
-    base.join("fedroid-bridge").join("control.sock")
+        .unwrap_or_else(|| std::path::PathBuf::from(format!("/tmp/anyflow-{}", nix_uid())));
+    base.join("anyflow").join("control.sock")
 }
 
 fn nix_uid() -> u32 {

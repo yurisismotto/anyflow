@@ -136,7 +136,7 @@ impl Store {
     fn initialize(dir: PathBuf, state_path: &Path, key_path: &Path) -> Result<Self> {
         let settings = Settings::default();
         let identity =
-            LocalIdentity::generate(&settings.device_name, fedroid_proto::v1::Platform::Linux)?;
+            LocalIdentity::generate(&settings.device_name, anyflow_proto::v1::Platform::Linux)?;
 
         let store = Self {
             dir,
@@ -171,7 +171,7 @@ impl Store {
         let identity = LocalIdentity::from_parts(
             state.device_id,
             state.settings.device_name.clone(),
-            fedroid_proto::v1::Platform::Linux,
+            anyflow_proto::v1::Platform::Linux,
             cert_der,
             key_der,
         )?;
@@ -229,7 +229,7 @@ impl Store {
         self.peers.get(fp).filter(|p| !p.revoked)
     }
 
-    /// Looks up a peer including revoked ones (for `fedroid devices` output).
+    /// Looks up a peer including revoked ones (for `anyflow devices` output).
     pub fn peer_record(&self, fp: &Fingerprint) -> Option<&TrustedPeer> {
         self.peers.get(fp)
     }
@@ -283,15 +283,15 @@ impl Store {
     }
 }
 
-/// Default location: `$XDG_DATA_HOME/fedroid-bridge`, else `~/.local/share/...`.
+/// Default location: `$XDG_DATA_HOME/anyflow`, else `~/.local/share/...`.
 pub fn default_data_dir() -> PathBuf {
     if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(xdg).join("fedroid-bridge")
+        PathBuf::from(xdg).join("anyflow")
     } else {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        home.join(".local/share/fedroid-bridge")
+        home.join(".local/share/anyflow")
     }
 }
 

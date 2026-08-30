@@ -3,7 +3,7 @@
 //! # What goes in, and why
 //!
 //! ```text
-//! fedroidb1:<responder-fingerprint-hex>:<token-base32>:<device-id>:<addr>[,<addr>...]
+//! anyflow1:<responder-fingerprint-hex>:<token-base32>:<device-id>:<addr>[,<addr>...]
 //! ```
 //!
 //! * **fingerprint** — the whole point. The scanning device pins this SPKI
@@ -28,7 +28,7 @@ use crate::error::{Error, Result};
 use crate::fingerprint::Fingerprint;
 use crate::pairing::PairingToken;
 
-pub const QR_SCHEME: &str = "fedroidb1";
+pub const QR_SCHEME: &str = "anyflow1";
 
 /// Cap on the encoded payload. Bounds what a malicious QR can push into the
 /// parser on the phone before any of it is interpreted.

@@ -1,22 +1,50 @@
-# Fedroid Bridge — Android app
+# AnyFlow — Android app
 
 Kotlin, Jetpack Compose, coroutines. No Google Play Services, no analytics, no
 network access beyond the LAN socket to the paired computer.
 
 ## Build
 
+Requires **JDK 21** and the **Android SDK, platform 35** with build-tools
+35.0.0. Point Gradle at them with `JAVA_HOME` and `ANDROID_HOME`, or with an
+untracked `android/local.properties`.
+
+JDK 21 specifically: AGP 8.8 does not support running on JDK 25, which is what
+Fedora 44 ships as its default `java`.
+
 ```bash
+export JAVA_HOME=/path/to/jdk-21
+export ANDROID_HOME="$HOME/Android/Sdk"
+
 cd android
-./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest   # 63 tests
+./gradlew :app:assembleDebug       # -> app/build/outputs/apk/debug/app-debug.apk
 ```
 
-> **Not yet built.** The environment this Sprint was developed in had no JDK
-> and no Android SDK, so this module has **never been compiled**. The Kotlin
-> is written against documented APIs and mirrors the Rust implementation
-> function for function, but expect to fix version pins in
-> `gradle/libs.versions.toml` and possibly a few import or API details on the
-> first real build. This is recorded as a known limitation, not as a claim
-> that it works. See the Sprint report.
+### Resource limits
+
+`gradle.properties` caps the Gradle JVM, the Kotlin daemon and the worker
+count on purpose. This is a single-module project, so parallelism buys almost
+nothing, while the defaults are enough to push a 16 GiB laptop into swap. Do
+not raise them without a reason.
+
+## Testing
+
+Local JVM unit tests cover the wire rules, pinning, framing, capability
+negotiation and the pairing proof. Two suites assert known-answer vectors
+shared with the Rust implementation:
+
+* `PairingProofTest` — the proof and confirmation HMACs.
+* `FingerprintTest` — the SPKI fingerprints of `protocol/testdata/*.der`,
+  which are real certificates emitted by the desktop identity code.
+
+`PinnedTrustManagerTest` runs against those same real certificates rather than
+a stub, so removing the pinning comparison makes it fail.
+
+**Not covered here:** `TrustStore`'s persistence path needs a real `Context`
+and `filesDir`, and proof-of-private-key-possession is the TLS handshake's
+job, which a local unit test cannot stand in for. Both are on-device
+concerns.
 
 ## Layout
 

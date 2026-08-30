@@ -14,9 +14,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .canonicalize()?;
 
     let files = [
-        "fedroid/v1/envelope.proto",
-        "fedroid/v1/core.proto",
-        "fedroid/v1/capabilities/battery_v1.proto",
+        "anyflow/v1/envelope.proto",
+        "anyflow/v1/core.proto",
+        "anyflow/v1/capabilities/battery_v1.proto",
     ];
 
     for f in &files {

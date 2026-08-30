@@ -16,11 +16,11 @@ is split so the protocol is testable without any of the daemon:
 
 | Crate | Role |
 | --- | --- |
-| `fedroid-proto` | Generated protobuf types only |
-| `fedroid-core` | Identity, pairing, TLS, framing, session, capability registry. No I/O policy, no globals. |
-| `fedroid-daemon` | mDNS, listener, control socket, `SessionHost` implementation |
-| `fedroid-cli` | `fedroid` — talks to the daemon, holds no keys and no protocol logic |
-| `fedroid-capability-battery` | `battery.v1` |
+| `anyflow-proto` | Generated protobuf types only |
+| `anyflow-core` | Identity, pairing, TLS, framing, session, capability registry. No I/O policy, no globals. |
+| `anyflow-daemon` | mDNS, listener, control socket, `SessionHost` implementation |
+| `anyflow-cli` | `anyflow` — talks to the daemon, holds no keys and no protocol logic |
+| `anyflow-capability-battery` | `battery.v1` |
 
 `unsafe_code = "forbid"` at the workspace level.
 
@@ -54,7 +54,7 @@ deliberately thin so a D-Bus front end can be added beside it.
 ## Consequences
 
 * One dependency-light binary; the release build needs only a Rust toolchain.
-* `fedroid-core` has no global state and takes its host application as a
+* `anyflow-core` has no global state and takes its host application as a
   trait, so the entire protocol runs in-process in tests over real TLS.
 * Contributors need Rust. Compile times are moderate.
 * A D-Bus interface will have to be added later for the GTK4 GUI, alongside

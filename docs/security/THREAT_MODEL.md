@@ -1,4 +1,4 @@
-# Fedroid Bridge — Threat Model
+# AnyFlow — Threat Model
 
 Scope: the foundation Sprint (identity, discovery, pairing, authenticated
 transport, `battery.v1`). Clipboard, file transfer, notifications and browser
@@ -106,7 +106,7 @@ and nothing more:
   advertises — a device announcing `clipboard.v1` gets it only if the store
   says so;
 * authorization is re-checked per message, not once at connect;
-* `fedroid unpair <device>` sets `revoked`, clears the grants, **and tears
+* `anyflow unpair <device>` sets `revoked`, clears the grants, **and tears
   down the live session immediately** rather than waiting for the next
   reconnect;
 * this Sprint has no remote command execution, no filesystem access and no
@@ -195,7 +195,7 @@ a claim.
 non-exportable, so it cannot be extracted from a stolen device to impersonate
 it elsewhere. The identity is excluded from cloud backup and device transfer,
 so a restored backup cannot carry it either. Recovery is: revoke from the
-desktop (`fedroid unpair`), which is effective immediately for live sessions
+desktop (`anyflow unpair`), which is effective immediately for live sessions
 and permanently for future ones.
 
 **Residual:** an unlocked stolen phone can use its granted capabilities until

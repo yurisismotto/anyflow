@@ -1,4 +1,5 @@
 import com.google.protobuf.gradle.id
+import com.google.protobuf.gradle.proto
 
 plugins {
     alias(libs.plugins.android.application)
@@ -8,11 +9,11 @@ plugins {
 }
 
 android {
-    namespace = "dev.fedroid.bridge"
+    namespace = "io.github.yurisismotto.anyflow"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.fedroid.bridge"
+        applicationId = "io.github.yurisismotto.anyflow"
         // API 29 (Android 10) is the floor: it is where TLS 1.3 is enabled by
         // default and where SSLParameters.setApplicationProtocols (ALPN)
         // became available. Below that we could not speak the protocol at all.
@@ -45,6 +46,14 @@ android {
             // Single source of truth: the same .proto files the Rust daemon
             // compiles. Neither side can drift from the other.
             proto { srcDir("../../protocol/proto") }
+        }
+        getByName("test") {
+            // Same idea for the cross-language fixtures: the unit tests read
+            // the very certificates the Rust suite reads, so the two
+            // implementations cannot quietly disagree about what an identity
+            // fingerprint is. Regenerate with:
+            //   cargo run -p anyflow-core --example gen_test_vectors
+            resources.srcDir("../../protocol/testdata")
         }
     }
 }
