@@ -29,6 +29,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.pairing.QrPayload
 import io.github.yurisismotto.anyflow.service.ConnectionService
+import io.github.yurisismotto.anyflow.capability.FilesCapability
 import io.github.yurisismotto.anyflow.store.TrustStore
 import kotlinx.coroutines.launch
 
@@ -87,6 +88,19 @@ class MainActivity : ComponentActivity() {
                             app.trustStore.removePeer(peer.fingerprint)
                             ConnectionService.stop(this)
                         },
+                        onSetFilesGrant = { peer, granted ->
+                            // Written straight to the trust store, which is
+                            // what `isFileTransferAllowed` reads on every
+                            // question — so withdrawing it stops a transfer
+                            // that is already running.
+                            val grants = peer.grantedCapabilities.toMutableSet()
+                            if (granted) {
+                                grants += FilesCapability.ID
+                            } else {
+                                grants -= FilesCapability.ID
+                            }
+                            app.trustStore.addPeer(peer.copy(grantedCapabilities = grants))
+                        },
                     )
                 }
             }
@@ -121,9 +135,12 @@ private fun MainScreen(
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onForget: (TrustStore.TrustedPeer) -> Unit,
+    onSetFilesGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
 ) {
     val state by app.connectionState.collectAsState()
     val peers = app.trustStore.peers()
+    val offers by app.files.pendingOffers.collectAsState()
+    val transfers by app.files.visible.collectAsState()
 
     Scaffold { padding ->
         Column(
@@ -148,6 +165,22 @@ private fun MainScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+            }
+
+            // Offers come first: they are the only thing on this screen that
+            // is waiting on the person looking at it.
+            for (offer in offers) {
+                IncomingOfferCard(
+                    offer = offer,
+                    onRespond = { accept -> app.files.respondToOffer(offer.transferId, accept) },
+                )
+            }
+
+            for (transfer in transfers) {
+                TransferRow(
+                    transfer = transfer,
+                    onCancel = { app.files.cancel(transfer.transferId) },
+                )
             }
 
             Card {
@@ -182,6 +215,22 @@ private fun MainScreen(
                             Text(peer.deviceName, style = MaterialTheme.typography.titleMedium)
                             Text("Fingerprint ${peer.fingerprint.toDisplayShort()}")
                             Text("Allowed: ${peer.grantedCapabilities.joinToString(", ")}")
+
+                            // Files can be withdrawn without unpairing. The
+                            // grant is re-read per message, so revoking it
+                            // stops an in-flight transfer, not just the next
+                            // one.
+                            val filesAllowed = FilesCapability.ID in peer.grantedCapabilities
+                            Button(onClick = { onSetFilesGrant(peer, !filesAllowed) }) {
+                                Text(
+                                    if (filesAllowed) {
+                                        "Stop allowing file transfer"
+                                    } else {
+                                        "Allow file transfer"
+                                    },
+                                )
+                            }
+
                             Button(onClick = { onForget(peer) }) { Text("Forget this computer") }
                         }
                     }

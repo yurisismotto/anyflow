@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "anyflow/v1/envelope.proto",
         "anyflow/v1/core.proto",
         "anyflow/v1/capabilities/battery_v1.proto",
+        "anyflow/v1/capabilities/files_v1.proto",
     ];
 
     for f in &files {

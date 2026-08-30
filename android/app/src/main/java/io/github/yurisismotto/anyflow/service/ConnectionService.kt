@@ -156,6 +156,11 @@ class ConnectionService : LifecycleService() {
                 val connection = result.connection
                 currentConnection = connection
                 updateNotification(getString(R.string.notif_connected, peer.deviceName))
+                // A data stream reuses this session's address, port and
+                // pinned identity. Recorded before the session runs, so a
+                // transfer offered the instant we connect has somewhere to
+                // dial.
+                app.files.attachTransport(connection.remoteAddress, peer.fingerprint)
                 // Remember only an address that actually worked, so the fast
                 // path stays the one that was proven, not merely advertised.
                 runCatching {

@@ -64,6 +64,12 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long to wait for the human to accept or decline a pairing prompt.
 pub const PAIRING_CONFIRM_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long teardown waits for the writer to flush what is already queued.
+/// Short on purpose: this is a courtesy to frames already accepted, not a
+/// guarantee, and a peer that stopped reading must not be able to hold a
+/// session's teardown open.
+const WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Number of recent message ids remembered for de-duplication.
 const DEDUP_WINDOW: usize = 1024;
 
@@ -181,6 +187,47 @@ pub enum Command {
     Ping { reply: oneshot::Sender<Duration> },
     SendCapability(OutboundMessage),
     Shutdown,
+}
+
+/// One frame handed to the session's writer task.
+///
+/// The body only; the writer owns the [`EnvelopeFactory`] and stamps the
+/// sequence number as it writes, so sequence order and wire order cannot
+/// disagree.
+struct WriteRequest {
+    body: v1::envelope::Body,
+    /// Pre-minted id, for the one case that needs to know it before the frame
+    /// is on the wire: a PING must be able to recognise its own PONG. `None`
+    /// lets the writer mint one.
+    message_id: Option<Vec<u8>>,
+    /// Set on replies; empty otherwise.
+    correlation_id: Vec<u8>,
+}
+
+impl WriteRequest {
+    fn new(body: v1::envelope::Body) -> Self {
+        Self {
+            body,
+            message_id: None,
+            correlation_id: Vec::new(),
+        }
+    }
+
+    fn reply_to(body: v1::envelope::Body, correlate: &[u8]) -> Self {
+        Self {
+            body,
+            message_id: None,
+            correlation_id: correlate.to_vec(),
+        }
+    }
+
+    fn with_id(body: v1::envelope::Body, message_id: Vec<u8>) -> Self {
+        Self {
+            body,
+            message_id: Some(message_id),
+            correlation_id: Vec::new(),
+        }
+    }
 }
 
 /// Outside-world handle to a live session.
@@ -726,6 +773,25 @@ where
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(32);
     let (cap_tx, mut cap_rx) = mpsc::channel::<OutboundMessage>(32);
 
+    // The writer lives in its own task, and that is the whole point of this
+    // arrangement rather than a stylistic preference.
+    //
+    // `on_message` is awaited by the dispatch loop below. If that same loop
+    // were also the only consumer of the outbound queue — as it once was —
+    // then a handler that answered one inbound message with more replies than
+    // the queue is deep would wait for a drain that could only happen after
+    // it returned. That is a true cycle, not a slow path: the session wedged
+    // permanently, the frames already queued were never written, and even the
+    // peer's disconnect went unnoticed because the loop could not reach the
+    // branch that observes it. See `dispatch_tests` at the bottom of this
+    // file, which reproduce exactly that.
+    //
+    // Splitting the writer out breaks the cycle by construction: the drain no
+    // longer depends on the handler returning. A full queue becomes ordinary
+    // backpressure — the producer waits for the socket, which is the pressure
+    // we actually want to propagate — instead of a deadlock.
+    let (write_tx, mut write_rx) = mpsc::channel::<WriteRequest>(32);
+
     let session_id = next_session_id();
     let started = tokio::time::Instant::now();
     let last_inbound_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -739,6 +805,48 @@ where
         started,
         last_inbound_ms: Arc::clone(&last_inbound_ms),
     };
+
+    // Exactly one task owns the write half, and with it the envelope factory:
+    // sequence numbers are therefore assigned in the order frames actually go
+    // out, and no two producers can interleave halves of a frame.
+    //
+    // It serves two queues. `write_rx` carries the session's own protocol
+    // frames (PONG, liveness PING, protocol errors); `cap_rx` carries whatever
+    // capabilities produce, including from inside `on_message`. Both are
+    // bounded and each is FIFO, so a capability's messages keep their relative
+    // order — which is what `files.v1` needs, since FILE_COMPLETE must not
+    // overtake the bytes it refers to.
+    let mut writer_task = tokio::spawn(async move {
+        let result = loop {
+            let (body, message_id, correlation_id) = tokio::select! {
+                req = write_rx.recv() => match req {
+                    Some(r) => (r.body, r.message_id, r.correlation_id),
+                    // The dispatch loop has finished. Stop; anything still
+                    // queued belongs to a session that is already over.
+                    None => break Ok(()),
+                },
+                Some(msg) = cap_rx.recv() => (
+                    v1::envelope::Body::CapabilityMessage(v1::CapabilityMessage {
+                        capability_id: msg.capability_id,
+                        payload: msg.payload,
+                    }),
+                    None,
+                    Vec::new(),
+                ),
+            };
+
+            let mut env = factory.build(body);
+            if let Some(id) = message_id {
+                env.message_id = id;
+            }
+            env.correlation_id = correlation_id;
+            if let Err(e) = framing::write_envelope(&mut writer, &env).await {
+                break Err(e);
+            }
+        };
+        let _ = writer.shutdown().await;
+        result
+    });
 
     let registry = host.registry();
     let ctx = CapabilityContext {
@@ -774,9 +882,8 @@ where
 
     let result = loop {
         tokio::select! {
-            // Biased so that inbound traffic is always drained before new
-            // outbound work is queued; keeps a chatty peer from starving the
-            // reader and growing buffers.
+            // Biased so that inbound traffic is always drained first; keeps a
+            // chatty peer from starving the reader and growing buffers.
             biased;
 
             incoming = inbound_rx.recv() => {
@@ -806,12 +913,12 @@ where
                         if p.payload.len() > MAX_PING_PAYLOAD {
                             break Err(Error::Protocol("ping payload too large"));
                         }
-                        let pong = factory.build_reply(
+                        let pong = WriteRequest::reply_to(
                             v1::envelope::Body::Pong(v1::Pong { payload: p.payload }),
                             &env.message_id,
                         );
-                        if let Err(e) = framing::write_envelope(&mut writer, &pong).await {
-                            break Err(e);
+                        if write_tx.send(pong).await.is_err() {
+                            break Ok(());
                         }
                     }
 
@@ -832,7 +939,7 @@ where
                         // the negotiated+granted list. It is never inferred
                         // from the message itself.
                         if !established.negotiated_capabilities.contains(&m.capability_id) {
-                            let err = factory.build_reply(
+                            let err = WriteRequest::reply_to(
                                 v1::envelope::Body::Error(v1::Error {
                                     code: v1::ErrorCode::UnsupportedCapability as i32,
                                     message: "capability not negotiated".into(),
@@ -840,8 +947,8 @@ where
                                 }),
                                 &env.message_id,
                             );
-                            if let Err(e) = framing::write_envelope(&mut writer, &err).await {
-                                break Err(e);
+                            if write_tx.send(err).await.is_err() {
+                                break Ok(());
                             }
                             continue;
                         }
@@ -888,27 +995,45 @@ where
                     Command::Ping { reply } => {
                         let mut payload = [0u8; 8];
                         let _ = rand::rngs::OsRng.try_fill_bytes(&mut payload);
-                        let env = factory.build(v1::envelope::Body::Ping(v1::Ping {
-                            payload: payload.to_vec(),
-                        }));
-                        let id = env.message_id.clone();
-                        if let Err(e) = framing::write_envelope(&mut writer, &env).await {
-                            break Err(e);
+                        // Minted here rather than by the writer: the PONG is
+                        // matched against this id, and waiting for the writer
+                        // to report one back would make the dispatch loop
+                        // depend on the writer's progress again.
+                        let id = random_message_id();
+                        let req = WriteRequest::with_id(
+                            v1::envelope::Body::Ping(v1::Ping {
+                                payload: payload.to_vec(),
+                            }),
+                            id.clone(),
+                        );
+                        if write_tx.send(req).await.is_err() {
+                            break Ok(());
                         }
                         pending_ping = Some((id, Instant::now(), reply));
                     }
                     Command::SendCapability(msg) => {
-                        if let Err(e) = send_capability(&mut writer, &mut factory, msg).await {
-                            break Err(e);
+                        let req = WriteRequest::new(v1::envelope::Body::CapabilityMessage(
+                            v1::CapabilityMessage {
+                                capability_id: msg.capability_id,
+                                payload: msg.payload,
+                            },
+                        ));
+                        if write_tx.send(req).await.is_err() {
+                            break Ok(());
                         }
                     }
                 }
             }
 
-            Some(msg) = cap_rx.recv() => {
-                if let Err(e) = send_capability(&mut writer, &mut factory, msg).await {
-                    break Err(e);
-                }
+            // The writer stopping is how a write error reaches this loop:
+            // there is no longer a `write_envelope` call here to return one.
+            joined = &mut writer_task => {
+                break match joined {
+                    Ok(Err(e)) => Err(e),
+                    // Ok(Ok(())) cannot happen while `write_tx` is alive, and
+                    // a panicked writer is reported as a closed connection.
+                    _ => Ok(()),
+                };
             }
 
             _ = liveness.tick() => {
@@ -928,14 +1053,14 @@ where
                 if silent_for >= LIVENESS_PROBE_AFTER {
                     let mut payload = [0u8; 8];
                     let _ = rand::rngs::OsRng.try_fill_bytes(&mut payload);
-                    let env = factory.build(v1::envelope::Body::Ping(v1::Ping {
-                        payload: payload.to_vec(),
-                    }));
                     // A probe carries no reply channel: the PONG is not
                     // matched to anything, it only has to arrive, and any
                     // frame at all is proof enough that the peer is there.
-                    if let Err(e) = framing::write_envelope(&mut writer, &env).await {
-                        break Err(e);
+                    let req = WriteRequest::new(v1::envelope::Body::Ping(v1::Ping {
+                        payload: payload.to_vec(),
+                    }));
+                    if write_tx.send(req).await.is_err() {
+                        break Ok(());
                     }
                 }
             }
@@ -951,23 +1076,28 @@ where
     }
     host.on_closed(&established.peer, session_id).await;
     reader_task.abort();
-    let _ = writer.shutdown().await;
 
-    result
-}
+    // Dropping the last `WriteRequest` sender is what tells the writer the
+    // session is over; it then shuts the socket down itself. Bounded, because
+    // a peer that has stopped reading must not hold teardown open — after
+    // that the task is aborted and the socket closes when its half drops.
+    drop(write_tx);
+    let flushed = tokio::time::timeout(WRITER_DRAIN_TIMEOUT, &mut writer_task).await;
+    let writer_result = match flushed {
+        Ok(Ok(r)) => r,
+        Ok(Err(_)) => Ok(()),
+        Err(_) => {
+            writer_task.abort();
+            Ok(())
+        }
+    };
 
-async fn send_capability<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    factory: &mut EnvelopeFactory,
-    msg: OutboundMessage,
-) -> Result<()> {
-    let env = factory.build(v1::envelope::Body::CapabilityMessage(
-        v1::CapabilityMessage {
-            capability_id: msg.capability_id,
-            payload: msg.payload,
-        },
-    ));
-    framing::write_envelope(writer, &env).await
+    // A write error only surfaces here when the loop itself ended cleanly;
+    // a reason the loop already has is the more specific one.
+    match (result, writer_result) {
+        (Ok(()), Err(e)) => Err(e),
+        (r, _) => r,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,4 +1266,321 @@ where
         },
         EnvelopeState { factory, guard },
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::DuplexStream;
+
+    /// The session's outbound queue depth. The tests below push past it on
+    /// purpose; if this constant and the channel in `run_session` ever drift
+    /// apart the tests stop proving anything, so they assert against it.
+    const OUTBOUND_CAPACITY: usize = 32;
+
+    fn fp(byte: u8) -> Fingerprint {
+        Fingerprint::from_hex(&format!("{byte:02x}").repeat(32)).expect("valid fingerprint")
+    }
+
+    /// A capability that answers one inbound message with `replies` outbound
+    /// ones, using an *unbounded* `send().await` — the naive pattern a
+    /// capability author would reach for first.
+    struct FloodCapability {
+        replies: usize,
+        /// How many of those sends actually returned.
+        completed: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::capability::Capability for FloodCapability {
+        fn id(&self) -> &str {
+            "flood.v1"
+        }
+
+        async fn on_message(&self, ctx: &CapabilityContext, _payload: &[u8]) -> Result<()> {
+            for i in 0..self.replies {
+                let msg = OutboundMessage {
+                    capability_id: "flood.v1".into(),
+                    payload: vec![i as u8],
+                };
+                if ctx.outbound.send(msg).await.is_err() {
+                    break;
+                }
+                self.completed.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(())
+        }
+    }
+
+    struct TestHost {
+        registry: CapabilityRegistry,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionHost for TestHost {
+        fn local_device_info(&self) -> v1::DeviceInfo {
+            v1::DeviceInfo {
+                device_id: "test".into(),
+                device_name: "test".into(),
+                platform: v1::Platform::Linux as i32,
+                identity_fingerprint: fp(0xaa).to_hex(),
+            }
+        }
+        fn registry(&self) -> CapabilityRegistry {
+            self.registry.clone()
+        }
+        async fn lookup_peer(&self, _f: &Fingerprint) -> PeerStatus {
+            PeerStatus::Unknown
+        }
+        async fn pairing_mode_active(&self) -> bool {
+            false
+        }
+        async fn verify_pairing_proof(
+            &self,
+            _i: &Fingerprint,
+            _n: &[u8],
+            _p: &[u8],
+        ) -> std::result::Result<[u8; 32], PairingError> {
+            Err(PairingError::NotInPairingMode)
+        }
+        async fn confirm_pairing(&self, _d: &v1::DeviceInfo, _f: &Fingerprint) -> bool {
+            false
+        }
+        async fn store_peer(
+            &self,
+            _d: &v1::DeviceInfo,
+            _f: &Fingerprint,
+            _c: &[String],
+            _v: u32,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Spawns a session speaking `flood.v1` over an in-memory duplex, and
+    /// returns the peer's end of the pipe.
+    fn spawn_flood_session(
+        replies: usize,
+        completed: Arc<AtomicUsize>,
+    ) -> (DuplexStream, tokio::task::JoinHandle<Result<()>>) {
+        let registry = CapabilityRegistry::builder()
+            .register(Arc::new(FloodCapability { replies, completed }))
+            .build();
+        let host: Arc<dyn SessionHost> = Arc::new(TestHost { registry });
+        let established = Established {
+            peer: fp(0xbb),
+            device: v1::DeviceInfo {
+                device_id: "peer".into(),
+                device_name: "peer".into(),
+                platform: v1::Platform::Android as i32,
+                identity_fingerprint: fp(0xbb).to_hex(),
+            },
+            negotiated_capabilities: vec!["flood.v1".into()],
+            protocol_version: PROTOCOL_VERSION_MAX,
+        };
+        let state = EnvelopeState {
+            factory: EnvelopeFactory::new(PROTOCOL_VERSION_MAX),
+            guard: ReplayGuard::new(),
+        };
+        // 64 KiB each way: big enough that the socket buffer is never what
+        // limits the test, so a stall can only be the dispatch loop.
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let task = tokio::spawn(run_session(theirs, host, established, state));
+        (ours, task)
+    }
+
+    /// Builds a `flood.v1` capability message from the peer.
+    fn flood_request(sequence: u64) -> v1::Envelope {
+        v1::Envelope {
+            protocol_version: PROTOCOL_VERSION_MAX,
+            message_id: vec![sequence as u8; 16],
+            sequence,
+            timestamp_unix_ms: now_unix_ms(),
+            correlation_id: Vec::new(),
+            body: Some(v1::envelope::Body::CapabilityMessage(
+                v1::CapabilityMessage {
+                    capability_id: "flood.v1".into(),
+                    payload: Vec::new(),
+                },
+            )),
+        }
+    }
+
+    /// Counts `flood.v1` replies arriving on the peer's end until `budget`
+    /// elapses with nothing new.
+    async fn drain_replies(peer: &mut DuplexStream, budget: Duration) -> usize {
+        let mut seen = 0usize;
+        loop {
+            match tokio::time::timeout(budget, framing::read_envelope(peer)).await {
+                Ok(Ok(env)) => {
+                    if let Some(v1::envelope::Body::CapabilityMessage(m)) = env.body {
+                        if m.capability_id == "flood.v1" {
+                            seen += 1;
+                        }
+                    }
+                }
+                // Timed out, or the session died: either way, no more replies.
+                _ => return seen,
+            }
+        }
+    }
+
+    /// The load-bearing one. A handler that replies more times than the
+    /// outbound queue is deep must still get every reply out.
+    ///
+    /// Before the reader/writer split this deadlocked: `on_message` was
+    /// awaited by the same task that drains the outbound queue, so once the
+    /// queue filled, the handler's `send().await` waited for a consumer that
+    /// was waiting for the handler.
+    #[tokio::test]
+    async fn a_handler_may_reply_more_times_than_the_outbound_queue_is_deep() {
+        let replies = OUTBOUND_CAPACITY * 4;
+        let completed = Arc::new(AtomicUsize::new(0));
+        let (mut peer, task) = spawn_flood_session(replies, Arc::clone(&completed));
+
+        framing::write_envelope(&mut peer, &flood_request(1))
+            .await
+            .expect("the peer end should accept a request");
+
+        let seen = drain_replies(&mut peer, Duration::from_secs(5)).await;
+
+        assert_eq!(
+            seen, replies,
+            "the peer should receive every reply the handler sent"
+        );
+        assert_eq!(
+            completed.load(Ordering::SeqCst),
+            replies,
+            "every send from inside the handler should complete"
+        );
+
+        drop(peer);
+        let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
+    }
+
+    /// Ordering is preserved end to end: replies arrive in the order the
+    /// handler produced them, with the queue saturated throughout.
+    #[tokio::test]
+    async fn replies_keep_their_order_under_queue_pressure() {
+        let replies = OUTBOUND_CAPACITY * 3;
+        let completed = Arc::new(AtomicUsize::new(0));
+        let (mut peer, task) = spawn_flood_session(replies, Arc::clone(&completed));
+
+        framing::write_envelope(&mut peer, &flood_request(1))
+            .await
+            .expect("the peer end should accept a request");
+
+        let mut payloads = Vec::new();
+        let mut sequences = Vec::new();
+        for _ in 0..replies {
+            let env =
+                tokio::time::timeout(Duration::from_secs(5), framing::read_envelope(&mut peer))
+                    .await
+                    .expect("a reply should arrive")
+                    .expect("the session should still be alive");
+            sequences.push(env.sequence);
+            if let Some(v1::envelope::Body::CapabilityMessage(m)) = env.body {
+                payloads.push(m.payload[0]);
+            }
+        }
+
+        let expected: Vec<u8> = (0..replies).map(|i| i as u8).collect();
+        assert_eq!(payloads, expected, "replies arrived out of order");
+
+        let mut sorted = sequences.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            sequences, sorted,
+            "envelope sequence numbers went backwards"
+        );
+
+        drop(peer);
+        let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
+    }
+
+    /// A session under outbound pressure still reads. Before the split, a
+    /// handler blocked on a full queue also stopped the inbound path, so the
+    /// peer's next request was never even parsed.
+    #[tokio::test]
+    async fn inbound_dispatch_continues_while_the_outbound_queue_is_saturated() {
+        let replies = OUTBOUND_CAPACITY * 2;
+        let completed = Arc::new(AtomicUsize::new(0));
+        let (mut peer, task) = spawn_flood_session(replies, Arc::clone(&completed));
+
+        // Two requests back to back, without reading anything in between:
+        // the queue is guaranteed to be full while the second is dispatched.
+        framing::write_envelope(&mut peer, &flood_request(1))
+            .await
+            .expect("the peer end should accept a request");
+        framing::write_envelope(&mut peer, &flood_request(2))
+            .await
+            .expect("the peer end should accept a request");
+
+        let seen = drain_replies(&mut peer, Duration::from_secs(5)).await;
+        assert_eq!(
+            seen,
+            replies * 2,
+            "both requests should have been dispatched and answered in full"
+        );
+
+        drop(peer);
+        let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
+    }
+
+    /// One wedged session must not affect another. Sessions share no
+    /// outbound queue, so this holds by construction — the test pins it.
+    #[tokio::test]
+    async fn outbound_pressure_on_one_session_does_not_affect_another() {
+        let replies = OUTBOUND_CAPACITY * 2;
+        let slow_completed = Arc::new(AtomicUsize::new(0));
+        // Deliberately never drained: `slow_peer` is held open and ignored.
+        let (slow_peer, slow_task) = spawn_flood_session(replies, Arc::clone(&slow_completed));
+
+        let mut slow_peer = slow_peer;
+        framing::write_envelope(&mut slow_peer, &flood_request(1))
+            .await
+            .ok();
+
+        let fast_completed = Arc::new(AtomicUsize::new(0));
+        let (mut fast_peer, fast_task) = spawn_flood_session(replies, Arc::clone(&fast_completed));
+        framing::write_envelope(&mut fast_peer, &flood_request(1))
+            .await
+            .expect("the peer end should accept a request");
+
+        let seen = drain_replies(&mut fast_peer, Duration::from_secs(5)).await;
+        assert_eq!(
+            seen, replies,
+            "a healthy session should be unaffected by a stalled one"
+        );
+
+        drop(fast_peer);
+        drop(slow_peer);
+        let _ = tokio::time::timeout(Duration::from_secs(5), fast_task).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), slow_task).await;
+    }
+
+    /// Shutdown wins over a saturated outbound queue: a session told to stop
+    /// stops, rather than waiting for a peer that is not reading.
+    #[tokio::test]
+    async fn a_saturated_session_still_shuts_down() {
+        let replies = OUTBOUND_CAPACITY * 8;
+        let completed = Arc::new(AtomicUsize::new(0));
+        let (mut peer, task) = spawn_flood_session(replies, Arc::clone(&completed));
+
+        framing::write_envelope(&mut peer, &flood_request(1))
+            .await
+            .ok();
+
+        // Drop the peer without reading: the writer's socket fills, the
+        // handler keeps producing, and the session must still end.
+        drop(peer);
+
+        let ended = tokio::time::timeout(Duration::from_secs(10), task).await;
+        assert!(ended.is_ok(), "the session should end after the peer left");
+    }
 }

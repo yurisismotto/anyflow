@@ -19,7 +19,7 @@ new major version and a new threat-model review.
 
 ```
 ┌──────────────────────────────────────────┐
-│ capabilities        battery.v1, …        │  own schemas, own versions
+│ capabilities        battery.v1, files.v1 │  own schemas, own versions
 ├──────────────────────────────────────────┤
 │ session             HELLO, PAIR_*, PING  │  state machine, replay guard
 ├──────────────────────────────────────────┤
@@ -30,6 +30,34 @@ new major version and a new threat-model review.
 │ TCP                 port 55432 (default) │
 └──────────────────────────────────────────┘
 ```
+
+A second kind of connection shares that same port and the same four lower
+layers, and skips the top two:
+
+```
+┌──────────────────────────────────────────┐
+│ raw bytes           exactly size_bytes   │  one transfer, then closed
+├──────────────────────────────────────────┤
+│ stream auth         MAC over a challenge │  which transfer, not just which peer
+├──────────────────────────────────────────┤
+│ TLS 1.3             mutual auth, pinned  │  the SAME pinned identities
+├──────────────────────────────────────────┤
+│ TCP                 the same port        │
+└──────────────────────────────────────────┘
+```
+
+Which one a connection is, is decided by **ALPN** during the handshake, before
+a single application byte:
+
+| ALPN | Connection |
+| --- | --- |
+| `anyflow/1` | control session — HELLO, pairing, capability messages |
+| `anyflow-data/1` | a `files.v1` data stream — one transfer's bytes |
+
+A connection that negotiates neither is dropped. Treating an absent ALPN as
+"probably a control session" would hand the handshake path to any client that
+omitted it, so this fails closed. See
+[ADR-0013](../adr/ADR-0013-file-transfer-data-stream.md).
 
 ## Framing
 
@@ -149,6 +177,57 @@ The transport never parses `payload`. Effective capabilities are
 `mutually supported ∩ granted by the local trust store`, re-checked per
 message. An un-negotiated id gets a **non-fatal** `ERROR` and the session
 continues.
+
+### `files.v1`
+
+Capability id `files.v1`, payload a `FileControl` message. Control messages
+only: **no file byte ever enters an `Envelope`**, which is what lets
+`MAX_FRAME_LEN` stay at 64 KiB (ADR-0012).
+
+| Message | Sent by | Carries |
+| --- | --- | --- |
+| `FILE_OFFER` | sender | `transfer_id`, filename, `size_bytes`, `mime_type`, `sha256`, timestamp |
+| `FILE_ACCEPT` | receiver | `transfer_id`, and the stream challenge when the receiver is the stream acceptor |
+| `FILE_READY` | stream acceptor | `transfer_id` + challenge, when the acceptor is the *sender* |
+| `FILE_REJECT` | receiver | `transfer_id`, reason |
+| `FILE_CANCEL` | either | `transfer_id`, reason |
+| `FILE_COMPLETE` | receiver | `transfer_id` — the receiver's verdict, after verification |
+| `FILE_FAILED` | either | `transfer_id`, reason |
+
+`transfer_id` is 16 cryptographically random bytes, single-use, and
+deliberately **not** derived from `message_id`: a message id is meaningful for
+one frame and is garbage-collected by the dedup window, while a transfer id
+must stay meaningful across many frames and two connections.
+
+`FileOffer` has **no path field**, relative or absolute, and no stream
+challenge. The absent path means nothing a peer sends can name a location on
+the receiver; the absent challenge means a data stream cannot be opened before
+the receiving human has accepted.
+
+The data stream's first two frames use the same 4-byte big-endian length
+prefix, capped at 4 KiB and checked before allocation:
+
+```
+DataStreamAuth  { protocol_version, transfer_id, mac }   dialer → acceptor
+DataStreamReady { status, reason }                       acceptor → dialer
+<raw bytes>     exactly size_bytes                       in the negotiated direction
+```
+
+```text
+mac = HMAC-SHA256(
+    key = stream_challenge,
+    msg = "anyflow/files.v1/data-stream/v1"
+          || len_prefixed(acceptor_identity_fingerprint)
+          || len_prefixed(dialer_identity_fingerprint)
+          || len_prefixed(transfer_id))
+```
+
+Same construction as the pairing proof. The acceptor additionally requires that
+the TLS peer certificate on the data connection is the same pinned identity
+that negotiated the transfer; the MAC is defence in depth on that check, not a
+replacement for it.
+
+Full specification: [FILES.md](FILES.md).
 
 ### `battery.v1`
 

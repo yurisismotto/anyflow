@@ -60,6 +60,36 @@
         </activity>
 
         <!--
+          The Sharesheet entry point: Gallery / Files / Browser -> Share ->
+          AnyFlow. Exported because that is what makes it appear in the
+          chooser; it accepts only a shared stream and does nothing with an
+          empty or unrecognised intent.
+
+          `mimeType="*/*"` is what lets any file type be shared. It grants the
+          app nothing: the URI arrives with a temporary read permission for
+          that one item, which is strictly less access than any storage
+          permission would be, and is exactly why no storage permission is
+          declared anywhere in this manifest.
+        -->
+        <activity
+            android:name=".ui.SendActivity"
+            android:exported="true"
+            android:label="@string/share_target_label"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.Light.Dialog.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <!--
           `connectedDevice`: this service exists only while an active
           connection to a paired computer exists or is being established. It
           is NOT a `dataSync` daemon and it is not started at boot.

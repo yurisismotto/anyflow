@@ -29,7 +29,8 @@ The phone always initiates. The desktop always listens. See ADR-0005.
 | `anyflow-proto` | — | Generated protobuf types |
 | `anyflow-core` | proto | Identity, pairing, TLS, framing, session, capability registry |
 | `anyflow-capability-battery` | core, proto | `battery.v1` |
-| `anyflow-daemon` | core, battery | mDNS, listener, control socket, `SessionHost` |
+| `anyflow-capability-files` | core, proto | `files.v1`: transfer state machine, filename safety, data-stream auth |
+| `anyflow-daemon` | core, battery, files | mDNS, listener, control socket, `SessionHost` |
 | `anyflow-cli` | daemon (types only) | `anyflow` |
 
 `anyflow-core` has no global state and no I/O policy. Everything it needs from
@@ -47,7 +48,9 @@ There is exactly one place per direction, on purpose.
 | Does this client hold the key it claims? | `verify_tls13_signature` (both verifiers) |
 | Is this peer trusted? | `SessionHost::lookup_peer` → the trust store |
 | May this peer use this capability? | `granted_capabilities`, re-checked per message |
+| Which *transfer* is this data stream for? | `files.v1` MAC over a single-use challenge (ADR-0013) |
 | Should this stranger become trusted? | Valid pairing proof **and** a human |
+| Should this file be written to my disk? | A human, per transfer |
 
 Nothing else grants anything. Not the network, not mDNS, not a device id, not
 a device name.

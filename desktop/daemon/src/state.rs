@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use anyflow_capability_files::{FilesAuthorizer, TransferManager};
 use anyflow_core::capability::CapabilityRegistry;
 use anyflow_core::error::{PairingError, Result};
 use anyflow_core::pairing::PairingSession;
@@ -25,6 +26,9 @@ pub struct DaemonState {
     pub store: Mutex<Store>,
     pub registry: CapabilityRegistry,
     pub battery: Arc<anyflow_capability_battery::BatteryState>,
+    /// `files.v1`, when the capability is enabled. `None` leaves the daemon
+    /// with no file transfer at all rather than a half-wired one.
+    pub transfers: Option<Arc<TransferManager>>,
 
     /// The single open pairing window, if any.
     pairing: Mutex<Option<PairingSession>>,
@@ -62,6 +66,7 @@ impl DaemonState {
             store: Mutex::new(store),
             registry,
             battery,
+            transfers: None,
             pairing: Mutex::new(None),
             confirm_tx: Mutex::new(None),
             sessions: RwLock::new(HashMap::new()),
@@ -70,6 +75,19 @@ impl DaemonState {
             listen_port: std::sync::atomic::AtomicU16::new(0),
             listen_families: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Attaches the file-transfer manager.
+    ///
+    /// Separate from [`new`] because the manager needs this state as its
+    /// authorizer, and this state needs the manager: one of the two has to be
+    /// built first. The daemon builds the manager, constructs the state with
+    /// it, and then hands the state back as the authorizer.
+    ///
+    /// [`new`]: Self::new
+    pub fn with_transfers(mut self, transfers: Arc<TransferManager>) -> Self {
+        self.transfers = Some(transfers);
+        self
     }
 
     /// Records the port the listener actually bound.
@@ -241,6 +259,23 @@ impl DaemonState {
                 many.len()
             )),
         }
+    }
+}
+
+/// The `files.v1` grant check, asked fresh every time.
+///
+/// Reads the trust store rather than a cached set, so a revocation that
+/// happened one second ago is already in force — including against a data
+/// stream that is mid-copy.
+#[async_trait::async_trait]
+impl FilesAuthorizer for DaemonState {
+    async fn is_authorized(&self, peer: &Fingerprint) -> bool {
+        let store = self.store.lock().await;
+        // `trusted_peer` already excludes revoked devices; `allows` re-checks
+        // that and the per-capability grant.
+        store
+            .trusted_peer(peer)
+            .is_some_and(|p| p.allows(anyflow_capability_files::CAPABILITY_ID))
     }
 }
 

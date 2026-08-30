@@ -75,6 +75,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyflow-capability-files"
+version = "0.1.0"
+dependencies = [
+ "anyflow-core",
+ "anyflow-proto",
+ "async-trait",
+ "hmac",
+ "prost",
+ "rand",
+ "sha2",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
 name = "anyflow-cli"
 version = "0.1.0"
 dependencies = [
@@ -118,6 +136,7 @@ name = "anyflow-daemon"
 version = "0.1.0"
 dependencies = [
  "anyflow-capability-battery",
+ "anyflow-capability-files",
  "anyflow-core",
  "anyflow-proto",
  "anyhow",
@@ -130,6 +149,7 @@ dependencies = [
  "rustls-pki-types",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-rustls",

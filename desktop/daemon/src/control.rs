@@ -36,6 +36,27 @@ pub enum Request {
     Unpair { device: String },
     /// Round-trips a PING over the live session with a device.
     Ping { device: String },
+
+    /// Grants or withdraws one capability for one device.
+    ///
+    /// Separate from pairing on purpose. Pairing establishes *who* a device
+    /// is; a grant decides *what it may do*, and `files.v1` writes files, so
+    /// it is never auto-granted (ADR-0008).
+    Grant {
+        device: String,
+        capability: String,
+        granted: bool,
+    },
+
+    /// Offers a local file to a device. The connection then streams
+    /// [`Event`]s until the transfer reaches a terminal state.
+    Send { device: String, path: String },
+
+    /// Every transfer this daemon knows about in this run.
+    Transfers,
+
+    /// Cancels a transfer by id, or by an unambiguous id prefix.
+    CancelTransfer { transfer: String },
 }
 
 /// A single-shot reply.
@@ -44,6 +65,7 @@ pub enum Request {
 pub enum Response {
     Status(StatusReport),
     Devices(Vec<DeviceReport>),
+    Transfers(Vec<TransferReport>),
     Pong { rtt_ms: u64 },
     Ok { message: String },
     Error { message: String },
@@ -69,6 +91,36 @@ pub enum Event {
     },
     /// Terminal event for the stream.
     Finished { status: String, detail: String },
+
+    /// A transfer changed. Streamed by `Send` so the CLI can render progress
+    /// without polling.
+    TransferProgress(TransferReport),
+}
+
+/// One transfer, as the CLI sees it.
+///
+/// `stored_at` is present only for a file this machine *received*, and only
+/// once it is verified and promoted. It is local information and is never
+/// sent to a peer — an absolute path on the receiver is exactly the kind of
+/// thing the offer format deliberately has no room for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferReport {
+    /// Full hex. Local only: the truncated form is what reaches a log.
+    pub transfer_id: String,
+    pub device_name: String,
+    pub fingerprint_short: String,
+    pub direction: String,
+    /// Sanitized. The raw peer-supplied name never reaches a display.
+    pub filename: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub bytes_transferred: u64,
+    /// `None` for a zero-byte file, where a percentage means nothing.
+    pub percentage: Option<u8>,
+    pub state: String,
+    /// Set once the transfer is not going to complete.
+    pub failure: Option<String>,
+    pub stored_at: Option<String>,
 }
 
 /// How a known device stands *right now*.

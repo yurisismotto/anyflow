@@ -72,6 +72,17 @@ class PeerConnection private constructor(
     val protocolVersion: Int,
 ) {
 
+    /**
+     * Where this session's computer actually is.
+     *
+     * A `files.v1` data stream dials this same address and port: there is no
+     * second discovery mechanism and no second port to open (ADR-0013). Read
+     * from the live socket rather than remembered from the dial, so it is the
+     * address that genuinely answered.
+     */
+    val remoteAddress: InetSocketAddress
+        get() = InetSocketAddress(socket.inetAddress, socket.port)
+
     private val outbound = Channel<Envelope>(Channel.BUFFERED)
     private val _closed = MutableStateFlow(false)
     val closed: StateFlow<Boolean> = _closed.asStateFlow()

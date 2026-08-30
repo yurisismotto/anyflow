@@ -10,7 +10,7 @@ use tokio::net::{UnixListener, UnixStream};
 
 use crate::control::{
     BatteryReport, ConnectionReport, DeviceReport, DeviceState, Event, Request, Response,
-    StatusReport, BATTERY_STALE_AFTER_SECS,
+    StatusReport, TransferReport, BATTERY_STALE_AFTER_SECS,
 };
 use crate::state::DaemonState;
 
@@ -98,6 +98,25 @@ async fn serve_client(stream: UnixStream, state: Arc<DaemonState>) -> anyhow::Re
         }
         Request::Pair { ttl_secs } => {
             run_pair_session(state, lines, write, ttl_secs).await?;
+        }
+        Request::Grant {
+            device,
+            capability,
+            granted,
+        } => {
+            let response = do_grant(&state, &device, &capability, granted).await;
+            send(&mut write, &response).await?;
+        }
+        Request::Transfers => {
+            let report = build_transfers(&state).await;
+            send(&mut write, &Response::Transfers(report)).await?;
+        }
+        Request::CancelTransfer { transfer } => {
+            let response = do_cancel_transfer(&state, &transfer).await;
+            send(&mut write, &response).await?;
+        }
+        Request::Send { device, path } => {
+            run_send_session(state, write, &device, &path).await?;
         }
     }
 
@@ -293,6 +312,20 @@ async fn do_unpair(state: &Arc<DaemonState>, device: &str) -> Response {
         Ok(true) => {
             // Revocation must take effect now, not at the next reconnect:
             // tear down any live session with that device.
+            //
+            // A data stream is a *separate* TCP connection and would survive
+            // the control session's death for as long as its copy loop ran,
+            // so in-flight transfers are stopped explicitly rather than left
+            // to the reaper. Done before the session is closed, so the peer
+            // still receives the cancellation.
+            if let Some(transfers) = state.transfers.clone() {
+                transfers
+                    .cancel_peer(
+                        &fingerprint,
+                        anyflow_capability_files::transfer::FailureReason::Revoked,
+                    )
+                    .await;
+            }
             if let Some(handle) = state.session_for(&fingerprint).await {
                 handle.shutdown().await;
             }
@@ -308,6 +341,268 @@ async fn do_unpair(state: &Arc<DaemonState>, device: &str) -> Response {
             message: format!("failed to persist revocation: {e}"),
         },
     }
+}
+
+/// Renders one transfer for the CLI.
+async fn transfer_report(
+    state: &Arc<DaemonState>,
+    snapshot: &anyflow_capability_files::TransferSnapshot,
+) -> TransferReport {
+    let device_name = {
+        let store = state.store.lock().await;
+        store
+            .peer_record(&snapshot.peer)
+            .map(|p| p.device_name.clone())
+            .unwrap_or_else(|| "unknown device".to_string())
+    };
+
+    TransferReport {
+        transfer_id: snapshot.id.to_hex(),
+        device_name,
+        fingerprint_short: snapshot.peer.to_display_short(),
+        direction: snapshot.direction.as_str().to_string(),
+        filename: snapshot.filename.clone(),
+        mime_type: snapshot.mime_type.clone(),
+        size_bytes: snapshot.size_bytes,
+        bytes_transferred: snapshot.bytes_transferred,
+        percentage: snapshot.percentage(),
+        state: snapshot.state.as_str().to_string(),
+        failure: snapshot.failure.map(|f| f.as_str().to_string()),
+        stored_at: snapshot.stored_at.as_ref().map(|p| p.display().to_string()),
+    }
+}
+
+async fn build_transfers(state: &Arc<DaemonState>) -> Vec<TransferReport> {
+    let Some(transfers) = state.transfers.clone() else {
+        return Vec::new();
+    };
+    let snapshots = transfers.snapshot().await;
+    let mut out = Vec::with_capacity(snapshots.len());
+    for snapshot in &snapshots {
+        out.push(transfer_report(state, snapshot).await);
+    }
+    out
+}
+
+/// Grants or withdraws a capability for one device.
+async fn do_grant(
+    state: &Arc<DaemonState>,
+    device: &str,
+    capability: &str,
+    granted: bool,
+) -> Response {
+    let fingerprint = match state.resolve_device(device).await {
+        Ok(f) => f,
+        Err(message) => return Response::Error { message },
+    };
+
+    // Only a capability this build actually implements can be granted.
+    // Storing a grant for an unknown id would produce a permission that looks
+    // real in `anyflow devices` and does nothing.
+    if !state.registry.supports(capability) {
+        return Response::Error {
+            message: format!("this daemon does not implement '{capability}'"),
+        };
+    }
+
+    let result = {
+        let mut store = state.store.lock().await;
+        if store.trusted_peer(&fingerprint).is_none() {
+            return Response::Error {
+                message: "that device is not paired (or its pairing was revoked)".into(),
+            };
+        }
+        store.set_capability_grant(&fingerprint, capability, granted)
+    };
+
+    if let Err(e) = result {
+        return Response::Error {
+            message: format!("could not persist the grant: {e}"),
+        };
+    }
+
+    // Withdrawing a grant must bite immediately, exactly as a full revocation
+    // does. Otherwise a transfer already in flight would run to completion
+    // under a permission the user has just taken away.
+    if !granted {
+        if let Some(transfers) = state.transfers.clone() {
+            if capability == anyflow_capability_files::CAPABILITY_ID {
+                transfers
+                    .cancel_peer(
+                        &fingerprint,
+                        anyflow_capability_files::transfer::FailureReason::Revoked,
+                    )
+                    .await;
+            }
+        }
+    }
+
+    Response::Ok {
+        message: format!(
+            "{} {} for {}",
+            if granted { "granted" } else { "withdrew" },
+            capability,
+            fingerprint.to_display_short()
+        ),
+    }
+}
+
+/// Cancels a transfer named by id or by an unambiguous prefix.
+async fn do_cancel_transfer(state: &Arc<DaemonState>, selector: &str) -> Response {
+    let Some(transfers) = state.transfers.clone() else {
+        return Response::Error {
+            message: "file transfer is not enabled".into(),
+        };
+    };
+
+    let needle = selector.trim().to_ascii_lowercase();
+    if needle.len() < 4 {
+        return Response::Error {
+            message: "a transfer id prefix must be at least 4 characters".into(),
+        };
+    }
+
+    let matches: Vec<_> = transfers
+        .snapshot()
+        .await
+        .into_iter()
+        .filter(|t| t.state.is_active() && t.id.to_hex().starts_with(&needle))
+        .collect();
+
+    // An ambiguous prefix is an error, never a guess — the same rule
+    // `resolve_device` follows, and for the same reason.
+    match matches.as_slice() {
+        [one] => {
+            if transfers.cancel(one.id).await {
+                Response::Ok {
+                    message: format!("cancelled transfer {}", one.id),
+                }
+            } else {
+                Response::Error {
+                    message: "that transfer already finished".into(),
+                }
+            }
+        }
+        [] => Response::Error {
+            message: format!("no active transfer matches '{selector}'"),
+        },
+        many => Response::Error {
+            message: format!(
+                "'{}' is ambiguous: it matches {} transfers",
+                selector,
+                many.len()
+            ),
+        },
+    }
+}
+
+/// Offers a file and streams the transfer's progress until it settles.
+async fn run_send_session(
+    state: Arc<DaemonState>,
+    mut write: tokio::net::unix::OwnedWriteHalf,
+    device: &str,
+    path: &str,
+) -> anyhow::Result<()> {
+    let Some(transfers) = state.transfers.clone() else {
+        send(
+            &mut write,
+            &Response::Error {
+                message: "file transfer is not enabled".into(),
+            },
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let fingerprint = match state.resolve_device(device).await {
+        Ok(f) => f,
+        Err(message) => {
+            // An ambiguous or unknown name fails here, loudly. Sending a file
+            // to the wrong device because a prefix matched two of them is
+            // exactly the failure this refuses to have.
+            send(&mut write, &Response::Error { message }).await?;
+            return Ok(());
+        }
+    };
+
+    let path = std::path::PathBuf::from(path);
+    let metadata = match tokio::fs::metadata(&path).await {
+        Ok(m) if m.is_file() => m,
+        Ok(_) => {
+            send(
+                &mut write,
+                &Response::Error {
+                    message: "only regular files can be sent (directories come later)".into(),
+                },
+            )
+            .await?;
+            return Ok(());
+        }
+        Err(e) => {
+            send(
+                &mut write,
+                &Response::Error {
+                    message: format!("cannot read that file: {e}"),
+                },
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    let _ = metadata;
+
+    // Subscribed *before* the offer, so no early event is missed.
+    let mut events = transfers.subscribe();
+
+    let id = match transfers.offer_file(fingerprint, path).await {
+        Ok(id) => id,
+        Err(e) => {
+            send(
+                &mut write,
+                &Response::Error {
+                    message: format!("could not offer the file: {e}"),
+                },
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    loop {
+        let event = match events.recv().await {
+            Ok(e) => e,
+            // Lagged: the CLI fell behind a burst of progress updates. The
+            // next event still carries the current byte count, so nothing is
+            // lost but resolution.
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(_) => break,
+        };
+        if event.0.id != id {
+            continue;
+        }
+
+        let report = transfer_report(&state, &event.0).await;
+        let terminal = event.0.state.is_terminal();
+        send(&mut write, &Event::TransferProgress(report)).await?;
+
+        if terminal {
+            send(
+                &mut write,
+                &Event::Finished {
+                    status: event.0.state.as_str().to_string(),
+                    detail: event
+                        .0
+                        .failure
+                        .map(|f| f.as_str().to_string())
+                        .unwrap_or_else(|| event.0.filename.clone()),
+                },
+            )
+            .await?;
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 /// Drives an interactive pairing session over one control connection.

@@ -17,3 +17,4 @@ alternatives that were actually considered, and what the decision costs.
 | [0010](ADR-0010-protocol-envelope-and-framing.md) | Protocol envelope and framing | Accepted |
 | [0011](ADR-0011-project-naming-and-wire-identifiers.md) | Project naming and wire identifiers | Accepted |
 | [0012](ADR-0012-bulk-transfer-and-frame-limit.md) | Bulk transfer and the 64 KiB frame limit | Accepted |
+| [0013](ADR-0013-file-transfer-data-stream.md) | The `files.v1` authenticated data stream | Accepted |

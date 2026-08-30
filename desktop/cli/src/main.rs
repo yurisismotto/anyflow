@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyflow_daemon::control::{
-    control_socket_path, BatteryReport, DeviceReport, Event, Request, Response,
+    control_socket_path, BatteryReport, DeviceReport, Event, Request, Response, TransferReport,
 };
 use clap::{Parser, Subcommand};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -36,6 +36,40 @@ enum Command {
     Unpair { device: String },
     /// Round-trip a PING over the live session with a device.
     Ping { device: String },
+
+    /// Allow a device to use a capability.
+    ///
+    /// Pairing says who a device is; this says what it may do. `files.v1` is
+    /// never granted automatically, because writing files to your disk is a
+    /// side effect and ADR-0008 requires those to be explicit.
+    Grant {
+        /// Device id, or a fingerprint prefix of at least 8 characters.
+        device: String,
+        /// Capability id, e.g. `files.v1`.
+        capability: String,
+    },
+
+    /// Withdraw a capability from a device. Takes effect immediately,
+    /// including on a transfer that is already running.
+    Revoke { device: String, capability: String },
+
+    /// Send a file to a paired device.
+    ///
+    /// The device may be named by its device id or by an unambiguous
+    /// fingerprint prefix. An ambiguous name is an error: sending a file to
+    /// the wrong device because a prefix matched two of them is not a
+    /// failure mode worth having.
+    Send {
+        device: String,
+        /// Path to a regular file on this machine. Only its basename is sent.
+        file: std::path::PathBuf,
+    },
+
+    /// List transfers this daemon has seen since it started.
+    Transfers,
+
+    /// Cancel a running transfer, by id or by an unambiguous id prefix.
+    Cancel { transfer: String },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -57,6 +91,31 @@ async fn main() -> anyhow::Result<()> {
         Command::Ping { device } => simple(stream, Request::Ping { device }).await,
         Command::Unpair { device } => simple(stream, Request::Unpair { device }).await,
         Command::Pair { ttl } => pair(stream, ttl).await,
+        Command::Grant { device, capability } => {
+            simple(
+                stream,
+                Request::Grant {
+                    device,
+                    capability,
+                    granted: true,
+                },
+            )
+            .await
+        }
+        Command::Revoke { device, capability } => {
+            simple(
+                stream,
+                Request::Grant {
+                    device,
+                    capability,
+                    granted: false,
+                },
+            )
+            .await
+        }
+        Command::Transfers => simple(stream, Request::Transfers).await,
+        Command::Cancel { transfer } => simple(stream, Request::CancelTransfer { transfer }).await,
+        Command::Send { device, file } => send_file(stream, device, file).await,
     }
 }
 
@@ -104,6 +163,16 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
             }
             for d in &devices {
                 print_device(d, "   ");
+            }
+        }
+        Response::Transfers(transfers) => {
+            if transfers.is_empty() {
+                println!("no transfers since the daemon started.");
+                return Ok(());
+            }
+            for t in &transfers {
+                print_transfer(t, "  ");
+                println!();
             }
         }
         Response::Pong { rtt_ms } => println!("pong in {rtt_ms} ms"),
@@ -177,6 +246,130 @@ fn human_duration(secs: u64) -> String {
     }
 }
 
+/// Prints one transfer.
+fn print_transfer(t: &TransferReport, indent: &str) {
+    // The short id is what a user types into `anyflow cancel`.
+    println!(
+        "{indent}{}  {} {} {}",
+        &t.transfer_id[..8],
+        t.direction,
+        if t.direction == "sending" { "->" } else { "<-" },
+        t.device_name,
+    );
+    println!("{indent}   file        {}", t.filename);
+    println!("{indent}   size        {}", human_bytes(t.size_bytes));
+    println!("{indent}   state       {}", t.state);
+    if let Some(reason) = &t.failure {
+        println!("{indent}   reason      {reason}");
+    }
+    if let Some(path) = &t.stored_at {
+        println!("{indent}   stored at   {path}");
+    }
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Renders a one-line progress bar, rewritten in place.
+fn progress_line(t: &TransferReport) -> String {
+    match t.percentage {
+        Some(pct) => {
+            let filled = (pct as usize * 24) / 100;
+            let bar: String = std::iter::repeat_n('=', filled)
+                .chain(std::iter::repeat_n(' ', 24 - filled))
+                .collect();
+            format!(
+                "  [{bar}] {pct:>3}%  {} / {}",
+                human_bytes(t.bytes_transferred),
+                human_bytes(t.size_bytes)
+            )
+        }
+        // A zero-byte file has no meaningful percentage; showing 100% or 0%
+        // would both be lies of a sort.
+        None => format!("  {} ({})", t.state, human_bytes(t.size_bytes)),
+    }
+}
+
+/// Offers a file and follows it to a terminal state.
+async fn send_file(
+    stream: UnixStream,
+    device: String,
+    file: std::path::PathBuf,
+) -> anyhow::Result<()> {
+    // Resolved locally so a typo fails here, with a clear message, rather
+    // than as a daemon-side error about a path the user did not type.
+    let path = file
+        .canonicalize()
+        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", file.display()))?;
+
+    let (read, mut write) = stream.into_split();
+    let mut lines = BufReader::new(read).lines();
+
+    write_json(
+        &mut write,
+        &Request::Send {
+            device,
+            path: path.to_string_lossy().into_owned(),
+        },
+    )
+    .await?;
+
+    let mut named = false;
+    while let Some(line) = lines.next_line().await? {
+        if let Ok(Response::Error { message }) = serde_json::from_str::<Response>(&line) {
+            eprintln!("error: {message}");
+            std::process::exit(1);
+        }
+
+        match serde_json::from_str::<Event>(&line)? {
+            Event::TransferProgress(t) => {
+                if !named {
+                    println!(
+                        "{} -> {} ({})",
+                        t.filename,
+                        t.device_name,
+                        human_bytes(t.size_bytes)
+                    );
+                    named = true;
+                }
+                // `\r` and no newline: one line that updates in place.
+                use std::io::Write as _;
+                print!("\r{}", progress_line(&t));
+                let _ = std::io::stdout().flush();
+            }
+
+            Event::Finished { status, detail } => {
+                println!();
+                match status.as_str() {
+                    "completed" => println!("Sent. {detail}"),
+                    "cancelled" => println!("Cancelled: {detail}"),
+                    other => {
+                        eprintln!("Transfer {other}: {detail}");
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+
+            // Not part of a send stream.
+            Event::PairingReady { .. } | Event::ConfirmRequest { .. } => continue,
+        }
+    }
+    Ok(())
+}
+
 /// Runs an interactive pairing session.
 ///
 /// The pairing window lives exactly as long as this process: closing the
@@ -223,6 +416,9 @@ async fn pair(stream: UnixStream, ttl: Option<u64>) -> anyhow::Result<()> {
                 let accept = read_yes_no().await;
                 write_json(&mut write, &Request::Confirm { accept }).await?;
             }
+
+            // Not part of a pairing stream.
+            Event::TransferProgress(_) => continue,
 
             Event::Finished { status, detail } => {
                 match status.as_str() {

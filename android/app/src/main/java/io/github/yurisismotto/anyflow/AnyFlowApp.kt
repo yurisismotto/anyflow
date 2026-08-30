@@ -4,6 +4,8 @@ import android.app.Application
 import android.util.Log
 import io.github.yurisismotto.anyflow.capability.BatteryCapability
 import io.github.yurisismotto.anyflow.capability.CapabilityRegistry
+import io.github.yurisismotto.anyflow.capability.FilesCapability
+import io.github.yurisismotto.anyflow.files.FileTransferManager
 import io.github.yurisismotto.anyflow.identity.DeviceIdentity
 import io.github.yurisismotto.anyflow.net.ConnectResult
 import io.github.yurisismotto.anyflow.net.Discovery
@@ -38,6 +40,18 @@ class AnyFlowApp : Application() {
         private set
     lateinit var discovery: Discovery
         private set
+    lateinit var files: FileTransferManager
+        private set
+
+    /**
+     * Application-lifetime scope for file transfers.
+     *
+     * Not the connection service's scope: a transfer must survive the UI
+     * being closed, and must not be cancelled by a screen rotation.
+     */
+    private val appScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+    )
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -67,7 +81,19 @@ class AnyFlowApp : Application() {
         trustStore = TrustStore(this)
         identity = DeviceIdentity.loadOrCreate(trustStore.deviceId)
         battery = BatteryCapability(this)
-        registry = CapabilityRegistry(listOf(battery))
+
+        // The grant is re-read from the trust store on every question rather
+        // than captured once, so revoking `files.v1` — or forgetting the
+        // computer entirely — takes effect immediately, including against a
+        // transfer that is already running.
+        files = FileTransferManager(
+            context = this,
+            identity = identity,
+            scope = appScope,
+            isAuthorized = { peer -> isFileTransferAllowed(peer) },
+        )
+
+        registry = CapabilityRegistry(listOf(battery, FilesCapability(files)))
         discovery = Discovery(this)
 
         Log.i(
@@ -76,6 +102,18 @@ class AnyFlowApp : Application() {
                 "(strongbox=${identity.isStrongBoxBacked})",
         )
     }
+
+    /**
+     * Whether a computer may transfer files with this phone, right now.
+     *
+     * Answered from the trust store every time. A peer that was forgotten, or
+     * whose `files.v1` grant was withdrawn, stops being authorized at once —
+     * the handshake's answer is a snapshot and would not.
+     */
+    private fun isFileTransferAllowed(peer: io.github.yurisismotto.anyflow.identity.Fingerprint):
+        Boolean = runCatching {
+        trustStore.peer(peer)?.grantedCapabilities?.contains(FilesCapability.ID) == true
+    }.getOrDefault(false)
 
     /**
      * Where to try reaching a paired computer, best guess first.
@@ -197,6 +235,11 @@ class AnyFlowApp : Application() {
                     )
                     trustStore.addPeer(peer)
                     connection.disconnect()
+                    // `files.v1` is granted here because the person just
+                    // paired this computer by hand, and every incoming file
+                    // still needs their explicit approval. The grant is
+                    // revocable from the device card, and revoking it takes
+                    // effect immediately.
                     _connectionState.value = ConnectionState.Idle
                     return Result.success(peer)
                 }
