@@ -66,6 +66,10 @@ android {
             // fingerprint is. Regenerate with:
             //   cargo run -p anyflow-core --example gen_test_vectors
             resources.srcDir("../../protocol/testdata")
+            // Same idea for the design tokens: DesignTokensTest reads the very
+            // file the desktop's own token test reads, so the two front ends
+            // cannot quietly disagree about what "connected teal" is.
+            resources.srcDir("../../docs/design")
         }
     }
 }

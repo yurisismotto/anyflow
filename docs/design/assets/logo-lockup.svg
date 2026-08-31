@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 72" width="340" height="72" role="img" aria-label="AnyFlow">
+  <title>AnyFlow logo lockup</title>
+  <defs>
+    <linearGradient id="anyflow-lockup" x1="10" y1="56" x2="54" y2="8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#16B8A6"/><stop offset=".5" stop-color="#4F7CFF"/><stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(4,4)">
+    <path d="M32 7 C 34.5 7 36 9 37 11.5 L 55 51 C 56.4 54 54.6 57 51.5 57 L 45 57 C 43 57 41.6 55.8 40.8 54 L 32 33 L 25.5 49 C 23 55 17 58 10.5 56.5 C 7.6 55.8 6.6 53.2 8.2 50.6 L 27 11.5 C 28 9 29.5 7 32 7 Z" fill="url(#anyflow-lockup)"/>
+    <path d="M18 46 C 29 46, 31 53, 42 47 C 46 44.6, 49 45, 51 47" fill="none" stroke="url(#anyflow-lockup)" stroke-width="6.5" stroke-linecap="round"/>
+  </g>
+  <text x="80" y="46" font-family="Inter, Cantarell, 'Adwaita Sans', 'Noto Sans', system-ui, sans-serif"
+        font-size="38" font-weight="700" letter-spacing="-1" fill="#0F172A">AnyFlow</text>
+  <text x="82" y="64" font-family="Inter, Cantarell, 'Adwaita Sans', 'Noto Sans', system-ui, sans-serif"
+        font-size="13" font-weight="400" letter-spacing="0.2" fill="#475569">One flow. Any device.</text>
+</svg>

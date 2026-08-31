@@ -5,6 +5,7 @@ members = [
     "core",
     "daemon",
     "cli",
+    "gui",
     "capabilities/battery",
     "capabilities/clipboard",
     "capabilities/files",

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon foreground. The 108x108 canvas has a 72x72 safe zone; the
+  ribbon is scaled and centred to sit inside it, so no launcher mask can clip
+  a terminal node off.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:pivotX="32" android:pivotY="32"
+        android:scaleX="1.15" android:scaleY="1.15"
+        android:translateX="22" android:translateY="22">
+        <path android:pathData="M14,44 C 30,44 24,21 50,22"
+            android:strokeWidth="6.5" android:strokeLineCap="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear"
+                    android:startX="12" android:startY="46" android:endX="52" android:endY="20">
+                    <item android:offset="0" android:color="#FF16B8A6" />
+                    <item android:offset="0.5" android:color="#FF4F7CFF" />
+                    <item android:offset="1" android:color="#FF8B5CF6" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M14,44m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" android:fillColor="#FF16B8A6" />
+        <path android:pathData="M50,22m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" android:fillColor="#FF8B5CF6" />
+    </group>
+</vector>
