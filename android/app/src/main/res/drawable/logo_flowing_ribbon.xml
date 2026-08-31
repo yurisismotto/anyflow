@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Flowing Ribbon: AnyFlow's product / connection mark.
+  Two endpoints joined by one continuous flow. Used for the app icon, the app
+  bar, transfer motifs and empty states. The institutional mark is the
+  Flowing A (logo_flowing_a.xml) — see docs/design/BRAND.md.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="64dp" android:height="64dp"
+    android:viewportWidth="64" android:viewportHeight="64">
+    <path android:pathData="M14,44 C 30,44 24,21 50,22"
+        android:strokeWidth="6.5" android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:type="linear"
+                android:startX="12" android:startY="46" android:endX="52" android:endY="20">
+                <item android:offset="0" android:color="#FF16B8A6" />
+                <item android:offset="0.5" android:color="#FF4F7CFF" />
+                <item android:offset="1" android:color="#FF8B5CF6" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M14,44m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" android:fillColor="#FF16B8A6" />
+    <path android:pathData="M50,22m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" android:fillColor="#FF8B5CF6" />
+</vector>

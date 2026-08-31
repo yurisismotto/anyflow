@@ -1,0 +1,34 @@
+[package]
+name = "anyflow-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "anyflow_gui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "anyflow-gui"
+path = "src/main.rs"
+
+[dependencies]
+# The control protocol types, from the daemon crate the CLI already uses.
+# Sharing them is the point: the GUI cannot drift from the socket contract.
+anyflow-daemon = { version = "0.1.0", path = "../daemon", default-features = false }
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "sync"] }
+async-channel = "2"
+serde_json = "1"
+anyhow = "1"
+# Same encoder the daemon uses for the terminal QR, so the two cannot
+# disagree about what was encoded.
+qrcode = { version = "0.14", default-features = false }
+
+[build-dependencies]
+glib-build-tools = "0.20"

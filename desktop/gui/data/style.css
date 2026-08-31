@@ -1,0 +1,210 @@
+/*
+ * AnyFlow desktop stylesheet.
+ *
+ * Colour tokens are injected ahead of this file as @define-color by
+ * src/theme.rs, so the same rules serve light and dark and there is exactly
+ * one place where a hex value is decided.
+ *
+ * Structural values (radius, spacing, weights) are literal here because GTK
+ * CSS has no custom properties; they mirror docs/design/tokens.json and the
+ * token test checks the ones that matter.
+ */
+
+/* ---- typography ------------------------------------------------------- */
+/*
+ * Inter is the brand direction but is not bundled: on a GNOME desktop the
+ * system UI face is already a close neo-grotesque, and shipping a font to
+ * override the user's own font settings is the wrong trade on Linux. If
+ * Inter is installed it is picked up first. See docs/design/BRAND.md.
+ */
+window, .af-root {
+    font-family: Inter, Cantarell, "Adwaita Sans", sans-serif;
+}
+
+.af-display   { font-size: 32px; font-weight: 700; letter-spacing: -0.5px; }
+.af-title     { font-size: 24px; font-weight: 700; letter-spacing: -0.25px; }
+.af-heading   { font-size: 20px; font-weight: 600; }
+.af-subtitle  { font-size: 16px; font-weight: 600; }
+.af-body      { font-size: 14px; font-weight: 400; }
+.af-label     { font-size: 13px; font-weight: 500; }
+.af-caption   { font-size: 12px; font-weight: 400; }
+.af-mono      { font-family: "JetBrains Mono", "Source Code Pro", monospace; font-size: 13px; }
+
+.af-text-primary   { color: @af_text_primary; }
+.af-text-secondary { color: @af_text_secondary; }
+.af-text-muted     { color: @af_text_muted; }
+
+/* ---- surfaces --------------------------------------------------------- */
+window.af-root, .af-content {
+    background-color: @af_background;
+}
+
+.af-card {
+    background-color: @af_surface;
+    border: 1px solid @af_border;
+    border-radius: 16px;
+    padding: 16px;
+}
+
+/* A card that is itself a button keeps the card look and gains a hover. */
+button.af-card {
+    background-image: none;
+    box-shadow: none;
+    padding: 16px;
+}
+button.af-card:hover  { background-color: @af_surface_sunken; }
+button.af-card:active { background-color: @af_surface_sunken; }
+
+.af-card-sunken {
+    background-color: @af_surface_sunken;
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.af-sidebar {
+    background-color: @af_surface;
+    border-right: 1px solid @af_border;
+}
+
+/* ---- navigation ------------------------------------------------------- */
+.af-nav row {
+    border-radius: 8px;
+    margin: 2px 8px;
+    min-height: 40px;
+}
+.af-nav row:selected {
+    background-color: alpha(@af_blue, 0.12);
+    color: @af_blue;
+}
+.af-nav row:selected label { color: @af_blue; font-weight: 600; }
+.af-nav row:hover { background-color: @af_surface_sunken; }
+
+/* ---- status language -------------------------------------------------- */
+/*
+ * Colour is never the only carrier: each of these sits beside an icon and a
+ * word. The dot classes paint the brand hue at full strength on a shape big
+ * enough that its colour is decoration; the text classes use the corrected
+ * hue that clears AA.
+ */
+.af-status-connected    { color: @af_teal; }
+.af-status-available    { color: @af_blue; }
+.af-status-transferring { color: @af_blue; }
+.af-status-success      { color: @af_teal; }
+.af-status-warning      { color: @af_amber; }
+.af-status-stale        { color: @af_amber; }
+.af-status-error        { color: @af_red; }
+.af-status-revoked      { color: @af_red; }
+.af-status-disconnected { color: @af_text_muted; }
+
+.af-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 999px;
+}
+.af-dot-teal    { background-color: @af_dot_teal; }
+.af-dot-blue    { background-color: @af_dot_blue; }
+.af-dot-violet  { background-color: @af_dot_violet; }
+.af-dot-amber   { background-color: #F59E0B; }
+.af-dot-red     { background-color: #EF4444; }
+.af-dot-neutral { background-color: @af_disabled; }
+
+/* ---- buttons ---------------------------------------------------------- */
+/*
+ * The CTA wears the deepened gradient, not the identity one: white on brand
+ * teal is 2.49:1 and this button always has a label on it.
+ */
+button.af-cta {
+    background-image: linear-gradient(to right, #0B7F72 0%, #3B5BDB 55%, #7C3AED 100%);
+    background-color: transparent;
+    color: #FFFFFF;
+    font-weight: 600;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 20px;
+    box-shadow: none;
+}
+button.af-cta:hover { filter: brightness(1.08); }
+button.af-cta:disabled {
+    background-image: none;
+    background-color: @af_surface_sunken;
+    color: @af_disabled;
+}
+
+button.af-secondary {
+    background-image: none;
+    background-color: @af_surface;
+    color: @af_text_primary;
+    border: 1px solid @af_border_strong;
+    border-radius: 999px;
+    padding: 8px 16px;
+}
+button.af-secondary:hover { background-color: @af_surface_sunken; }
+
+/* Set apart from everything else, never filled: forgetting a device is not
+   an action that should be the loudest thing on the screen. */
+button.af-destructive {
+    background-image: none;
+    background-color: transparent;
+    color: @af_red;
+    border: 1px solid alpha(@af_red, 0.5);
+    border-radius: 999px;
+    padding: 8px 16px;
+}
+button.af-destructive:hover { background-color: alpha(@af_red, 0.08); }
+
+/* ---- tinted icon tiles ------------------------------------------------ */
+.af-tile {
+    border-radius: 12px;
+    /* A floor, not a size: callers set_size_request smaller tiles for chips. */
+    min-width: 28px;
+    min-height: 28px;
+    padding: 6px;
+}
+.af-tile-teal   { background-color: alpha(@af_teal, 0.10); color: @af_teal; }
+.af-tile-blue   { background-color: alpha(@af_blue, 0.10); color: @af_blue; }
+.af-tile-violet { background-color: alpha(@af_violet, 0.10); color: @af_violet; }
+.af-tile-amber  { background-color: alpha(@af_amber, 0.10); color: @af_amber; }
+.af-tile-red    { background-color: alpha(@af_red, 0.10); color: @af_red; }
+/* A capability that is not granted: present, legible, plainly inactive. */
+.af-tile-neutral { background-color: @af_surface_sunken; color: @af_disabled; }
+
+/* ---- notices ---------------------------------------------------------- */
+.af-notice {
+    border-radius: 12px;
+    padding: 12px;
+    background-color: alpha(@af_blue, 0.08);
+}
+.af-notice-caution { background-color: alpha(@af_amber, 0.10); }
+
+/* ---- progress --------------------------------------------------------- */
+/* No text sits on a progress fill, so the vivid brand stops are fine here. */
+progressbar.af-progress > trough {
+    background-color: @af_surface_sunken;
+    border-radius: 999px;
+    min-height: 6px;
+}
+progressbar.af-progress > trough > progress {
+    background-image: linear-gradient(to right, #16B8A6, #4F7CFF);
+    border-radius: 999px;
+    min-height: 6px;
+}
+
+/* ---- status bar ------------------------------------------------------- */
+.af-statusbar {
+    background-color: @af_surface;
+    border-top: 1px solid @af_border;
+    padding: 6px 16px;
+}
+
+/* ---- misc ------------------------------------------------------------- */
+.af-separator { background-color: @af_border; min-height: 1px; }
+
+/*
+ * Focus must stay visible: keyboard navigation is the primary way some
+ * people drive this app, and libadwaita's default ring is easy to lose
+ * against a tinted card.
+ */
+*:focus-visible {
+    outline: 2px solid @af_blue;
+    outline-offset: 2px;
+}

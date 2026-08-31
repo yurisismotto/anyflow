@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 72" width="200" height="72" role="img" aria-label="Two devices joined by a flow">
+  <title>AnyFlow connection ribbon</title>
+  <defs>
+    <linearGradient id="anyflow-conn" x1="16" y1="46" x2="184" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#16B8A6"/><stop offset=".5" stop-color="#4F7CFF"/><stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+  <path d="M18 46 C 62 46, 56 22, 100 26 C 144 30, 140 20, 182 26"
+        fill="none" stroke="url(#anyflow-conn)" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="18" cy="46" r="8" fill="#16B8A6"/>
+  <circle cx="182" cy="26" r="8" fill="#8B5CF6"/>
+</svg>

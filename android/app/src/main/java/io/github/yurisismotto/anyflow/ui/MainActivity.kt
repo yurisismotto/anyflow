@@ -3,47 +3,38 @@ package io.github.yurisismotto.anyflow.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import io.github.yurisismotto.anyflow.AnyFlowApp
+import io.github.yurisismotto.anyflow.capability.BatteryCapability
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
 import io.github.yurisismotto.anyflow.capability.FilesCapability
 import io.github.yurisismotto.anyflow.clipboard.ClipboardNotifications
 import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSendFailed
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
+import io.github.yurisismotto.anyflow.clipboard.SystemClipboard
 import io.github.yurisismotto.anyflow.identity.Fingerprint
 import io.github.yurisismotto.anyflow.pairing.QrPayload
 import io.github.yurisismotto.anyflow.service.ConnectionService
 import io.github.yurisismotto.anyflow.store.TrustStore
+import io.github.yurisismotto.anyflow.ui.theme.AnyFlowTheme
 import kotlinx.coroutines.launch
 
 /**
@@ -77,6 +68,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** The peer a file picked from the system picker should be offered to. */
+    private var pendingFileTarget: Fingerprint? = null
+
+    private val filePicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            val peer = pendingFileTarget
+            pendingFileTarget = null
+            if (uri == null || peer == null) return@registerForActivityResult
+            lifecycleScope.launch {
+                app.files.offer(peer, uri)
+                    .onFailure { showError(it.message ?: "Could not send that file.") }
+            }
+        }
+
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -109,36 +114,12 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
 
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    MainScreen(
-                        app = app,
-                        onPair = ::requestScan,
-                        onConnect = { ConnectionService.start(this) },
-                        onDisconnect = { ConnectionService.stop(this) },
-                        onForget = { peer ->
-                            app.trustStore.removePeer(peer.fingerprint)
-                            ConnectionService.stop(this)
-                        },
-                        onSetFilesGrant = { peer, granted ->
-                            app.trustStore.setGrant(peer.fingerprint, FilesCapability.ID, granted)
-                        },
-                        onSetClipboardGrant = { peer, granted ->
-                            app.trustStore
-                                .setGrant(peer.fingerprint, ClipboardCapability.ID, granted)
-                        },
-                        onSetClipboardPolicy = { peer, policy ->
-                            app.trustStore.setClipboardPolicy(peer.fingerprint, policy)
-                        },
-                        onSendClipboard = ::sendClipboard,
-                        onApplyClip = ::applyClip,
-                        onDismissClip = { peer ->
-                            lifecycleScope.launch { app.clipboard.dismissPending(peer) }
-                            ClipboardNotifications(this).clear(peer)
-                        },
-                        pendingRequest = requestedClip,
-                        onPendingRequestHandled = { requestedClip = null },
-                    )
+            AnyFlowTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = AnyFlowTheme.colors.background,
+                ) {
+                    AnyFlowShell(state = rememberMainUiState(), actions = rememberMainActions())
 
                     sensitivePrompt?.let { prompt ->
                         SensitiveClipDialog(
@@ -155,6 +136,95 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /** Collects every observable the UI draws from into one snapshot. */
+    @Composable
+    private fun rememberMainUiState(): MainUiState {
+        // Observed, not read once. An earlier release read the peer list during
+        // composition and never again, so a grant changed anywhere else stayed
+        // invisible until the screen was recreated.
+        val connection by app.connectionState.collectAsState()
+        val peers by app.trustStore.peersFlow.collectAsState()
+        val offers by app.files.pendingOffers.collectAsState()
+        val transfers by app.files.visible.collectAsState()
+        val pendingClips by app.clipboard.pendingClips.collectAsState()
+        val outcomes by app.clipboard.lastOutcome.collectAsState()
+        return MainUiState(
+            ownDeviceName = app.trustStore.deviceName,
+            ownFingerprint = app.identity.fingerprint.toDisplayShort(),
+            keyBackingDescription = if (app.identity.isStrongBoxBacked) {
+                "Key stored in a secure element"
+            } else {
+                "Key stored in the hardware-backed keystore"
+            },
+            connection = connection,
+            peers = peers,
+            offers = offers,
+            transfers = transfers,
+            pendingClips = pendingClips,
+            clipboardOutcomes = outcomes,
+            remoteBatteryPercent = app.battery.remoteReading()?.percentage,
+        )
+    }
+
+    @Composable
+    private fun rememberMainActions(): MainActions = MainActions(
+        onPair = ::requestScan,
+        onConnect = { ConnectionService.start(this) },
+        onDisconnect = { ConnectionService.stop(this) },
+        onForget = { peer ->
+            app.trustStore.removePeer(peer.fingerprint)
+            ConnectionService.stop(this)
+        },
+        onSetFilesGrant = { peer, granted ->
+            app.trustStore.setGrant(peer.fingerprint, FilesCapability.ID, granted)
+        },
+        onSetClipboardGrant = { peer, granted ->
+            app.trustStore.setGrant(peer.fingerprint, ClipboardCapability.ID, granted)
+        },
+        onSetBatteryGrant = { peer, granted ->
+            app.trustStore.setGrant(peer.fingerprint, BatteryCapability.ID, granted)
+        },
+        onSetClipboardPolicy = { peer, policy ->
+            app.trustStore.setClipboardPolicy(peer.fingerprint, policy)
+        },
+        onSendClipboard = { peer -> sendClipboard(peer) },
+        onApplyClip = ::applyClip,
+        onDismissClip = { peer ->
+            lifecycleScope.launch { app.clipboard.dismissPending(peer) }
+            ClipboardNotifications(this).clear(peer)
+        },
+        onRespondToOffer = { transferId, accept -> app.files.respondToOffer(transferId, accept) },
+        onCancelTransfer = { transferId -> app.files.cancel(transferId) },
+        onPickFileFor = { peer ->
+            pendingFileTarget = peer
+            // ACTION_OPEN_DOCUMENT, exactly like the Sharesheet path: the URI
+            // arrives with a temporary read grant for that one item, which is
+            // why no storage permission is declared anywhere in the manifest.
+            filePicker.launch(arrayOf("*/*"))
+        },
+        readClipboardPreview = ::readClipboardPreview,
+    )
+
+    /**
+     * Reads the clipboard so the send screen can show what is about to leave.
+     *
+     * A clip the source app marked sensitive comes back with its text
+     * withheld: `EXTRA_IS_SENSITIVE` exists so that a preview does not put a
+     * password on screen, and the size is enough to decide with. Nothing here
+     * is logged or stored.
+     */
+    private fun readClipboardPreview(): ClipboardPreview? =
+        SystemClipboard(this).read().fold(
+            onSuccess = { clip ->
+                ClipboardPreview(
+                    text = if (clip.sensitive) null else clip.text.text,
+                    bytes = clip.text.byteLength,
+                    sensitive = clip.sensitive,
+                )
+            },
+            onFailure = { null },
+        )
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -264,157 +334,5 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** Asks this screen to send the clipboard as soon as it has focus. */
         const val ACTION_SEND_CLIPBOARD = "io.github.yurisismotto.anyflow.SEND_CLIPBOARD"
-    }
-}
-
-@Composable
-private fun MainScreen(
-    app: AnyFlowApp,
-    onPair: () -> Unit,
-    onConnect: () -> Unit,
-    onDisconnect: () -> Unit,
-    onForget: (TrustStore.TrustedPeer) -> Unit,
-    onSetFilesGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
-    onSetClipboardGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
-    onSetClipboardPolicy: (TrustStore.TrustedPeer, ClipboardPolicy) -> Unit,
-    onSendClipboard: (Fingerprint, Boolean) -> Unit,
-    onApplyClip: (Fingerprint) -> Unit,
-    onDismissClip: (Fingerprint) -> Unit,
-    pendingRequest: Fingerprint?,
-    onPendingRequestHandled: () -> Unit,
-) {
-    val state by app.connectionState.collectAsState()
-    // Observed, not read once. The previous release read the peer list during
-    // composition and never again, so a grant changed anywhere else stayed
-    // invisible until the screen was recreated.
-    val peers by app.trustStore.peersFlow.collectAsState()
-    val offers by app.files.pendingOffers.collectAsState()
-    val transfers by app.files.visible.collectAsState()
-    val pendingClips by app.clipboard.pendingClips.collectAsState()
-    val clipboardOutcomes by app.clipboard.lastOutcome.collectAsState()
-
-    val connectedPeer = (state as? AnyFlowApp.ConnectionState.Connected)?.fingerprintShort
-
-    Scaffold { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("AnyFlow", style = MaterialTheme.typography.headlineSmall)
-
-            Card {
-                Column(Modifier.padding(12.dp), Arrangement.spacedBy(4.dp)) {
-                    Text("This device", style = MaterialTheme.typography.titleMedium)
-                    Text(app.trustStore.deviceName)
-                    // Shown so the user can compare it against the computer's
-                    // screen during pairing.
-                    Text("Fingerprint ${app.identity.fingerprint.toDisplayShort()}")
-                    Text(
-                        if (app.identity.isStrongBoxBacked) {
-                            "Key stored in secure element"
-                        } else {
-                            "Key stored in hardware-backed keystore"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-
-            // Anything waiting on the person comes first.
-            for (offer in offers) {
-                IncomingOfferCard(
-                    offer = offer,
-                    onRespond = { accept -> app.files.respondToOffer(offer.transferId, accept) },
-                )
-            }
-
-            for (clip in pendingClips) {
-                PendingClipCard(
-                    clip = clip,
-                    onApply = { onApplyClip(clip.peer) },
-                    onDismiss = { onDismissClip(clip.peer) },
-                )
-            }
-
-            // A notification tapped while a clip is already gone should not
-            // leave the request hanging around forever.
-            if (pendingRequest != null && pendingClips.none { it.peer == pendingRequest }) {
-                onPendingRequestHandled()
-            }
-
-            for (transfer in transfers) {
-                TransferRow(
-                    transfer = transfer,
-                    onCancel = { app.files.cancel(transfer.transferId) },
-                )
-            }
-
-            Card {
-                Column(Modifier.padding(12.dp), Arrangement.spacedBy(4.dp)) {
-                    Text("Status", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        when (val s = state) {
-                            is AnyFlowApp.ConnectionState.Idle -> "Not connected"
-                            is AnyFlowApp.ConnectionState.Connecting -> "Connecting…"
-                            is AnyFlowApp.ConnectionState.Connected ->
-                                "Connected to ${s.deviceName} (${s.fingerprintShort})"
-                            // Shown separately from Error so the user can see
-                            // that the app is still working on it.
-                            is AnyFlowApp.ConnectionState.Retrying ->
-                                "Reconnecting in ${s.inSeconds}s (${s.reason})"
-                            is AnyFlowApp.ConnectionState.Error -> "Error: ${s.message}"
-                        },
-                    )
-                    app.battery.remoteReading()?.let { reading ->
-                        Text("Computer battery: ${reading.percentage}%")
-                    }
-                }
-            }
-
-            if (peers.isEmpty()) {
-                Text("No computer paired yet. Run `anyflow pair` on Fedora, then scan the code.")
-                Button(onClick = onPair) { Text("Scan pairing code") }
-            } else {
-                for (peer in peers) {
-                    val connected = connectedPeer == peer.fingerprint.toDisplayShort()
-                    Card {
-                        Column(Modifier.padding(12.dp), Arrangement.spacedBy(4.dp)) {
-                            Text(peer.deviceName, style = MaterialTheme.typography.titleMedium)
-                            Text("Fingerprint ${peer.fingerprint.toDisplayShort()}")
-
-                            val filesAllowed = peer.allows(FilesCapability.ID)
-                            OutlinedButton(onClick = { onSetFilesGrant(peer, !filesAllowed) }) {
-                                Text(
-                                    if (filesAllowed) {
-                                        "Stop allowing file transfer"
-                                    } else {
-                                        "Allow file transfer"
-                                    },
-                                )
-                            }
-
-                            ClipboardSection(
-                                peer = peer,
-                                connected = connected,
-                                lastOutcome = clipboardOutcomes[peer.fingerprint.toHex()],
-                                onSetGrant = { granted -> onSetClipboardGrant(peer, granted) },
-                                onSetPolicy = { policy -> onSetClipboardPolicy(peer, policy) },
-                                onSendClipboard = { onSendClipboard(peer.fingerprint, false) },
-                            )
-
-                            OutlinedButton(onClick = { onForget(peer) }) {
-                                Text("Forget this computer")
-                            }
-                        }
-                    }
-                }
-                Button(onClick = onConnect) { Text("Connect") }
-                OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
-            }
-        }
     }
 }
