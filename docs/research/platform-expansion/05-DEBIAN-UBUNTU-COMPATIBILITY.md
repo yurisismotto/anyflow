@@ -111,6 +111,12 @@ the default `rustc`.
 
 ---
 
+
+> **⚠ Updated by the verification sprint (2026-08-31).** See
+> [26 — External verification closeout](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) for the primary
+> sources and [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) for the resulting decisions.
+> **§5.3 is now resolved**, and a **new P0 defect** was found: `wl-copy --sensitive` does not exist before wl-clipboard 2.3.0, so `sensitive_hint` clips **fail outright** on Debian 13 and every current Ubuntu LTS ([26 §5.1](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)). MSRV is **1.82**, so Ubuntu 24.04 needs the named `rustc-1.82` package.
+
 ## 5. The three findings that matter
 
 ### 5.1 Ubuntu 24.04 LTS sits exactly on the libadwaita floor
@@ -156,11 +162,26 @@ If KWin no longer offers `wlr-data-control`, then on **Ubuntu 26.04 LTS + Plasma
 through to the Xwayland XFIXES bridge — which may or may not work on a Plasma Wayland
 session. Automatic clipboard send is what is at stake.
 
-Whether KWin kept a compatibility `wlr-data-control` binding is the crux, and this research
-could not establish it from primary sources with confidence: the wl-clipboard release notes
-and issue #242 give contradictory impressions of when `ext-data-control` support shipped.
-**EXTERNAL VERIFICATION REQUIRED**, and it is the first question **POC-KDE-01** must answer.
-See [06 §4](06-KDE-PLASMA-WAYLAND.md).
+Whether KWin kept a compatibility `wlr-data-control` binding was the crux. **RESOLVED
+(V-01, V-02 — primary sources):**
+
+- `ext-data-control-v1` support landed in **wl-clipboard 2.3.0**, released **2026-03-22**
+  (upstream release body).
+- KWin **dropped** its `wlr-data-control` compatibility overlay in commit `764b723`
+  (2025-04-12), first shipped in **Plasma 6.5**. KWin ≤ 6.4 offers both.
+
+Cross-referenced against the archives, **exactly one supported configuration is broken**:
+
+| Distribution | KWin | wl-clipboard | Auto-send |
+| --- | --- | --- | :-: |
+| Debian 13 trixie | 6.3.6 | 2.2.1 | ✅ via `wlr` |
+| Ubuntu 24.04 LTS | 5.27.11 | 2.2.1 | ✅ via `wlr` |
+| Ubuntu 25.10 | 6.4.5 | 2.2.1 | ✅ via `wlr` |
+| **Ubuntu 26.04 LTS** | **6.6.4** | **2.2.1** | ❌ **no common protocol** |
+| Debian forky/sid, Ubuntu stonking | 6.7.4 | 2.3.0 | ✅ via `ext` |
+
+Full matrix and sources: [26 §6](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). **POC-KDE-01 is narrowed**
+to measuring the Xwayland XFIXES fallback on Plasma, which documentation cannot settle.
 
 Note that GNOME on Ubuntu is unaffected: on GNOME the code already knows `wl-paste --watch`
 will not work and uses the X11 bridge.
@@ -251,6 +272,14 @@ constraint shapes the whole test-lab recommendation in
 3. **Debian 12 / Ubuntu 22.04: daemon + CLI only, best-effort, no GUI.** Do not lower the
    libadwaita floor for them.
 4. Split into `anyflow` and `anyflow-gui`.
-5. Treat wl-clipboard 2.2.1 on Ubuntu LTS as a **KDE risk** and resolve it in
-   **POC-KDE-01** before promising KDE auto-send on Ubuntu.
+5. Treat wl-clipboard 2.2.1 on **Ubuntu 26.04 LTS + Plasma** as a confirmed auto-send gap
+   (cause known; see above). Report it upstream to Ubuntu — 2.3.0 in `resolute-updates` fixes
+   this *and* `--sensitive` for every Ubuntu user.
+6. **NEW, P0 (LINUX-010):** handle `wl-copy --sensitive` being unavailable before wl-clipboard
+   2.3.0. It affects Debian 13 and **every** current Ubuntu LTS, on **every** desktop, and today
+   makes `sensitive_hint` clips fail with no explanation. Probe, fail closed, name the remedy
+   (PLAT-DEC-013).
+7. **Do not express this as `wl-clipboard >= 2.3` in packaging.** Fedora ships
+   `2.2.1^git20251124`, which *has* both features — a version dependency would exclude a working
+   system. Probe at runtime; *recommend* 2.3 in packaging.
 6. Defer official Debian archive inclusion; ship a `.deb` from CI first.

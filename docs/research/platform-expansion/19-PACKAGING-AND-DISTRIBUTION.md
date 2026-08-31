@@ -8,6 +8,7 @@
 | **Scope** | All platforms. Formats, signing, updates, CI artifacts, CPU architectures, uninstall and data retention. |
 | **Decision status** | PROPOSED |
 | **Evidence** | REPO VERIFIED for current packaging; OFFICIAL DOC VERIFIED for signing/notarization requirements. |
+| **⚠ Verification update** | **Do not express the clipboard dependency as `wl-clipboard >= 2.3`** — Fedora ships `2.2.1^git20251124`, which *has* the features; a version dependency would exclude a working system. Recommend 2.3, decide at runtime by probe (V-11, PLAT-DEC-013). **macOS Developer ID signing is a runtime requirement, not only a distribution one**: local network privacy tracks program identity by code signature, so an unsigned agent's permission can reset across rebuilds (V-05). `ring` requires a C toolchain, and MSVC on Windows (V-10). See [26 §8, §V-10, §V-11](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). |
 | **Related documents** | [07](07-LINUX-PACKAGING.md), [08 §11](08-WINDOWS-FEASIBILITY.md), [10 §10](10-MACOS-FEASIBILITY.md), [12 §7](12-APPLE-SECURITY-AND-INTEGRATION.md), [22](22-IMPLEMENTATION-ROADMAP.md) |
 
 ---

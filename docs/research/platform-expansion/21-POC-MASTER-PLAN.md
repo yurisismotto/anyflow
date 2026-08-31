@@ -99,6 +99,25 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ---
 
+> **⚠ UPDATED by the verification sprint (2026-08-31).** Two PoCs added (**POC-CORE-04**,
+> **POC-LINUX-05**), four narrowed or requestioned, and all 37 reprioritised into
+> P0/P1/P2/P3 classes in [27 §7](27-ARCHITECTURE-DECISION-CLOSEOUT.md).
+>
+> **The headline result: only four PoCs are P0, all four are Wave 0's own acceptance gates, and
+> none of them blocks Wave 0 from starting.** Research v1's framing — 35 PoCs, ≈71 engineer-days,
+> none implemented — read as if the whole programme were gated on them. It is not.
+>
+> | Change | PoC |
+> | --- | --- |
+> | **Narrowed** — its central question is answered from primary sources (V-01, V-02); what remains is the Xwayland fallback on Plasma | POC-KDE-01 |
+> | **Split** — `mdns-sd` coexistence (V-12) stays P1; the `DnsServiceRegister` A/AAAA half (V-03) becomes contingent, run only if `mdns-sd` fails | POC-WIN-02 |
+> | **Requestioned** — no longer "does anything prompt?" (V-06 says yes, by default, from macOS 15.4) but *"does `changeCount` polling **alone** trigger the access alert, or only the subsequent content read?"* | POC-MAC-05 |
+> | **Narrowed** — TN3179 answers most of it; what remains is whether the listen-only path avoids the prompt, and whether the multicast entitlement is needed for a single declared service type | POC-IOS-02 |
+> | **NEW** — `cargo check --target x86_64-pc-windows-msvc` on a **Windows runner** for the portable crates (a Linux cross-compile cannot work: `ring` needs MSVC, V-10) | **POC-CORE-04** |
+> | **NEW** — confirm on real Debian 13 / Ubuntu 24.04 / 26.04 that `wl-copy --sensitive` fails as predicted, and that the probe detects it | **POC-LINUX-05** |
+>
+> No PoC is deleted.
+
 ### POC-CORE-01 — Cross-compile the portable crates
 
 - **Q** After the Wave 0 seams exist, do `anyflow-proto`, `anyflow-core`, the three capability crates and `anyflow-runtime` compile for a non-Unix target from a Linux host?
@@ -485,6 +504,38 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 - **⏱** 2 d · **⇢** POC-IOS-05 · **R** _pending_
 
 ---
+
+### POC-CORE-04 — Windows-target compile check 🆕
+
+| Field | Value |
+| --- | --- |
+| **Question** | After Wave 0, does `cargo check` succeed for the six portable crates on `x86_64-pc-windows-msvc`? |
+| **Why docs cannot answer** | `ring` requires MSVC and a C toolchain (V-10, upstream `BUILDING.md`), so a Linux cross-compile is not a valid gate. Whether the portable crates are otherwise clean is only knowable by compiling |
+| **Input** | The post-Wave-0 workspace |
+| **Minimal scope** | `cargo check -p anyflow-proto -p anyflow-core -p anyflow-control -p anyflow-capability-{clipboard,files,battery} --no-default-features --target x86_64-pc-windows-msvc` |
+| **Success** | Clean. `anyflow-runtime` deliberately excluded — its `mdns-sd` Windows behaviour is V-12 |
+| **Failure** | Any `std::os::unix` leak, or an unexpected transitive Unix-only dependency |
+| **Output** | The gate that becomes CI-001 |
+| **VM?** | ✅ GitHub-hosted `windows-latest` has MSVC |
+| **Hardware?** | None beyond a CI runner |
+| **Blocks** | Wave 0 acceptance (G3), CI-001 |
+| **Class** | **P0 — architecture blocking** |
+
+### POC-LINUX-05 — `wl-copy --sensitive` on real Debian/Ubuntu 🆕
+
+| Field | Value |
+| --- | --- |
+| **Question** | Does `wl-copy --sensitive` fail as predicted on wl-clipboard 2.2.1, and does a probe detect it reliably? |
+| **Why docs cannot answer** | The source proves the flag is absent and that `exit(1)` follows; what needs measuring is AnyFlow's end-to-end behaviour and the probe's reliability |
+| **Input** | Debian 13, Ubuntu 24.04, Ubuntu 26.04; a paired Android device sending a `sensitive_hint` clip |
+| **Minimal scope** | Send a sensitive clip to each; observe. Then run the proposed probe |
+| **Success** | The failure reproduces; the probe detects 2.2.1 without false positives; a 2.3.0 system is unaffected |
+| **Failure** | The probe is unreliable, or the failure differs from prediction |
+| **Output** | Validates LINUX-010 and PLAT-DEC-013 |
+| **VM?** | ✅ needs a real Wayland session, so a VM not a container |
+| **Hardware?** | An Android device for the end-to-end half |
+| **Blocks** | LINUX-010, PLAT-DEC-013, Wave 2 |
+| **Class** | **P1 — platform blocking** |
 
 ### POC-DISC-01 — Five-platform discovery interoperability
 

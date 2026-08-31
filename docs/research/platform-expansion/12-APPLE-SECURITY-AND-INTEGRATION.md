@@ -252,7 +252,7 @@ A Share Extension runs in a **separate process** with its own sandbox. To send a
 | --- | --- |
 | Identity key | Keychain **access group** shared with the app; the Enclave key must be created with that `kSecAttrAccessGroup` |
 | Trust store | **App Group** shared container |
-| Network | The extension has its own network access; the local-network permission is granted per-app and covers it — **EXTERNAL VERIFICATION REQUIRED** |
+| Network | **PARTIALLY VERIFIED (V-09).** TN3179: *"In general, app extensions share the Local Network privilege state of their container app"*, and the `NSLocalNetworkUsageDescription` / `NSBonjourServices` keys go in **the app's** `Info.plist`, not the extension's. Residual: an extension "assumed to be running in the background" is denied without an alert while the privilege is *undetermined*, so onboarding must establish it in the foreground |
 | Lifetime | Short. Extensions are killed aggressively; a large transfer will not finish in one |
 
 Security consequences worth recording in [20](20-SECURITY-THREAT-ANALYSIS.md):

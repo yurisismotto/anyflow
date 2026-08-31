@@ -15,6 +15,12 @@
 ## Legend
 
 **Type** — `refactor` · `feature` · `security` · `packaging` · `docs` · `ci` · `design`
+> **⚠ UPDATED by the verification sprint (2026-08-31).** Five items added, two rewritten. See
+> §"Verification-sprint delta" at the end of this document, and
+> [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) / [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md).
+> **P0 discipline restated:** P0 means *blocks architecture, security, or a first implementation* —
+> not "desirable". Every P0 below is tied to a wave, a decision, a risk, and a PoC where one exists.
+
 **Priority** — P0 blocks a wave · P1 required for the wave to ship · P2 should ship with it ·
 P3 opportunistic
 **Wave** — from [22](22-IMPLEMENTATION-ROADMAP.md); `X` means no platform dependency
@@ -45,12 +51,12 @@ P3 opportunistic
 | SEC-001 | Per-platform security-control checklist | P1 | X | docs | — | For each platform, record which of the Linux controls is present, equivalent, or an accepted gap. Becomes a certification gate | A checklist exists and is filled in per wave | [09 §2](09-WINDOWS-SECURITY-AND-INTEGRATION.md), [20](20-SECURITY-THREAT-ANALYSIS.md) |
 | SEC-002 | `verify_protection()` per platform | P0 | 0 | security | ARCH-002 | The equivalent of `require_private_mode` for every key backing. Without it the Windows software fallback ships with no protection check | Windows DACL check; Linux mode check unchanged; hardware backings trivially pass | [09 §3](09-WINDOWS-SECURITY-AND-INTEGRATION.md), [14 §4](14-CROSS-PLATFORM-IDENTITY-AND-KEY-STORAGE.md) |
 | SEC-003 | Named pipe hardening | P0 | 5 | security | ARCH-003 | `FILE_FLAG_FIRST_PIPE_INSTANCE`, per-SID DACL, per-SID name, caller verification via `GetNamedPipeClientProcessId` | A hostile squatter process cannot create the pipe name while the agent runs (POC-WIN-07) | [09 §4](09-WINDOWS-SECURITY-AND-INTEGRATION.md) |
-| SEC-004 | Windows-safe filename rules, applied everywhere | **P0** | 0 or 5 | security | — | Reserved device names, trailing dots/spaces, `:` (alternate data streams), `\`, `<>"\|?*`, length limits. Applied on all platforms, not `#[cfg]`-gated | New cases in `filename.rs` tests and `daemon/tests/files.rs`; a peer sending `CON` or `a:b` gets a safe name or a rejection | [09 §6](09-WINDOWS-SECURITY-AND-INTEGRATION.md), [16 §4](16-CROSS-PLATFORM-FILES.md) |
+| SEC-004 | **Filename rules — REWRITTEN** | **P0** | **0** | security | — | **Research v1's premise was refuted**: device names, trailing dots/spaces and `\` are already present and tested. Add only what is missing: **`:` (alternate data streams)**, **Unicode category `Cf`** (`U+202E` bidi override, `U+200B`, `U+FEFF` — `is_control()` matches `Cc` only), `CONIN$`/`CONOUT$`, and `<>"\|?*`. **Protocol-global, no `#[cfg]`** (PLAT-DEC-014) | `a:b` rejected; `photo\u{202E}gnp.exe` stripped; `CONIN$` rejected; existing 15 filename tests unmodified | [26 §7](26-EXTERNAL-VERIFICATION-CLOSEOUT.md), [27 PLAT-DEC-014](27-ARCHITECTURE-DECISION-CLOSEOUT.md) |
 | SEC-005 | Record the sandbox gap as an accepted risk | P2 | X | docs | — | The systemd hardening has no Windows/macOS equivalent. Say so; do not claim parity | The threat model names the gap and the compensating mitigations | [09 §5](09-WINDOWS-SECURITY-AND-INTEGRATION.md) |
 | SEC-006 | Quarantine received files on macOS | P2 | 8 | security | — | Set `com.apple.quarantine` so a received executable meets Gatekeeper. A genuine improvement over the Linux behaviour | A received `.app` triggers the normal Gatekeeper prompt | [10 §8](10-MACOS-FEASIBILITY.md) |
 | SEC-007 | iOS Share Extension is read-only against the trust store | P1 | 9 | security | — | Two processes writing the trust store can corrupt it; and pairing belongs where the human is | The extension can use an existing pairing and cannot create one | [12 §9](12-APPLE-SECURITY-AND-INTEGRATION.md) |
 | SEC-008 | Document the shared keychain access group | P3 | 9 | docs | — | Sharing the identity key with an extension widens who can use it — deliberate, but it must be written down | A line in the Apple security notes | [12 §9](12-APPLE-SECURITY-AND-INTEGRATION.md) |
-| SEC-009 | Never auto-regenerate over an unusable key | **P0** | 0 | security | ARCH-002 | Distinguish "no key yet" from "key exists but unreadable". The second must refuse to start, not silently create a new identity and break every pairing | Fault-injection test per backing; the error names the cause and the remedy | [14 §7](14-CROSS-PLATFORM-IDENTITY-AND-KEY-STORAGE.md), [20 X5](20-SECURITY-THREAT-ANALYSIS.md) |
+| SEC-009 | **Never auto-regenerate over an unusable key — REWRITTEN, now a present-tense defect** | **P0** | **0** | security | ARCH-002 | **This is broken on Linux today.** `Store::open()` uses `Path::exists()`, which returns `false` on *any* metadata error (`EACCES`, broken symlink, non-traversable parent) — so an unreadable `identity.key` routes into `initialize()`, which generates a new identity **and overwrites `state.json`, destroying the peer list**. Use `try_exists()`; classify into the six states in [28 §7](28-WAVE-0-IMPLEMENTATION-SPEC.md); `initialize()` reachable **only** from `IDENTITY_NOT_CREATED`; record `key_backing` in `state.json` and bump the schema | Fault injection: key deleted / `chmod 000` / dir non-traversable → refuses to start **and leaves `state.json` byte-identical** | [26 §11.2](26-EXTERNAL-VERIFICATION-CLOSEOUT.md), [28 §7](28-WAVE-0-IMPLEMENTATION-SPEC.md), [27 PLAT-DEC-015](27-ARCHITECTURE-DECISION-CLOSEOUT.md) |
 | SEC-010 | Signing-key custody plan | P1 | 5 | docs | — | Four platforms means four signing keys, collectively worth more than any device identity. CI secrets, separate keys, a revocation plan | A written custody and revocation procedure | [20 X11](20-SECURITY-THREAT-ANALYSIS.md) |
 
 ---
@@ -201,3 +207,45 @@ The eighteen P0 items are the ones that block a wave from starting or shipping. 
 (protection checks) and **MAC-002** (no user presence on the Enclave key) — are the ones where
 getting it wrong is a security defect rather than a delay, and two of those (MAC-002, IOS-002)
 are **irreversible after a key is created**.
+
+
+---
+
+## Verification-sprint delta (2026-08-31)
+
+Added or rewritten as a result of [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). Every P0 is tied to a
+wave, a decision, a risk and a PoC where one applies.
+
+| ID | Title | Pri | Wave | Type | Depends | Description | Acceptance | Decision | Risk | PoC |
+| --- | --- | :-: | :-: | --- | --- | --- | --- | --- | --- | --- |
+| **ARCH-010** | Scope `unsafe_code` per crate | **P0** | **0** | refactor | — | `unsafe_code = "forbid"` is set workspace-wide, and `forbid` **cannot** be relaxed by an inner `#[allow]`. Every platform adapter needs `unsafe` (Win32, CNG, `Security.framework`, IOKit). Remove it from `[workspace.lints.rust]`; set `forbid` **explicitly** on `anyflow-core`, `anyflow-proto`, `anyflow-control`, `anyflow-runtime` and the three capability crates; adapters get `deny` | The security core still forbids `unsafe`; an adapter crate can use it with a justified `#[allow]` | PLAT-DEC-001 | **R-18** | — |
+| **ARCH-011** | Platform value comes from the identity provider | P1 | 0 | refactor | ARCH-002 | `Platform::Linux` is hardcoded at `store.rs:154` and `store.rs:188`, so the storage layer decides platform identity. Move it behind `IdentityProvider::platform()` | An adapter supplies the value; no literal remains in `store.rs` | PLAT-DEC-008 | — | — |
+| **LINUX-010** | Handle `wl-copy --sensitive` being unavailable | **P0** | **2** | security | — | `--sensitive` was added in wl-clipboard **2.3.0**. On 2.2.1 the flag does not exist and `wl-copy` **exits 1**, so `sensitive_hint` clips **fail outright** — on Debian 13 and **every** current Ubuntu LTS, on **every** desktop. Probe once (beside `probe_data_control()`), fail closed, and tell the user the cause and the remedy. **Do not** downgrade silently to a plain write | Probe detects 2.2.1; the failure message names `wl-clipboard` and the upgrade; a 2.3.0 system is unaffected | **PLAT-DEC-013** | **R-17** | **POC-LINUX-05** |
+| **WIN-010** | Agent owns a message-only window and pumps messages | P0 | 5 | feature | — | `AddClipboardFormatListener` requires an `HWND`; `WM_CLIPBOARDUPDATE` is *posted to a window*. The agent cannot be a pure console/tokio process — it needs a message-only window and a message loop beside the async runtime. Reinforces the agent-not-service decision: a Session 0 service has no interactive window station | Clipboard changes arrive as `WM_CLIPBOARDUPDATE`; the runtime is not starved | PLAT-DEC-002 | — | POC-WIN-05 |
+| **MAC-010** | The macOS agent must not exit on a network failure | P1 | 7 | feature | — | Apple FB16131937: *"macOS fails to display the local network alert when a process with a very short lifespan performs a local network operation… To work around this, update your code to not exit immediately after a local network operation fails."* AnyFlow's daemon treats a bind failure as fatal — on macOS that produces an agent that can never obtain the permission it needs | The agent survives a denied local-network operation long enough for the alert to appear | — | — | POC-MAC-06 |
+| **KDE-001** | *(revised)* Name the missing protocol **and** the wl-clipboard version | P1 | 3 | feature | — | `anyflow clipboard status` must say which data-control protocol was missing *and* which `wl-clipboard` is installed. On Ubuntu 26.04 LTS the cause is KWin 6.6 (`ext` only) × wl-clipboard 2.2.1 (`wlr` only) | The message names both halves | — | R-05 | POC-KDE-01 |
+| **PKG-00x** | *(correction)* Do **not** depend on `wl-clipboard >= 2.3` | P2 | 4 | packaging | — | Fedora ships `2.2.1^git20251124`, which **has** both protocols and `--sensitive`. A version dependency would exclude a working system. **Recommend** 2.3 in packaging; decide at runtime by probe | Fedora is not excluded; the recommendation explains why | PLAT-DEC-013 | R-05, R-17 | — |
+| **SEC-003** | *(sharpened)* Named-pipe hardening | P0 | 5 | security | ARCH-003 | **The default named-pipe DACL grants read to Everyone and to the anonymous account** — so `lpSecurityAttributes` must **never** be `NULL`. Add `PIPE_REJECT_REMOTE_CLIENTS`. `FILE_FLAG_FIRST_PIPE_INSTANCE` is **detection, not prevention**: on `ERROR_ACCESS_DENIED` the agent must **abort naming the squatter — never retry, never fall back to another name**. Per-session pipe name (Microsoft's own guidance) | A hostile squatter started first causes the agent to refuse to start | PLAT-DEC-002 | **R-06** | POC-WIN-07 |
+| **WIN-008** | *(unblocked)* Clipboard-history / Cloud Clipboard exclusion | P1 | 6 | security | — | Set **all three** verified formats for `sensitive_hint` clips: `ExcludeClipboardContentFromMonitorProcessing` (any data), `CanIncludeInClipboardHistory` = DWORD 0, `CanUploadToCloudClipboard` = DWORD 0. The two DWORD formats cover disjoint halves | A sensitive clip appears in neither Win+V history nor Cloud Clipboard | — | X-W2 | POC-WIN-05 |
+
+### P0 audit
+
+The brief asks that no P0 be a merely-desirable improvement. Re-checked:
+
+| P0 | Wave | Blocks | Verdict |
+| --- | :-: | --- | --- |
+| ARCH-001 Adapter-crate layout | 0 | the boundary itself | ✅ |
+| ARCH-002 `IdentityProvider` | 0 | all hardware backing | ✅ |
+| ARCH-003 Split daemon; extract control types | 0 | GUI/CLI portability | ✅ |
+| ARCH-006 `FileSink` | 0 | `files.v1` off Linux | ✅ |
+| **ARCH-010 `unsafe_code` scoping** | 0 | **every adapter** | ✅ new |
+| SEC-002 `verify_protection()` | 0 | silent protection gap on Windows | ✅ |
+| SEC-004 Filename rules | **0** *(was 0 or 5)* | a present-tense bidi defect | ✅ **moved earlier** |
+| SEC-009 No auto-regeneration | 0 | **a live trust-store-destroying defect** | ✅ **severity raised** |
+| SEC-003 Named pipe hardening | 5 | Windows control plane | ✅ |
+| **LINUX-010 `--sensitive`** | 2 | `sensitive_hint` on Debian/Ubuntu | ✅ new |
+| CI-001 Cross-target compile matrix | 0 | boundary regressions | ✅ |
+| WIN-001/002/005, MAC-001/002/003/007, IOS-001/002 | 5–9 | their platform's first release | ✅ |
+
+**One demotion.** ARCH-011 (platform value from the provider) was implied as P0-adjacent; it is
+**P1** — it must land in Wave 0 for tidiness, but nothing is blocked if it slips to Wave 5.

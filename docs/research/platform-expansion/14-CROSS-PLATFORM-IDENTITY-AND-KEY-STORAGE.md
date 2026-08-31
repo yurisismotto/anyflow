@@ -8,6 +8,7 @@
 | **Scope** | Key generation, storage, hardware backing, non-exportability, TLS integration, fallbacks. |
 | **Decision status** | PROPOSED. **PLAT-DEC-001**, **PLAT-DEC-004** and **PLAT-DEC-012** OPEN. |
 | **Evidence** | REPO VERIFIED for the current model; OFFICIAL DOC VERIFIED for each platform's keystore; POC REQUIRED for every non-Android hardware path. |
+| **⚠ Verification update** | The rustls seam is now **documentation-verified** against 0.23.43, and the refactor is **two call sites** ([26 §10, §11.3](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)). Three constraints were added: `Signer::sign` receives an **unhashed** message; ECDSA output must be X9.62 **DER** (Apple returns it, Windows CNG does not); the Secure Enclave **cannot import an existing key**, so software→hardware migration re-pairs every peer (**PLAT-DEC-015**). Identity failure states are specified in [28 §7](28-WAVE-0-IMPLEMENTATION-SPEC.md). |
 | **Related documents** | [01](01-CURRENT-ARCHITECTURE-AUDIT.md), [02](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md), [09](09-WINDOWS-SECURITY-AND-INTEGRATION.md), [12](12-APPLE-SECURITY-AND-INTEGRATION.md), [20](20-SECURITY-THREAT-ANALYSIS.md), [ADR-0006](../../adr/ADR-0006-device-identity-and-pairing.md) |
 
 ---

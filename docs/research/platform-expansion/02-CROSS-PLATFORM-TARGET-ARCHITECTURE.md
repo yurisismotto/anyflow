@@ -215,7 +215,10 @@ Rust* during the TLS handshake, synchronously — see §5.
 process** over the `ControlTransport` (a Named Pipe), exactly as `anyflow-gui` talks to
 `anyflowd` today over a Unix socket. This preserves the property the current design already
 has — the UI can crash, restart or be absent, and the session survives — and it avoids a
-C#↔Rust FFI entirely. **PLAT-DEC-007**, recommended direction *named pipe IPC, no FFI*.
+C#↔Rust FFI entirely. Recommended direction: *named pipe IPC, no FFI*. (Research v1 cited this as "PLAT-DEC-007", which
+is a drafting error — [23](23-RISKS-OPEN-QUESTIONS-AND-DECISIONS.md) defines PLAT-DEC-007 as
+Flatpak viability. The IPC seam belongs to **PLAT-DEC-001**; see
+[27 §2](27-ARCHITECTURE-DECISION-CLOSEOUT.md).)
 
 **What is not worth sharing?** UI. Notification presentation. Anything whose two
 implementations disagreeing costs nothing. And — stated explicitly because it is
@@ -318,10 +321,15 @@ gate. Tracked as **PLAT-DEC-005**.
 before the first Windows line of code, because doing them afterwards means doing them twice.
 Their acceptance criterion is precise and testable on Linux alone:
 
-> `cargo build -p anyflow-core -p anyflow-capability-files -p anyflow-capability-clipboard
-> -p anyflow-runtime --target x86_64-pc-windows-msvc` succeeds on a Linux CI host, and
-> the entire existing test suite still passes on Linux with no behavioural change.
+> `cargo build … --target x86_64-pc-windows-msvc` succeeds on a Linux CI host, and the entire
+> existing test suite still passes on Linux with no behavioural change.
 
-Cross-compiling to `*-windows-msvc` requires the MSVC libraries and is not free on Linux;
-`x86_64-pc-windows-gnu` is the cheaper CI proxy for "does it compile". Either way the gate is
-*mechanical*, which is what makes Wave 0 finishable. See [22](22-IMPLEMENTATION-ROADMAP.md).
+**Corrected by the verification sprint.** `ring` *"currently requires a C (but not C++) toolchain"*
+and, for Windows targets, the Visual Studio 2022 "Desktop development with C++" workload
+(upstream `BUILDING.md`, V-10). MSVC libraries are not redistributable onto a Linux runner, so the
+Linux cross-compile gate **does not work as written**. The corrected gate runs `cargo check` on a
+**Windows CI runner**, and excludes `anyflow-runtime` (whose `mdns-sd` Windows behaviour is V-12,
+still open). See [28 §10.3](28-WAVE-0-IMPLEMENTATION-SPEC.md).
+
+The gate is still *mechanical*, which is what makes Wave 0 finishable — and a green compile check
+is a **boundary regression test, not runtime certification**.

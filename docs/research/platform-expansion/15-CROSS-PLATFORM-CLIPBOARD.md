@@ -277,7 +277,8 @@ cryptographic property"*.
 | Platform | Mechanism | Real effect |
 | --- | --- | --- |
 | Linux Wayland | `wl-copy --sensitive` | Clipboard managers skip history. **On KDE, Klipper actually honours it** |
-| Windows | Register "ExcludeClipboardContentFromMonitorProcessing" / "CanIncludeInClipboardHistory" formats | Skips Win+V history and Cloud Clipboard. **EXTERNAL VERIFICATION REQUIRED** on exact format names |
+| Windows | Register and set `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0, `CanUploadToCloudClipboard`=0 | Skips Win+V history and Cloud Clipboard. **VERIFIED (V-04)** — three formats, exact names and semantics confirmed |
+| Linux (wl-clipboard **< 2.3.0**) | *No mechanism* — `--sensitive` does not exist | ⚠️ **`wl-copy --sensitive` exits 1, so the write fails.** Debian 13 and every current Ubuntu LTS. See [26 §5.1](26-EXTERNAL-VERIFICATION-CLOSEOUT.md), PLAT-DEC-013 |
 | macOS | `org.nspasteboard.ConcealedType` | Community convention honoured by several managers; **not** an Apple API |
 | Android | `ClipDescription.EXTRA_IS_SENSITIVE` | The system hides the clip preview |
 | iOS | — | No equivalent found |

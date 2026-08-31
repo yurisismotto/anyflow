@@ -8,6 +8,7 @@
 | **Scope** | Pickers, destinations, sandboxes, filename safety, atomic writes, background receive, resume. |
 | **Decision status** | PROPOSED |
 | **Evidence** | REPO VERIFIED for the current implementation; OFFICIAL DOC VERIFIED for platform APIs; POC REQUIRED where marked. |
+| **⚠ Verification update** | Research v1's claim that `filename.rs` lacks Windows rules is **REFUTED** — device names, trailing dots/spaces and `\` are present and tested. The real gaps are **`:`** (alternate data streams) and **Unicode category `Cf`** (`U+202E` bidi override — a **present-tense Linux defect**). Scope decided as **protocol-global** (PLAT-DEC-014); SEC-004 rewritten and moved to **Wave 0**. Case-insensitive collisions are already safe (`create_new` + numbering). See [26 §7](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). |
 | **Related documents** | [09](09-WINDOWS-SECURITY-AND-INTEGRATION.md), [11](11-IOS-IPADOS-FEASIBILITY.md), [20](20-SECURITY-THREAT-ANALYSIS.md), [../../architecture/FILES.md](../../architecture/FILES.md), [ADR-0013](../../adr/ADR-0013-file-transfer-data-stream.md) |
 
 ---

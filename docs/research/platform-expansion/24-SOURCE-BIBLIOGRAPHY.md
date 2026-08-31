@@ -166,23 +166,51 @@ Per the sprint brief, in order:
 
 ## 7. EXTERNAL VERIFICATION REQUIRED — the complete list
 
-Everything this research could not confirm from a primary source, with exactly what must be
+Everything Research v1 could not confirm from a primary source, with exactly what must be
 checked. Nothing here was invented to fill a gap.
 
-| # | Claim | Document | What to verify, and where |
+> **⚠ CLOSED OUT (2026-08-31).** All twelve were taken to primary sources in
+> [26 — External verification closeout](26-EXTERNAL-VERIFICATION-CLOSEOUT.md).
+> **8 VERIFIED · 2 PARTIALLY VERIFIED · 2 STILL OPEN · 0 REFUTED · 0 BLOCKED.**
+> Neither remaining open item blocks Wave 0. The `Status` column below is the result; the
+> evidence is in [26 §4](26-EXTERNAL-VERIFICATION-CLOSEOUT.md).
+
+| # | Claim | Document | Status | Result |
 | --- | --- | --- | --- |
-| V-01 | Which wl-clipboard release added `ext-data-control-v1` support | 05, 06 | Read `NEWS`/`CHANGELOG` in the wl-clipboard source tree; the releases page and issue #242 gave conflicting impressions |
-| V-02 | Whether KWin still exposes `wlr-data-control-unstable-v1` for compatibility | 05, 06 | KWin source, or `wayland-info` on a live Plasma session (POC-KDE-01) |
-| V-03 | Whether `DnsServiceRegister` publishes A/AAAA records | 08, 13 | learn.microsoft.com and a live test (POC-WIN-02) |
-| V-04 | Exact Windows clipboard format names for excluding a clip from history / Cloud Clipboard | 08, 09, 15 | learn.microsoft.com clipboard-format documentation, before implementing WIN-008 |
-| V-05 | Full content of TN3179 (which operations prompt; how denial surfaces; macOS applicability; daemon/helper behaviour) | 03, 11 | developer.apple.com in a browser — the page is JS-rendered |
-| V-06 | `NSPasteboard.AccessBehavior`: introduced version, enum cases, Info.plist key, whether reads prompt | 10, 20 | developer.apple.com; measure in POC-MAC-05 |
-| V-07 | Current authoritative list of `UIBackgroundModes` values | 11 | Xcode documentation. The conclusion (none fits AnyFlow) does not depend on the edges |
-| V-08 | Whether `org.nspasteboard.ConcealedType` is honoured widely enough to be worth setting | 10, 15 | nspasteboard.org and clipboard-manager sources. It is a convention, not an Apple API |
-| V-09 | Whether an iOS Share Extension inherits the containing app's local-network permission | 11, 12 | Apple documentation; measure in POC-IOS-08 |
-| V-10 | Whether `ring` is the only reason the RPM spec requires `gcc` | 04 | Build in a container with rustup and no C compiler |
-| V-11 | Fedora's current `wl-clipboard` version | 05, 06 | Fedora package database |
-| V-12 | Whether `mdns-sd` can bind 5353 alongside `mDNSResponder` / the Windows responder | 08, 10, 13 | POC-WIN-02, POC-MAC-02 — cannot be settled from documentation |
+| V-01 | Which wl-clipboard release added `ext-data-control-v1` | 05, 06 | **VERIFIED** | **2.3.0**, released 2026-03-22 (upstream release body). 2.2.1 has only `wlr` |
+| V-02 | Whether KWin still exposes `wlr-data-control-unstable-v1` | 05, 06 | **VERIFIED** | **Dropped in Plasma 6.5** (commit `764b723`, 2025-04-12). KWin ≤ 6.4 has both |
+| V-03 | Whether `DnsServiceRegister` publishes A/AAAA records | 08, 13 | **PARTIALLY VERIFIED** | The struct carries host + IPv4 + IPv6; on-wire publication undocumented. Demoted to a contingent question — `mdns-sd` is the primary path |
+| V-04 | Exact Windows clipboard exclusion format names | 08, 09, 15 | **VERIFIED** | **Three** formats: `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`, `CanUploadToCloudClipboard`. Semantics confirmed |
+| V-05 | Full content of TN3179 | 03, 11 | **VERIFIED** | Retrieved in full via the documentation JSON API. Applies to **macOS 15+**; `launchd` agents get no exemption; listening needs no privilege |
+| V-06 | `NSPasteboard.AccessBehavior` | 10, 20 | **VERIFIED** | **macOS 15.4**, four cases, **no Info.plist key**, General pasteboard **defaults to ask** |
+| V-07 | Authoritative `UIBackgroundModes` list | 11 | **VERIFIED** | Eleven values; none fits a LAN control session. Conclusion confirmed |
+| V-08 | Whether `org.nspasteboard.ConcealedType` is widely honoured | 10, 15 | **STILL OPEN** | Not establishable from any primary source. [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) recommends retiring the question: set it, gate nothing on it |
+| V-09 | Whether a Share Extension inherits local-network permission | 11, 12 | **PARTIALLY VERIFIED** | *"In general, app extensions share the Local Network privilege state of their container app."* Residual: the background-undetermined case |
+| V-10 | Whether `ring` is why the RPM spec requires `gcc` | 04 | **VERIFIED** | Upstream: *"ring currently requires a C (but not C++) toolchain."* Windows needs MSVC — which invalidates the Linux cross-compile gate |
+| V-11 | Fedora's current `wl-clipboard` version | 05, 06 | **VERIFIED** | `2.2.1^git20251124.e808203-2.fc44` — **has** both protocols and `--sensitive` despite the version string |
+| V-12 | Whether `mdns-sd` can bind 5353 alongside a system responder | 08, 10, 13 | **STILL OPEN** | Correctly a PoC. POC-WIN-02, POC-MAC-02 |
+
+### 7.1 Sources added by the verification sprint
+
+Full table with locators in [26 §12](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). All primary, all
+accessed **2026-08-31**:
+
+| Publisher | Artefact | Supports |
+| --- | --- | --- |
+| bugaevc | wl-clipboard release record; `src/wl-copy.c` @ `v2.2.1` and `v2.3.0` | V-01, the `--sensitive` defect |
+| KDE | KWin `datacontroldevicemanager_v1.{h,cpp}`, commit history, tag ancestry | V-02 |
+| Debian / Canonical | `kwin-wayland` and `wl-clipboard` across all suites | the KDE matrix |
+| Fedora (local) | `wl-clipboard-2.2.1^git20251124.e808203-2.fc44` | V-11 |
+| Microsoft | Clipboard Formats; Interactive Services; `CreateNamedPipeA`; Using the Clipboard; `DnsServiceRegister`; `DNS_SERVICE_INSTANCE` | V-03, V-04, PLAT-DEC-002, SEC-003 |
+| Apple | TN3179 (full); `NSPasteboard.AccessBehavior`; `NSPasteboard` symbol list; `UIBackgroundModes`; Protecting keys with the Secure Enclave; `SecKeyCreateSignature`; `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` | V-05, V-06, V-07, V-09, PLAT-DEC-004, PLAT-DEC-009 |
+| rustls | `SigningKey`, `Signer`, `CertifiedKey`, `ConfigBuilder` @ 0.23.43; `rustls-cng` @ `v0.7.1` | the Wave 0 identity seam |
+| briansmith | `ring` `BUILDING.md` | V-10 |
+
+**Method note.** Research v1 could not verify five Apple claims because `developer.apple.com`
+renders through JavaScript. Those pages are backed by a JSON endpoint —
+`https://developer.apple.com/tutorials/data/documentation/<path>.json` — which returns the same
+authored content, including full technote bodies and complete symbol lists. **This unblocked V-05,
+V-06 and V-07.** Recorded so a future sprint does not repeat the dead end.
 
 ---
 

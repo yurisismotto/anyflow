@@ -222,12 +222,28 @@ it is polling*". The second is the honest option and costs nothing on Linux. Tra
 
 ### 3.4 BLOCKER-04 — filename sanitisation is POSIX-shaped
 
-`filename.rs` strips path separators and rejects `.`/`..`. It does not know about
-Windows-reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`),
-about trailing dots and spaces being stripped by the Win32 layer, about `:` opening an
-alternate data stream, or about `\` being a separator. A peer sending `CON` or
-`report.txt.` or `a:b` is not currently a Linux problem and *is* a Windows one. This is a
-security item, not a cosmetic one → [20](20-SECURITY-THREAT-ANALYSIS.md), **SEC-004**.
+> **⚠ SUBSTANTIALLY REFUTED by the verification sprint.** Re-reading `filename.rs` at `7bb0cc4`
+> shows reserved device names, trailing dots/spaces and `\` **are already handled and tested**.
+> See [26 §5.2 and §7](26-EXTERNAL-VERIFICATION-CLOSEOUT.md).
+
+What is **already present** (with tests): `RESERVED_STEMS` covering `con prn aux nul com1‥com9
+lpt1‥lpt9`; `.trim_end_matches([' ', '.', '\t'])`; `raw.rsplit(['/', '\\'])`; `Cc` control-character
+stripping; length capping on a char boundary.
+
+What is **genuinely missing**, confirmed by simulating `sanitize()` against adversarial input:
+
+- **`:` survives** → `a:b` opens an alternate data stream on Windows. `destination.rs`'s
+  parent-directory check does not catch it, because `C:\dir\a:b` has parent `C:\dir`.
+- **Unicode category `Cf` survives** — `char::is_control()` matches `Cc` only, so
+  `U+202E RIGHT-TO-LEFT OVERRIDE` passes through. `invoice\u{202E}cod.exe` displays as
+  `invoiceexe.doc`. **This is a present-tense defect on Linux**, not a future Windows one.
+- `CONIN$` / `CONOUT$` are absent from the reserved table; `< > " | ? *` are unfiltered.
+
+Also confirmed *safe*: case-insensitive collisions. `reserve()` uses `create_new(true)`, so a
+colliding `Report.txt` on NTFS/APFS returns `AlreadyExists` and numbers up. No overwrite possible.
+
+Still a security item → **SEC-004**, rewritten, and **moved to Wave 0** because the bidi half is a
+current defect. Scope decided as protocol-global by **PLAT-DEC-014**.
 
 ### 3.5 BLOCKER-05 — local IPC is a Unix domain socket with Unix semantics
 
@@ -400,7 +416,11 @@ Stated plainly, because the roadmap depends on it:
 | AUD-04 | `ClipboardBackend` is a clean seam | ABSTRACTION-READY | Reuse as-is |
 | AUD-05 | `watch_changes` bans polling; macOS can only poll | Contract conflict | Amend contract |
 | AUD-06 | Control socket is UDS + unix modes | LINUX-SPECIFIC | Needs an IPC trait |
-| AUD-07 | `filename.rs` has no Windows reserved-name rules | Security gap | Fix before any Windows receive |
+| AUD-07 | ~~`filename.rs` has no Windows reserved-name rules~~ **REFUTED** — device names, trailing dots/spaces and `\` are present and tested. Real gaps: `:` (ADS) and Unicode `Cf` (bidi spoofing, **all platforms**) | Security gap, **narrower and partly present-tense** | SEC-004, rewritten, **Wave 0** |
+| **AUD-14** | **`unsafe_code = "forbid"` is set workspace-wide, and `forbid` cannot be locally overridden. Every platform adapter needs `unsafe`** | **Structural blocker** | **ARCH-010, Wave 0 step 1** |
+| **AUD-15** | **`Store::open()` uses `Path::exists()`, which returns `false` on any metadata error, then `initialize()` overwrites `state.json` — destroying the trust store** | **Present-tense defect** | **SEC-009, rewritten, Wave 0 step 2** |
+| **AUD-16** | **`rustls_private_key()` has exactly two call sites, both in `tls.rs`; `private_key_pkcs8_der()` has one production call site, in persistence** | **Positive** | The identity refactor is far smaller than AUD-02 implies |
+| **AUD-17** | **`Platform::Linux` is hardcoded at `store.rs:154` and `store.rs:188`** | Coupling | ARCH-011, Wave 0 |
 | AUD-08 | `battery`/`upower` feature-gating is the right pattern | Positive | Copy it |
 | AUD-09 | GUI depends on `anyflow-daemon` for types only | Coupling | Split control types out |
 | AUD-10 | `Platform` proto enum lacks Windows/macOS/iOS | Protocol gap | Additive, backward-compatible |

@@ -8,6 +8,7 @@
 | **Scope** | How AnyFlow stays running on each platform, and what "running" means there. |
 | **Decision status** | PROPOSED |
 | **Evidence** | REPO VERIFIED for Linux and Android; OFFICIAL DOC VERIFIED for Windows/Apple mechanisms. |
+| **⚠ Verification update** | The **AnyFlow Agent** concept is confirmed, and two lifetimes are sharpened. **Windows:** a Session 0 service *cannot* see the user's clipboard (*"Services cannot directly interact with a user as of Windows Vista"*, noninteractive window station) — and `AddClipboardFormatListener` needs an `HWND` **and a message pump**, so the agent is a windowed process. **macOS:** *"the exception for `launchd` daemons doesn't apply to `launchd` agents"* — a per-user agent **does** face the Local Network prompt (macOS 15+), and must **not exit** on a network failure (Apple FB16131937). See [26 §9.1, §V-05](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). |
 | **Related documents** | [08](08-WINDOWS-FEASIBILITY.md), [10](10-MACOS-FEASIBILITY.md), [11](11-IOS-IPADOS-FEASIBILITY.md), [03](03-PLATFORM-CAPABILITY-MATRIX.md) |
 
 ---

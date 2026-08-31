@@ -100,7 +100,7 @@ Format: existing mitigation → what changes → recommended mitigation → how 
 | --- | --- |
 | **Risk** | A clip AnyFlow writes on Windows is uploaded to the user's Microsoft account by Cloud Clipboard, or retained in Win+V history. A local-first product silently touching a cloud |
 | **Existing** | `sensitive_hint` is honoured on Linux (`wl-copy --sensitive`) and Android (`EXTRA_IS_SENSITIVE`) |
-| **Mitigation** | **WIN-008** — set the clipboard-history/monitor-processing exclusion formats for sensitive clips; document the general behaviour. **EXTERNAL VERIFICATION REQUIRED** on exact format names |
+| **Mitigation** | **WIN-008** — set all three exclusion formats (`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0, `CanUploadToCloudClipboard`=0) for sensitive clips; document the general behaviour. **VERIFIED (V-04)** — names and semantics confirmed, WIN-008 implementable |
 | **Verify** | POC-WIN-05 with clipboard history enabled |
 | **Note** | This is the user's own setting, but AnyFlow is the thing putting data there |
 

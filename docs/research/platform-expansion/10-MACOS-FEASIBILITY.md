@@ -161,7 +161,7 @@ reasonable Linux one.
 | **read** | `NSPasteboard.general.string(forType: .string)` | Straightforward |
 | **write** | `clearContents()` then `setString(_:forType: .string)` | Straightforward |
 | **watch** | `NSPasteboard.general.changeCount`, compared against the last value | **Polling.** `changeCount` "increments every time the contents of the pasteboard changes"; comparing it is the documented way to detect change (OFFICIAL DOC VERIFIED). No public change *notification* exists in AppKit. |
-| **sensitive hint** | `NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")` alongside the text | A **community convention** (nspasteboard.org) honoured by several clipboard managers, **not an Apple API**. EXTERNAL VERIFICATION REQUIRED. Same status as `wl-copy --sensitive`: a hint, never enforcement — which is exactly how `clipboard.v1` already defines `sensitive_hint`. |
+| **sensitive hint** | `NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")` alongside the text | A **community convention** (nspasteboard.org), **not an Apple API**. V-08 is **STILL OPEN** and [26 §V-08](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) recommends retiring the question: adoption breadth is not establishable from any primary source, the cost is one line, and it is a *hint* exactly like `wl-copy --sensitive`. Set it, document it as best-effort, gate nothing on it. |
 
 ### 6.1 The contract conflict
 
@@ -187,13 +187,30 @@ practice. Suspend polling when no peer has `auto_send` enabled — the manager a
 **PLAT-DEC-009.** Note this is a *documentation and contract* change in
 `capabilities/clipboard/src/backend/mod.rs`, not a protocol change.
 
+
+> **⚠ Updated by the verification sprint (2026-08-31).** **Three macOS conclusions changed.** (1) Pasteboard access is **user-gated from macOS 15.4** — `NSPasteboard.AccessBehavior` defaults to *ask* for programmatic access to the General pasteboard. (2) **Local network privacy applies to macOS from macOS 15**, and `launchd` **agents** do not get the daemon exemption. (3) **Developer ID signing is a runtime requirement**, not only a distribution one, because local network privacy tracks identity by code signature. See
+> [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md).
+
 ### 6.2 macOS pasteboard privacy
 
-Recent macOS versions have added pasteboard-access transparency for Mac apps, in the spirit of
-iOS's paste prompt (`NSPasteboard.AccessBehavior` and a corresponding Info.plist key).
-The Apple documentation page for this could not be retrieved in this session —
-**EXTERNAL VERIFICATION REQUIRED**, and it is a first-order question for AnyFlow, because a
-per-read user prompt would make polling-based auto-send impossible.
+**RESOLVED (V-06).** `NSPasteboard.AccessBehavior` was introduced in **macOS 15.4** with four
+cases — `.default`, `.ask`, `.alwaysAllow`, `.alwaysDeny`. **There is no Info.plist key**:
+`accessBehavior` is read-only, and the value is set by the user in System Settings, per app, only
+after the app has triggered an alert.
+
+Verbatim, on `.default`: *"The default behavior for the General pasteboard is to ask upon
+programmatic access… Once programmatic pasteboard access triggers the first pasteboard access
+alert, the state automatically changes to [ask]."* And on `.ask`: *"access that is both **user
+originated and paste related** will always be allowed, and will not result in a notification."*
+
+**So AnyFlow's automatic clipboard send — programmatic, not user-originated — is user-gated on
+macOS 15.4+.** It does not make polling impossible, but it makes silent auto-send conditional on
+the user choosing `.alwaysAllow`. That is a product statement and
+[03](03-PLATFORM-CAPABILITY-MATRIX.md) is updated accordingly.
+
+What remains unmeasured is narrower and sharper: reading `changeCount` is *metadata*, not content.
+Whether polling it alone trips the alert, or only the subsequent content read, is now the precise
+subject of **POC-MAC-05**.
 
 **This should be the first thing POC-MAC-05 measures**, before any implementation effort:
 *does an unsandboxed, notarized, Developer-ID-signed background agent reading
