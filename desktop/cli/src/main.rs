@@ -7,9 +7,10 @@
 use std::time::Duration;
 
 use anyflow_daemon::control::{
-    control_socket_path, BatteryReport, DeviceReport, Event, Request, Response, TransferReport,
+    control_socket_path, BatteryReport, ClipboardFlag, ClipboardStatusReport, DeviceReport, Event,
+    Request, Response, TransferReport,
 };
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
@@ -70,6 +71,93 @@ enum Command {
 
     /// Cancel a running transfer, by id or by an unambiguous id prefix.
     Cancel { transfer: String },
+
+    /// Share text clipboards with a paired device.
+    #[command(subcommand)]
+    Clipboard(ClipboardCommand),
+}
+
+#[derive(Subcommand, Debug)]
+enum ClipboardCommand {
+    /// What clipboard sharing can do here, and the policy for each device.
+    ///
+    /// Shows whether this session can detect local clipboard changes at all,
+    /// which is what `auto-send` needs — on GNOME it cannot, and knowing that
+    /// before turning the flag on is the point.
+    Status,
+
+    /// Send the current clipboard to a device.
+    ///
+    /// Explicit and manual: it does not need `auto-send`, only the
+    /// `clipboard.v1` grant and `send` policy. The device may be named by its
+    /// device id or by an unambiguous fingerprint prefix — an ambiguous name
+    /// is an error, because sending a password to the wrong device because a
+    /// prefix matched two of them is not a failure mode worth having.
+    Send {
+        device: String,
+        /// Ask the receiving device to treat this clip as sensitive.
+        ///
+        /// On Android it sets `ClipDescription.EXTRA_IS_SENSITIVE`, so the
+        /// system hides the preview and clipboard managers skip it. It is a
+        /// presentation hint, not encryption and not an access control.
+        #[arg(long)]
+        sensitive: bool,
+    },
+
+    /// Apply a clip that arrived while `auto-receive` was off.
+    Apply { device: String },
+
+    /// Allow or stop sending this machine's clipboard to a device.
+    Allow {
+        device: String,
+        #[arg(value_enum)]
+        direction: Direction,
+        #[arg(value_enum)]
+        state: Toggle,
+    },
+
+    /// Automatically push local clipboard changes to a device.
+    ///
+    /// Off by default, and worth reading twice before turning on: it means
+    /// *everything you copy* — passwords, tokens, recovery codes — goes to
+    /// that device as you copy it. Unlike Android, a Linux desktop offers no
+    /// reliable "this clip is sensitive" signal to filter on.
+    AutoSend {
+        device: String,
+        #[arg(value_enum)]
+        state: Toggle,
+    },
+
+    /// Apply clips from a device to this clipboard as they arrive.
+    ///
+    /// Off by default. With it off, a clip is held in memory and applied only
+    /// when you run `anyflow clipboard apply`, so a paired device cannot
+    /// replace what you are about to paste.
+    AutoReceive {
+        device: String,
+        #[arg(value_enum)]
+        state: Toggle,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum Direction {
+    /// This machine may send its clipboard to that device.
+    Send,
+    /// That device may send its clipboard to this machine.
+    Receive,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum Toggle {
+    On,
+    Off,
+}
+
+impl Toggle {
+    fn enabled(self) -> bool {
+        matches!(self, Self::On)
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -116,6 +204,38 @@ async fn main() -> anyhow::Result<()> {
         Command::Transfers => simple(stream, Request::Transfers).await,
         Command::Cancel { transfer } => simple(stream, Request::CancelTransfer { transfer }).await,
         Command::Send { device, file } => send_file(stream, device, file).await,
+        Command::Clipboard(clipboard) => {
+            let request = match clipboard {
+                ClipboardCommand::Status => Request::ClipboardStatus,
+                ClipboardCommand::Send { device, sensitive } => {
+                    Request::ClipboardSend { device, sensitive }
+                }
+                ClipboardCommand::Apply { device } => Request::ClipboardApply { device },
+                ClipboardCommand::Allow {
+                    device,
+                    direction,
+                    state,
+                } => Request::ClipboardPolicy {
+                    device,
+                    flag: match direction {
+                        Direction::Send => ClipboardFlag::Send,
+                        Direction::Receive => ClipboardFlag::Receive,
+                    },
+                    enabled: state.enabled(),
+                },
+                ClipboardCommand::AutoSend { device, state } => Request::ClipboardPolicy {
+                    device,
+                    flag: ClipboardFlag::AutoSend,
+                    enabled: state.enabled(),
+                },
+                ClipboardCommand::AutoReceive { device, state } => Request::ClipboardPolicy {
+                    device,
+                    flag: ClipboardFlag::AutoReceive,
+                    enabled: state.enabled(),
+                },
+            };
+            simple(stream, request).await
+        }
     }
 }
 
@@ -175,6 +295,7 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
                 println!();
             }
         }
+        Response::Clipboard(report) => print_clipboard_status(&report),
         Response::Pong { rtt_ms } => println!("pong in {rtt_ms} ms"),
         Response::Ok { message } => println!("{message}"),
         Response::Error { message } => {
@@ -217,6 +338,106 @@ fn print_device(d: &DeviceReport, indent: &str) {
     );
     if let Some(b) = &d.battery {
         println!("{indent}   battery     {}", battery_line(b));
+    }
+}
+
+/// Renders `anyflow clipboard status`.
+///
+/// Three facts are kept visibly apart, because collapsing them is how a user
+/// comes to believe sync is running when it is not: whether the capability is
+/// *granted*, whether the *policy* permits a direction, and whether this
+/// session can technically do it at all.
+fn print_clipboard_status(report: &ClipboardStatusReport) {
+    if !report.enabled {
+        println!("clipboard.v1 is not enabled: {}", report.backend_detail);
+        return;
+    }
+
+    println!("Clipboard");
+    println!("  backend     {}", report.backend);
+    println!("  detail      {}", report.backend_detail);
+    println!(
+        "  auto-send   {}",
+        if report.watch_available {
+            "supported on this session"
+        } else {
+            "NOT supported here — this session cannot detect clipboard changes"
+        }
+    );
+    // Printed so the bounded-growth property is observable rather than merely
+    // documented. Neither cache holds content.
+    println!(
+        "  caches      {} event id(s), {} suppression entr(ies)",
+        report.event_cache_entries, report.suppression_cache_entries
+    );
+
+    if report.peers.is_empty() {
+        println!("\n  no paired devices. Run: anyflow pair");
+        return;
+    }
+
+    println!("\n  devices:");
+    for p in &report.peers {
+        println!("    {}  {}", p.device_name, p.device_id);
+        println!("      fingerprint  {}", p.fingerprint_short);
+        println!(
+            "      clipboard.v1 {}",
+            match (p.revoked, p.granted) {
+                // Revocation is the bigger fact and comes first: telling
+                // someone to grant a capability on a device that is no longer
+                // paired would send them down the wrong path.
+                (true, _) => "unavailable — this device's pairing was revoked",
+                (false, true) => "granted",
+                (false, false) => "NOT granted (run: anyflow grant <device> clipboard.v1)",
+            }
+        );
+        println!("      connected    {}", yes_no(p.connected));
+        println!(
+            "      policy       send={} receive={} auto-send={} auto-receive={}",
+            on_off(p.allow_send),
+            on_off(p.allow_receive),
+            on_off(p.auto_send),
+            on_off(p.auto_receive),
+        );
+        if p.auto_send && !report.watch_available {
+            println!(
+                "      warning      auto-send is on but this session cannot \
+                 detect clipboard changes, so nothing is pushed"
+            );
+        }
+        if let Some(outcome) = &p.last_outcome {
+            println!("      last result  {outcome}");
+        }
+    }
+
+    if !report.pending.is_empty() {
+        println!("\n  waiting to be applied (auto-receive is off):");
+        for clip in &report.pending {
+            // Size, hash prefix and age — never the text. A preview here
+            // would defeat the whole point of not carrying content on the
+            // control socket.
+            println!(
+                "    from {} ({})  {} bytes  sha256:{}  {}{} ago",
+                clip.device_name,
+                clip.fingerprint_short,
+                clip.bytes,
+                clip.hash_prefix,
+                if clip.sensitive { "SENSITIVE  " } else { "" },
+                human_duration(clip.age_secs),
+            );
+            println!(
+                "      apply with: anyflow clipboard apply {}",
+                clip.fingerprint_short.replace(' ', "").to_lowercase()
+            );
+        }
+    }
+}
+
+fn on_off(v: bool) -> &'static str {
+    if v {
+        "on"
+    } else {
+        "off"
     }
 }
 

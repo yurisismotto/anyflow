@@ -9,16 +9,18 @@ No required cloud. No vendor lock-in. No telemetry by default.
 Devices find each other on the local network, authenticate with pinned public
 keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 
-> **Status: `files.v1` Sprint.** On top of the certified foundation —
-> identity, discovery, pairing, authenticated transport, ping/pong and
-> `battery.v1` — this adds **secure file transfer in both directions**.
-> Clipboard, notifications, media control and browser integration are **not**
+> **Status: `clipboard.v1` Sprint.** On top of the certified foundation —
+> identity, discovery, pairing, authenticated transport, ping/pong,
+> `battery.v1` and `files.v1` — this adds **text clipboard sharing**.
+> Notifications, media control and browser integration are **not**
 > implemented; the architecture is built to receive them, and that is all.
 >
-> Both modules build and their test suites pass. `files.v1` has been exercised
-> end to end against the real daemon binary over real TLS, in both directions,
-> with SHA-256 verification. It has **not** yet been run against a physical
-> Android device; see [Known limitations](#known-limitations).
+> Clipboard sharing is, precisely: **automatic Fedora → Android sync**
+> (opt-in, per device) and **manual Android → Fedora send**. It is not
+> "automatic bidirectional clipboard", and saying so would be wrong: Android
+> 10+ refuses clipboard reads to an app without input focus, and AnyFlow uses
+> none of the techniques that defeat that. See
+> [docs/architecture/CLIPBOARD.md](docs/architecture/CLIPBOARD.md).
 
 ## Principles
 
@@ -42,6 +44,7 @@ anyflow/
 │   ├── core/                  Identity, pairing, TLS, framing, session
 │   ├── capabilities/battery/  battery.v1
 │   ├── capabilities/files/    files.v1 — transfers, filename safety, stream auth
+│   ├── capabilities/clipboard/ clipboard.v1 — text rules, policy, loop suppression
 │   ├── daemon/                anyflowd
 │   ├── cli/                   anyflow
 │   └── gui/                   (placeholder — GTK4/Libadwaita, later)
@@ -102,6 +105,26 @@ Received files land in `<XDG downloads>/AnyFlow`. An existing name is never
 overwritten — `photo.jpg` becomes `photo (1).jpg`. See
 [docs/architecture/FILES.md](docs/architecture/FILES.md).
 
+Clipboard sharing is likewise never granted automatically — a device that can
+write your clipboard can also see what you paste next:
+
+```bash
+anyflow grant <device> clipboard.v1        # allow clipboard sharing
+anyflow clipboard status                   # what works here, and per-device policy
+anyflow clipboard send <device>            # send the current clipboard, now
+anyflow clipboard send <device> --sensitive  # ask the phone to mark it sensitive
+anyflow clipboard apply <device>           # apply a clip that is waiting
+anyflow clipboard auto-send <device> on    # push every local copy to that device
+anyflow clipboard auto-receive <device> on # apply its clips as they arrive
+```
+
+Granting is one decision; automation is another. A freshly granted device can
+send and receive **by hand**, and both automatic directions start **off** —
+`auto-send` means everything you copy leaves this machine, and `auto-receive`
+means that device can replace what you are about to paste. Clipboard content
+is never written to disk and never logged, at any level. See
+[docs/architecture/CLIPBOARD.md](docs/architecture/CLIPBOARD.md).
+
 The daemon has no terminal, so it cannot prompt: it **declines** incoming
 files and logs why. `anyflowd --accept-files-without-asking` is the documented
 escape hatch for an unattended test rig.
@@ -152,8 +175,15 @@ repository that disables certificate validation.
 ## Testing
 
 ```bash
-cd desktop && cargo test --workspace     # 81 tests
-cd android && ./gradlew :app:testDebugUnitTest   # 63 tests
+cd desktop && cargo test --workspace              # 292 tests
+cd android && ./gradlew :app:testDebugUnitTest    # 206 tests
+
+# Touches the real system clipboard, so it is opt-in:
+cd desktop && cargo test -p anyflow-capability-clipboard --test real_backend \
+    -- --ignored --test-threads=1                 # 9 tests
+
+# On a connected Android device:
+cd android && ./gradlew :app:connectedDebugAndroidTest   # 21 tests
 ```
 
 The Rust suite includes end-to-end pairing over real TLS on loopback and a
@@ -164,20 +194,17 @@ The Android suite covers the same wire rules on the Kotlin side, and checks
 pinning against real certificates emitted by the desktop implementation
 (`protocol/testdata/`).
 
-Two known-answer vectors are asserted by **both** suites, so the
+Three known-answer vectors are asserted by **both** suites, so the
 implementations cannot drift apart silently:
 
-* the pairing proof and confirmation HMACs, and
-* the SPKI fingerprints of the shared certificate fixtures.
+* the pairing proof and confirmation HMACs,
+* the SPKI fingerprints of the shared certificate fixtures, and
+* the `clipboard.v1` content hash — SHA-256 over the UTF-8 bytes — along with
+  the text rules around it, since a clip one platform sends and the other
+  refuses is a bug rather than a policy.
 
 ## Known limitations
 
-* **Pairing has never run against a physical phone.** Both sides build, both
-  test suites pass, and the desktop end-to-end suite pairs over real TLS
-  between two processes — but no Android hardware has been in the loop yet, so
-  the on-device behaviour of the Keystore, the foreground service and mDNS
-  browsing is unverified. `desktop/daemon/examples/fake_phone.rs` is a test
-  client, not a phone, and must never be reported as one.
 * **`files.v1` has not run against a physical phone.** It is exercised end to
   end against the real `anyflowd` binary over real TLS, in both directions,
   with SHA-256 verification — but by `fake_phone`, which is a test client and
@@ -196,8 +223,23 @@ implementations cannot drift apart silently:
 * **One file per share.** `ACTION_SEND_MULTIPLE` is registered so AnyFlow
   appears for multi-select, but only the first item is sent.
 * The trust store's persistence path is not covered by the local JVM unit
-  tests: it needs a real `Context` and `filesDir`. Its pure logic is tested;
-  the file I/O is not.
+  tests: it needs a real `Context` and `filesDir`. Its pure logic is tested,
+  and `ClipboardPersistenceTest` now covers the file I/O on a device.
+* **Automatic Android → Fedora clipboard is not implemented, and will not be.**
+  Android 10+ refuses clipboard reads to an app without input focus, and every
+  way around it is forbidden or user-hostile. Android → Fedora is a deliberate
+  action: the Send clipboard button, the Quick Settings tile, or sharing text
+  to AnyFlow. Verified on an SM-X620 (Android 16): background read REFUSED,
+  focused read ALLOWED, background `setPrimaryClip` APPLIED.
+* **The desktop clipboard needs an unlocked session.** On GNOME Wayland,
+  `wl-copy` and `wl-paste` block behind the lock screen rather than failing.
+  Every call is bounded by a timeout and reported as such, so nothing hangs —
+  but clipboard sync does not work while the screen is locked.
+* **Clipboard auto-send needs a compositor that can report clipboard changes.**
+  GNOME implements neither wlr- nor ext-data-control, so AnyFlow watches via
+  XFIXES on the Xwayland `CLIPBOARD` selection instead (ADR-0014). Without
+  Xwayland there is no watcher and `auto-send` degrades to manual sending,
+  which `anyflow clipboard status` reports.
 * The desktop private key is protected by filesystem permissions, not by
   hardware. TPM2 sealing is the top security debt
   ([ADR-0006](docs/adr/ADR-0006-device-identity-and-pairing.md)).

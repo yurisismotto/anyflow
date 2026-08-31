@@ -180,11 +180,33 @@ confirmation for anything else.
 
 ### T10 — Clipboard contents (passwords, tokens, 2FA codes)
 
-*Not applicable in this Sprint*: no clipboard capability exists. The
-groundwork: clipboard content will never be persisted, never logged at any
-level, and will be a separately granted capability that is **off by default**
-(`auto_grant` contains only `battery.v1`, which is read-only telemetry with no
-side effects).
+**Implemented by `clipboard.v1`.** The clipboard is the most sensitive surface
+AnyFlow touches. It routinely holds passwords, API keys, one-time codes, card
+numbers, recovery phrases and URLs with tokens in them — usually without the
+person consciously deciding to put them there.
+
+* `clipboard.v1` is **never auto-granted**. `auto_grant` still contains only
+  `battery.v1`. Granting it is `anyflow grant <device> clipboard.v1`, or a
+  switch on the Android device card.
+* The grant is one question; **direction and automation are another**. A
+  freshly granted device gets `allow_send`/`allow_receive` on (that is what
+  the person just asked for) and `auto_send`/`auto_receive` **off**. So a
+  fresh grant sends nothing when you copy, and puts nothing on your clipboard
+  when a peer pushes.
+* With `auto_receive` off, an accepted clip is held **in memory** and offered
+  through a notification or `anyflow clipboard apply`. It never silently
+  replaces what you are about to paste.
+* Content is bounded at 32 KiB and **never truncated** — a truncated password
+  is a different, plausible-looking, wrong value.
+* Nothing is persisted: see T21. Nothing is logged: see T11.
+
+**Residual risk.** A person who grants `clipboard.v1` *and* turns on
+`auto_send` for a device has decided that everything they copy goes to that
+device. That is a real exposure and the CLI help says so in those words. The
+desktop has no reliable way to detect a sensitive clip (unlike Android's
+`EXTRA_IS_SENSITIVE`), and we deliberately do **not** invent a heuristic
+password detector — a guess dressed up as a security control is worse than an
+honest warning.
 
 ### T11 — Leakage through logs
 
@@ -207,6 +229,25 @@ side effects).
   screen.
 * Failure reasons sent to a peer come from a fixed enum, so a local path or an
   errno string cannot escape through that channel.
+* `clipboard.v1` adds the strictest rule in the project: **clipboard text
+  never reaches a log, at any level, on either platform.** What is logged is
+  the peer's short fingerprint, the event-id prefix, the content-hash prefix,
+  the byte count and the outcome. `ClipboardText` has a *hand-written*
+  `Debug`/`toString` — a derived one would put content into every `tracing`
+  field using `?value`, every panic message and every test failure. This is
+  proved rather than asserted: `capabilities/clipboard/tests/logging.rs` runs
+  every flow (applied, sensitive, duplicate, oversized, invalid,
+  held-then-applied, backend failure) under a subscriber capturing at
+  **TRACE** with canary strings, and fails if a canary appears. `RUST_LOG=trace`
+  is what someone runs when something is wrong, which is the worst moment to
+  spill a password into a file they are about to attach to a bug report.
+* Nothing built by `clipboard.v1` reaches a shell. Clipboard text goes to
+  `wl-copy`'s **stdin**, never an `argv`, so it never appears in
+  `/proc/<pid>/cmdline` where any process on the machine could read it.
+* A clipboard notification on Android carries the computer's name, the byte
+  count and the sensitive flag — **never the text**. A notification is shown
+  on the lock screen and is readable by any notification listener the user has
+  installed.
 * The daemon logs to stderr, which journald captures under the user's own
   session.
 
@@ -320,6 +361,139 @@ deletes the partial file. Offers, acceptances, stream opens, idle streams and
 the post-send verdict all have explicit bounds, and concurrency is capped per
 peer.
 
+### T21 — Clipboard exfiltration by a malicious trusted peer
+
+**New with `clipboard.v1`.** *A3.* A device that was legitimately paired, and
+has since been compromised or lent out, is inside TLS and inside the trust
+store. What can it get?
+
+* **Nothing, without a `clipboard.v1` grant.** The grant is checked on every
+  inbound message, freshly, from the trust store — not from a set captured at
+  handshake time. `CLIP-SEC-01`.
+* **Nothing after revocation**, on the session it is already holding.
+  Narrowing a grant takes effect at once, without a reconnect; widening one
+  needs a new handshake. The dangerous half is the immediate one.
+  `CLIP-SEC-02`, `CLIP-SEC-16`.
+* **It cannot pull.** There is no "give me your clipboard" message in the
+  schema. A peer can only *offer*; a clip leaves this device because a local
+  watcher fired under a locally-set `auto_send`, or because a person tapped a
+  button. `CLIP-SEC-11`.
+* **It cannot widen its own permissions.** No protocol message writes a grant
+  or a policy flag — the schema has no such message, so this is an absence
+  rather than a check that could be inverted. `CLIP-SEC-13`.
+* **It cannot impersonate another device.** Authorization keys on the pinned
+  TLS identity, never on the `origin_device_id` a peer claims. `CLIP-SEC-03`.
+
+**Residual risk.** A compromised device with `clipboard.v1` granted and
+`auto_send` enabled *on the other side* receives whatever that side copies,
+for as long as the pairing stands. Revocation is the answer and it is
+immediate; there is no way to un-send what already went.
+
+### T22 — Clipboard poisoning
+
+**New with `clipboard.v1`.** *A3.* The inverse of T21: a trusted-but-hostile
+peer writing to *your* clipboard. The classic attack is swapping a copied
+cryptocurrency address, or a `curl … | sh` line, for one of the attacker's —
+and it works precisely because nobody re-reads what they just copied.
+
+* `auto_receive` is **off by default**, so an update is held rather than
+  applied. Poisoning requires the person to have turned automatic application
+  on for that specific device.
+* With it off, applying is an explicit act, and the UI names the source device
+  and the size.
+* `allow_receive` off refuses the update outright; nothing is even held.
+  `CLIP-SEC-12`.
+* On Android, an applied clip carries `EXTRA_IS_REMOTE_DEVICE` (API 34+) so
+  the system can present it as having come from elsewhere.
+
+**Residual risk.** With `auto_receive` on — which is the setting that makes
+desktop → phone sync feel automatic — a trusted peer *can* replace your
+clipboard at any moment, including between your copy and your paste. This is
+inherent to the feature, it is opt-in per device, and there is no mitigation
+short of not enabling it.
+
+### T23 — Clipboard sync loops and multi-peer storms
+
+**New with `clipboard.v1`.** *A3, A4.* Two devices each applying the other's
+clip and re-announcing it is an infinite loop that would saturate both radios
+and both CPUs — a denial of service reachable by accident, not just by an
+attacker.
+
+Two independent mechanisms, both required:
+
+* **`EventCache`** makes one event idempotent. Global rather than per-peer, so
+  replaying one peer's `event_id` through another peer is also caught.
+  `CLIP-SEC-05`.
+* **`SuppressionCache`** makes a locally applied remote clip invisible to the
+  local watcher. Armed **before** the write, single-use, and expiring in ten
+  seconds so that a stale entry cannot swallow a legitimate re-copy.
+  `CLIP-SEC-10`.
+
+Both caches are bounded by count *and* by age, so a flooding peer cannot grow
+them. `CLIP-SEC-17`. Convergence is proved by a suite that runs real managers
+against each other with a hard budget on messages delivered — checked on every
+delivery, because a loop amplifies and a per-sweep check would let one sweep
+reach billions of messages before it was tested.
+
+**No relay.** A clip from peer A is never forwarded to peer B. This is
+enforced by absence: no code path takes an inbound update and sends it
+onward, and the loop *through* the clipboard is what the suppression cache
+stops. `CLIP-SEC-09`.
+
+**Residual risk.** A peer that is itself buggy can still send us updates as
+fast as its link allows. They are bounded by the session's outbound queue and
+answered idempotently, and the liveness probe eventually ends a session whose
+peer has stopped reading.
+
+### T24 — Stale, duplicated or replayed clipboard updates
+
+**New with `clipboard.v1`.** *A1, A3.* Beneath the transport's own replay
+protection (`sequence`, `message_id`), an `event_id` gives the capability its
+own idempotence, with a lifetime that suits it: the transport's dedup window
+is scoped to one connection, while a clipboard event must stay recognisable
+across a reconnect.
+
+Receiving the same `event_id` twice applies nothing twice, sends nothing
+twice, and answers `DUPLICATE`. `timestamp_unix_ms` is informational only and
+is never an input to an authorization, expiry or ordering decision — clocks
+between a phone and a desktop disagree routinely. Within a session, ordering
+is the protocol's; across peers, v1 is explicitly **last-accepted-wins**.
+
+### T25 — Oversized or malformed clipboard updates
+
+**New with `clipboard.v1`.** *A3.* Bounded before anything is allocated or
+copied: 32 KiB of UTF-8, an `event_id` of exactly 16 bytes, a `content_hash`
+of exactly 32 bytes or absent. Protobuf refuses to decode a `string` field
+that is not valid UTF-8, so invalid encodings never reach the capability at
+all. NUL-bearing text is refused explicitly and identically on both platforms.
+
+A refusal is **not fatal**: the session survives, because one capability
+misbehaving must not cost the user everything else. `CLIP-SEC-06`,
+`CLIP-SEC-07`, `CLIP-SEC-18`.
+
+### T26 — Android background clipboard restrictions
+
+**New with `clipboard.v1`.** Not an attack — a platform control we are on the
+*receiving* end of, and the design consequence is large enough to belong here.
+
+Android 10+ refuses `getPrimaryClip` to an app without input focus. Every
+technique that defeats it (`AccessibilityService`, default IME, an invisible
+focus-stealing activity, `READ_LOGS`, root, hidden APIs, reflection) is either
+forbidden or user-hostile, and **AnyFlow uses none of them**. The manifest
+declares no accessibility service, no notification listener, no
+`QUERY_ALL_PACKAGES`, no location and no `SYSTEM_ALERT_WINDOW`.
+
+The consequence is stated rather than hidden: Android → Fedora is a manual
+action, `ClipboardCapabilities.AUTO_SEND_SUPPORTED` is `false`, and the UI
+explains why instead of offering a toggle that would silently do nothing.
+
+`EXTRA_IS_SENSITIVE` and `EXTRA_IS_REMOTE_DEVICE` are treated strictly as
+**presentation hints**. Neither is a cryptographic mechanism, neither is an
+ACL, and neither is ever an authorization input — a sensitive clip from an
+ungranted peer is still refused, and a sensitive clip from a granted one is
+still delivered. What the sensitive hint earns is one more deliberate
+confirmation, naming the destination, before a clip leaves the device.
+
 ## 4. Assumptions
 
 1. The OS CSPRNG is sound on both platforms.
@@ -328,6 +502,10 @@ peer.
 4. The user's desktop account is not already compromised.
 5. The user looks at the fingerprint on the confirmation prompt. This one is
    the weakest link in the whole model and we know it.
+6. The system clipboard itself is not already being read by another local
+   process. On Android the platform enforces this; on a Linux desktop any
+   process in the same session can read the clipboard, and `clipboard.v1`
+   neither worsens nor can fix that.
 
 ## 5. Verification
 
@@ -351,6 +529,24 @@ and the data-stream MAC are additionally pinned as cross-language contracts:
 `android/app/src/test/.../FilenamesTest.kt` and `StreamAuthTest.kt` assert the
 same cases and the same MAC vector as the Rust suite, so the two
 implementations cannot quietly diverge.
+
+`clipboard.v1` adds four suites. `capabilities/clipboard/tests/security.rs`
+asserts CLIP-SEC-01 … 18 against the manager: an ungranted peer, a revoked
+peer, a spoofed `origin_device_id`, a replayed and a cross-peer-replayed
+`event_id`, an oversized clip, invalid UTF-8, a NUL, a mismatched hash, a
+sensitive clip, no relay, no echo, both direction policies, a peer trying to
+widen policy, bounded caches, and malformed protobuf.
+`capabilities/clipboard/tests/loops.rs` proves convergence with two- and
+three-device meshes under a hard delivery budget.
+`capabilities/clipboard/tests/logging.rs` proves T11's clipboard rule.
+`daemon/tests/clipboard.rs` runs the whole capability over real TLS with real
+pinning and the real trust store, including the session-writer regression: a
+burst four times the outbound queue depth must be answered in full, both
+directions must interleave without wedging, and a saturated session must still
+shut down. The Android JVM suite mirrors the text, policy, cache and sync
+rules; `ClipboardInstrumentedTest` asserts the **real** `ClipboardManager`,
+`EXTRA_IS_SENSITIVE` and `EXTRA_IS_REMOTE_DEVICE` on a device, because a mock
+there would prove only that we agree with ourselves.
 
 **Never**, in tests or in a debug build, disable certificate validation. There
 is no code path in this repository that does, and adding one would invalidate

@@ -8,4 +8,18 @@
     <string name="notif_receiving">Receiving %1$s</string>
     <string name="notif_sending">Sending %1$s</string>
     <string name="channel_transfers">File transfers</string>
+
+    <!--
+      clipboard.v1. Note what is absent from every string here: any way to
+      interpolate the clipboard text itself. A notification is visible on the
+      lock screen and readable by any notification listener, so a clip must
+      never reach one.
+    -->
+    <string name="channel_clipboard">Clipboard</string>
+    <string name="channel_clipboard_description">Clipboard text received from a paired computer.</string>
+    <string name="clip_received_title">Clipboard received from %1$s</string>
+    <string name="clip_received_body">%1$d bytes of text. Open AnyFlow to copy it.</string>
+    <string name="clip_marked_sensitive">Marked sensitive.</string>
+    <string name="clip_action_copy">Copy</string>
+    <string name="clipboard_tile_label">Send clipboard</string>
 </resources>

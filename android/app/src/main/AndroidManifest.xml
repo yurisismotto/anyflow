@@ -82,6 +82,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
+            <!--
+              Selected text, shared straight to a paired computer as a
+              clipboard update. `text/plain` is listed explicitly even though
+              `*/*` already matches it, because Android ranks a share target
+              higher when the type is named — and because being explicit is
+              what documents that shared text takes the clipboard.v1 path,
+              not the files.v1 one.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -98,6 +111,30 @@
             android:name=".service.ConnectionService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!--
+          "Send clipboard" in the Quick Settings panel.
+
+          The tile cannot read the clipboard itself: a TileService has no
+          input focus, and since Android 10 that is what `getPrimaryClip`
+          requires. It therefore opens MainActivity with an explicit request,
+          and the Activity — which does have focus — reads the clipboard after
+          the person confirms. That is the supported flow, not a workaround
+          for one. See ClipboardTileService.
+
+          BIND_QUICK_SETTINGS_TILE is held by the *system*, not by us: it is
+          what stops any other app from binding this service.
+        -->
+        <service
+            android:name=".ui.ClipboardTileService"
+            android:exported="true"
+            android:label="@string/clipboard_tile_label"
+            android:icon="@android:drawable/ic_menu_upload"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
     </application>
 </manifest>

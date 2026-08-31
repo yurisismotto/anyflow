@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use anyflow_capability_battery::{BatteryCapability, BatteryState, UPowerReader};
+use anyflow_capability_clipboard::{ClipboardCapability, ClipboardManager};
 use anyflow_capability_files::{
     Destination, FilesCapability, FilesConfig, StreamRole, TransferApproval, TransferManager,
 };
@@ -156,9 +157,29 @@ async fn main() -> anyhow::Result<()> {
         approval,
     );
 
+    // clipboard.v1. Like files.v1 it is absent from `auto_grant`: a device
+    // that can write your clipboard can also read what you paste next, and
+    // ADR-0008 requires a side effect that large to be granted by hand.
+    //
+    // The backend is probed once here so that `anyflow clipboard status` can
+    // report what this session can actually do — including, on GNOME, that it
+    // cannot report clipboard changes at all — instead of each command
+    // discovering it separately.
+    let clipboard_backend = anyflow_capability_clipboard::backend::detect();
+    if let Err(why) = clipboard_backend.watch_availability() {
+        tracing::info!(
+            reason = %why,
+            "clipboard auto-send is unavailable on this session; manual \
+             `anyflow clipboard send` still works"
+        );
+    }
+    let clipboard = ClipboardManager::new(clipboard_backend, device_id.clone());
+    tracing::info!(backend = %clipboard.backend().describe(), "clipboard.v1 ready");
+
     let registry = CapabilityRegistry::builder()
         .register(Arc::new(battery))
         .register(Arc::new(FilesCapability::new(Arc::clone(&transfers))))
+        .register(Arc::new(ClipboardCapability::new(Arc::clone(&clipboard))))
         .build();
     tracing::info!(capabilities = ?registry.advertised(), "capabilities registered");
 
@@ -167,7 +188,9 @@ async fn main() -> anyhow::Result<()> {
     let acceptor = TlsAcceptor::from(tls_config);
 
     let state = Arc::new(
-        DaemonState::new(store, registry, battery_state).with_transfers(Arc::clone(&transfers)),
+        DaemonState::new(store, registry, battery_state)
+            .with_transfers(Arc::clone(&transfers))
+            .with_clipboard(Arc::clone(&clipboard)),
     );
 
     // The state is the authorizer: every grant question is answered from the
@@ -176,6 +199,18 @@ async fn main() -> anyhow::Result<()> {
         .set_authorizer(Arc::clone(&state) as Arc<dyn anyflow_capability_files::FilesAuthorizer>)
         .await;
     let _reaper = transfers.spawn_reaper();
+
+    // Same rule for the clipboard: the grant and the per-peer policy are
+    // answered from the trust store on every question, never from a set
+    // captured at handshake time.
+    clipboard
+        .set_authorizer(
+            Arc::clone(&state) as Arc<dyn anyflow_capability_clipboard::ClipboardAuthorizer>
+        )
+        .await;
+    // Supervised, and idle until some peer actually asks for auto-send: with
+    // nobody asking it holds no helper process and no X connection.
+    let _clipboard_watcher = clipboard.spawn_watcher();
 
     // ---- listeners --------------------------------------------------------
     let bound = listener::bind_endpoints(port)?;

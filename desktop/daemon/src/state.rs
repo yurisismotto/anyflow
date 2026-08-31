@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use anyflow_capability_clipboard::{ClipboardAuthorizer, ClipboardManager, ClipboardPolicy};
 use anyflow_capability_files::{FilesAuthorizer, TransferManager};
 use anyflow_core::capability::CapabilityRegistry;
 use anyflow_core::error::{PairingError, Result};
@@ -29,6 +30,9 @@ pub struct DaemonState {
     /// `files.v1`, when the capability is enabled. `None` leaves the daemon
     /// with no file transfer at all rather than a half-wired one.
     pub transfers: Option<Arc<TransferManager>>,
+    /// `clipboard.v1`. Same reasoning as `transfers`: absent rather than
+    /// half-wired.
+    pub clipboard: Option<Arc<ClipboardManager>>,
 
     /// The single open pairing window, if any.
     pairing: Mutex<Option<PairingSession>>,
@@ -67,6 +71,7 @@ impl DaemonState {
             registry,
             battery,
             transfers: None,
+            clipboard: None,
             pairing: Mutex::new(None),
             confirm_tx: Mutex::new(None),
             sessions: RwLock::new(HashMap::new()),
@@ -88,6 +93,28 @@ impl DaemonState {
     pub fn with_transfers(mut self, transfers: Arc<TransferManager>) -> Self {
         self.transfers = Some(transfers);
         self
+    }
+
+    /// Attaches the clipboard manager. Separate from [`new`] for the same
+    /// circular-construction reason as [`with_transfers`].
+    ///
+    /// [`new`]: Self::new
+    /// [`with_transfers`]: Self::with_transfers
+    pub fn with_clipboard(mut self, clipboard: Arc<ClipboardManager>) -> Self {
+        self.clipboard = Some(clipboard);
+        self
+    }
+
+    /// Tells the clipboard watcher that a grant or policy may have changed.
+    ///
+    /// Called from every path that edits a grant, a policy or a pairing. It
+    /// is what makes "revoke stops future sync immediately" true for the
+    /// outbound direction: the watcher re-reads the peer list and stops
+    /// entirely once nobody is left who wants it.
+    pub fn notify_clipboard_policy_changed(&self) {
+        if let Some(clipboard) = &self.clipboard {
+            clipboard.policy_changed();
+        }
     }
 
     /// Records the port the listener actually bound.
@@ -279,6 +306,37 @@ impl FilesAuthorizer for DaemonState {
     }
 }
 
+/// The `clipboard.v1` grant *and* policy check, asked fresh every time.
+///
+/// One call answers both questions on purpose. A caller that had to ask
+/// "is it granted?" and "what is the policy?" separately could do the second
+/// and forget the first, and the failure would be silent — a revoked device
+/// whose stored policy still said `allow_receive`. Returning
+/// [`ClipboardPolicy::DENIED`] for an unknown, revoked or ungranted peer makes
+/// that mistake unrepresentable.
+#[async_trait::async_trait]
+impl ClipboardAuthorizer for DaemonState {
+    async fn policy_for(&self, peer: &Fingerprint) -> ClipboardPolicy {
+        let store = self.store.lock().await;
+        match store.trusted_peer(peer) {
+            // `trusted_peer` already excludes revoked devices; `allows`
+            // re-checks that and the per-capability grant.
+            Some(p) if p.allows(anyflow_capability_clipboard::CAPABILITY_ID) => p.clipboard_policy,
+            _ => ClipboardPolicy::DENIED,
+        }
+    }
+
+    async fn auto_send_peers(&self) -> Vec<Fingerprint> {
+        let store = self.store.lock().await;
+        store
+            .peers()
+            .filter(|p| p.allows(anyflow_capability_clipboard::CAPABILITY_ID))
+            .filter(|p| p.clipboard_policy.may_auto_send())
+            .map(|p| p.fingerprint)
+            .collect()
+    }
+}
+
 #[async_trait::async_trait]
 impl SessionHost for DaemonState {
     fn local_device_info(&self) -> v1::DeviceInfo {
@@ -391,6 +449,10 @@ impl SessionHost for DaemonState {
             granted_capabilities: granted,
             last_protocol_version: protocol_version,
             revoked: false,
+            // Safe defaults. `clipboard.v1` is not in `auto_grant`, so every
+            // flag here is inert until someone grants the capability by hand
+            // — and even then the two automatic directions stay off.
+            clipboard_policy: ClipboardPolicy::default(),
         };
         store.add_peer(peer)
     }

@@ -41,6 +41,18 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
 
+    testOptions {
+        unitTests {
+            // `android.util.Log` is a stub on the unit-test classpath and
+            // throws by default. Returning a default instead lets production
+            // code keep its logging while the domain logic is tested on the
+            // JVM. It is not a licence to test Android behaviour here: where
+            // the platform's own behaviour is the subject — ClipboardManager,
+            // the Keystore — the test is instrumented and runs on a device.
+            isReturnDefaultValues = true
+        }
+    }
+
     sourceSets {
         getByName("main") {
             // Single source of truth: the same .proto files the Rust daemon
@@ -88,6 +100,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.json)
 
     // Instrumented tests. The Keystore regression can only be proved on a
     // real device: the whole failure was the TEE refusing an operation, and

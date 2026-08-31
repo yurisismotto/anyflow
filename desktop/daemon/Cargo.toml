@@ -20,6 +20,7 @@ upower = ["anyflow-capability-battery/upower"]
 anyflow-core = { version = "0.1.0", path = "../core" }
 anyflow-proto = { version = "0.1.0", path = "../proto" }
 anyflow-capability-battery = { version = "0.1.0", path = "../capabilities/battery" }
+anyflow-capability-clipboard = { version = "0.1.0", path = "../capabilities/clipboard" }
 anyflow-capability-files = { version = "0.1.0", path = "../capabilities/files" }
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }

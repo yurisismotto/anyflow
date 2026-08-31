@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import io.github.yurisismotto.anyflow.AnyFlowApp
+import io.github.yurisismotto.anyflow.capability.ClipboardCapability
+import io.github.yurisismotto.anyflow.clipboard.ClipboardText
 import io.github.yurisismotto.anyflow.files.SharedFile
 import io.github.yurisismotto.anyflow.service.ConnectionService
 import io.github.yurisismotto.anyflow.store.TrustStore
@@ -51,6 +53,21 @@ import kotlinx.coroutines.launch
  * increment rather than half-implemented: batching needs a queue, per-item
  * progress and a partial-failure story, and the sprint's own guidance is to
  * ship one file first and document the rest. See `docs/architecture/FILES.md`.
+ *
+ * ## Shared text goes to `clipboard.v1`, not `files.v1`
+ *
+ * A `text/plain` share carries its text in `EXTRA_TEXT`, in the intent
+ * itself. Two consequences, and both are worth stating:
+ *
+ *  * it never touches the system clipboard, so the Android 10 focus
+ *    restriction on `getPrimaryClip` does not apply — this is the one path
+ *    where text can reach a computer without the person first copying it;
+ *  * an intent carries no `EXTRA_IS_SENSITIVE`, so shared text is sent
+ *    without the sensitive hint. That is honest rather than convenient: we
+ *    do not know, and guessing from the content would be exactly the
+ *    heuristic-password-detector this project refuses to build.
+ *
+ * This complements the Send clipboard button; it does not replace it.
  */
 class SendActivity : ComponentActivity() {
 
@@ -60,21 +77,72 @@ class SendActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val uri = extractSharedUri(intent)
+        val sharedText = extractSharedText(intent)
         val peer = runCatching { app.trustStore.peers().firstOrNull() }.getOrNull()
 
         setContent {
             MaterialTheme {
                 Surface {
-                    SendScreen(
-                        app = app,
-                        uri = uri,
-                        peer = peer,
-                        onSend = { target, file -> startSend(target, file) },
-                        onClose = { finish() },
-                    )
+                    if (sharedText != null && uri == null) {
+                        SendTextScreen(
+                            text = sharedText,
+                            peer = peer,
+                            onSend = { target, text -> startTextSend(target, text) },
+                            onClose = { finish() },
+                        )
+                    } else {
+                        SendScreen(
+                            app = app,
+                            uri = uri,
+                            peer = peer,
+                            onSend = { target, file -> startSend(target, file) },
+                            onClose = { finish() },
+                        )
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Sends shared text as a clipboard update.
+     *
+     * `sensitive = false`: an `ACTION_SEND` intent carries no sensitivity
+     * hint, and inferring one from the text would be a heuristic dressed up
+     * as a security control.
+     */
+    private fun startTextSend(peer: TrustStore.TrustedPeer, text: ClipboardText) {
+        ConnectionService.start(this)
+        lifecycleScope.launch {
+            app.clipboard.sendText(peer.fingerprint, text, sensitive = false)
+                .onSuccess {
+                    android.widget.Toast.makeText(
+                        this@SendActivity,
+                        "Sent ${'$'}{it} bytes to ${'$'}{peer.deviceName}.",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                    finish()
+                }
+                .onFailure { failure ->
+                    android.widget.Toast.makeText(
+                        this@SendActivity,
+                        failure.message ?: "Could not send that text.",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+        }
+    }
+
+    /**
+     * The text of a `text/plain` share, if there is usable text.
+     *
+     * Validated here rather than at send time so the screen can say *why*
+     * something cannot be sent before offering a button that would fail.
+     */
+    private fun extractSharedText(intent: Intent?): ClipboardText? {
+        if (intent?.action != Intent.ACTION_SEND) return null
+        val raw = intent.getCharSequenceExtra(Intent.EXTRA_TEXT) ?: return null
+        return ClipboardText.validate(raw).getOrNull()
     }
 
     private fun startSend(peer: TrustStore.TrustedPeer, uri: Uri) {
@@ -176,6 +244,71 @@ private fun SendScreen(
                         TransferRow(transfer)
                     }
                 }
+            }
+        }
+
+        Button(onClick = onClose) { Text("Close") }
+    }
+}
+
+/**
+ * The text half of the Sharesheet: "Share → AnyFlow" from a browser or a
+ * notes app.
+ *
+ * The text is *not* rendered. Showing a preview would put whatever was shared
+ * — which may well be a password someone selected in a manager — on a screen
+ * that is also visible over the shoulder, and it buys nothing: the person
+ * just selected it and knows what it is. The size is shown instead.
+ */
+@Composable
+private fun SendTextScreen(
+    text: ClipboardText,
+    peer: TrustStore.TrustedPeer?,
+    onSend: (TrustStore.TrustedPeer, ClipboardText) -> Unit,
+    onClose: () -> Unit,
+) {
+    var started by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Send text with AnyFlow", style = MaterialTheme.typography.headlineSmall)
+
+        when {
+            peer == null ->
+                Text("No computer paired yet. Open AnyFlow and scan the pairing code first.")
+
+            !peer.allows(ClipboardCapability.ID) ->
+                Text(
+                    "Clipboard sharing is off for ${'$'}{peer.deviceName}. Turn on " +
+                        "\"Share clipboard with this computer\" in AnyFlow first.",
+                )
+
+            !peer.clipboardPolicy.allowSend ->
+                Text("Sending your clipboard to ${'$'}{peer.deviceName} is turned off.")
+
+            else -> {
+                Card {
+                    Column(Modifier.padding(12.dp), Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "${'$'}{text.byteLength} bytes of text",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text("to ${'$'}{peer.deviceName}")
+                        Text(
+                            "Fingerprint ${'$'}{peer.fingerprint.toDisplayShort()}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                Button(
+                    enabled = !started,
+                    onClick = {
+                        started = true
+                        onSend(peer, text)
+                    },
+                ) { Text(if (started) "Sending…" else "Send") }
             }
         }
 

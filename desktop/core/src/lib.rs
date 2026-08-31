@@ -15,6 +15,7 @@
 //! ```
 
 pub mod capability;
+pub mod clipboard_policy;
 pub mod discovery;
 pub mod error;
 pub mod fingerprint;
