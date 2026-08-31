@@ -84,9 +84,24 @@ Behavioural consequences that shape the UX:
 - The prompt fires on browsing *and* on connecting to a local address — so it cannot be
   deferred past pairing.
 
-Apple's TN3179 is the authoritative reference and could not be retrieved through this
-session's tooling. **EXTERNAL VERIFICATION REQUIRED** for the finer points: exactly which
-operations trigger the prompt, and how denial surfaces to `NWBrowser` versus a raw socket.
+**RESOLVED (V-05).** TN3179 was retrieved in full. The operation table, verbatim:
+
+| Operation | Local network access required |
+| --- | :-: |
+| Making an outgoing TCP connection | **yes** |
+| **Listening for and accepting incoming TCP connections** | **no** |
+| Sending a UDP unicast / multicast / broadcast | yes |
+| Receiving an incoming UDP unicast | no |
+| Receiving an incoming UDP multicast | yes |
+
+plus *"All Bonjour operations require local network access"* (register, browse, resolve).
+
+**A listen-only iOS client would need no Local Network privilege** — it is Bonjour and outgoing
+connections that do. That does not rescue background operation, but it narrows the permission
+story usefully and reshapes what POC-IOS-02 should measure. Also: *"If an iOS app is in the
+background and performs a local network operation while its Local Network privilege is
+undetermined, the system denies that operation without presenting the local network alert"* — so
+the privilege must be established in the **foreground**, during onboarding.
 
 **POC-IOS-02** exists to measure this first, because a denied permission with no in-app
 recovery is a support burden that must be designed for, not discovered.
@@ -160,9 +175,13 @@ clipboard send or close cleanly, not enough to keep a session.
 | `remote-notification` | Requires **APNs** → §6.4 |
 
 **Conclusion: no background mode legitimately supports an always-connected LAN session, and
-AnyFlow must not pretend otherwise.** The exact current list of values could not be fetched
-from Apple in this session — **EXTERNAL VERIFICATION REQUIRED** — but the conclusion does not
-depend on the edges of the list.
+AnyFlow must not pretend otherwise.**
+
+**VERIFIED (V-07).** The authoritative list is eleven values: `audio`, `location`, `voip`,
+`fetch`, `remote-notification`, `external-accessory`, `bluetooth-central`,
+`bluetooth-peripheral`, `processing`, `push-to-talk`, `nearby-interaction`. None describes holding
+a TCP/TLS session open to a LAN peer. Research v1's hedge is discharged: the conclusion did not
+depend on the edges, **and the edges confirm it**.
 
 ### 6.3 What *is* possible
 

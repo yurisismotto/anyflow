@@ -10,8 +10,40 @@
 | **Evidence** | Ordering is derived from [01](01-CURRENT-ARCHITECTURE-AUDIT.md)–[21](21-POC-MASTER-PLAN.md). |
 | **Related documents** | [02](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md), [21](21-POC-MASTER-PLAN.md), [23](23-RISKS-OPEN-QUESTIONS-AND-DECISIONS.md), [25](25-IMPLEMENTATION-BACKLOG.md) |
 
+
 ---
 
+> **⚠ UPDATED by the verification sprint (2026-08-31).**
+>
+> **The wave order is confirmed, not changed.** Every ordering argument survived verification, and
+> two got stronger:
+>
+> - **Wave 0 first** — reinforced. The identity seam is now documentation-verified against
+>   rustls 0.23.43 rather than PoC-gated, and it turns out to be **two call sites**
+>   ([26 §11.3](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)). Wave 0 also now carries **two defect fixes**
+>   that must not be refactored around.
+> - **Windows before macOS** — reinforced. `rustls-cng` was verified in source (rustls org, active,
+>   rustls 0.23, P-256, P1363→DER conversion with tests), while the Apple signer still has to be
+>   written. Windows remains the cheapest place to prove the riskiest part of the architecture.
+>
+> **Changes to the plan:**
+>
+> | Item | Change |
+> | --- | --- |
+> | **Wave 0 size** | ≈**17 engineer-days**, nine PRs ([28 §16](28-WAVE-0-IMPLEMENTATION-SPEC.md)). Smaller than "M" — the identity refactor is two call sites — but it absorbs two new defect fixes |
+> | **Wave 0 gate** | The proposed Linux cross-compile **does not work**: `ring` needs MSVC (V-10). Corrected to `cargo check` on a **Windows CI runner**, excluding `anyflow-runtime` |
+> | **Wave 0 hardware** | **None beyond what the project already has** — Fedora, an Android device, and a CI Windows runner |
+> | **Wave 2** | Gains **LINUX-010 (P0)**: `sensitive_hint` clips fail on Debian 13 and every current Ubuntu LTS |
+> | **Wave 3** | **Cheaper.** POC-KDE-01's central question is answered; only the Xwayland fallback needs measuring |
+> | **Wave 5** | Gains **WIN-010** (message-only window + message pump for `AddClipboardFormatListener`) |
+> | **Wave 7** | Gains **MAC-010** (do not exit on network failure) and the macOS **local-network permission** (applies from macOS 15; `launchd` agents get no exemption). **Developer ID moves from a release requirement to a PoC prerequisite** |
+> | **Wave 8** | macOS auto-send is **user-gated** from macOS 15.4, not merely polling-based |
+> | **PoCs** | 37 specified. **Four are P0 and all are Wave 0 acceptance gates — none blocks Wave 0 from starting** ([27 §7](27-ARCHITECTURE-DECISION-CLOSEOUT.md)) |
+>
+> **Waves 0–4 remain a complete, shippable outcome**, and that is now a stronger claim: three of the
+> four defects this programme has found are fixed inside Waves 0–2.
+
+---
 ## 1. What determines the order
 
 Not platform popularity. Three things:

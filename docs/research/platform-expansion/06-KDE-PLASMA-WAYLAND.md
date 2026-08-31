@@ -72,7 +72,7 @@ know which protocol KWin speaks — `wl-clipboard` decides, and AnyFlow reads th
 | --- | --- | --- |
 | **read** | `wl-paste --no-newline --type text/plain;charset=utf-8` | ✅ identical |
 | **write** | `wl-copy --type text/plain;charset=utf-8`, text on stdin | ✅ identical |
-| **write sensitive** | `wl-copy --sensitive` | ✅ identical, and *more effective* — Klipper is a real clipboard-history manager that honours the hint |
+| **write sensitive** | `wl-copy --sensitive` | ⚠️ **Requires wl-clipboard ≥ 2.3.0.** On 2.2.1 the flag does not exist and `wl-copy` exits 1, so the clip **fails entirely** — see [26 §5.1](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). Where it *is* available, Plasma is the best case: Klipper honours the `x-kde-passwordManagerHint` it sets |
 | **watch** | `wl-paste --watch` over `ext-data-control-v1` (expected) | ❌ **different, and better** |
 
 Read and write need no work at all: they are `wl-clipboard` invocations that do not depend on
@@ -89,6 +89,12 @@ on a platform it was not written for.
 
 ---
 
+
+> **⚠ Updated by the verification sprint (2026-08-31).** See
+> [26 — External verification closeout](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) for the primary
+> sources and [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) for the resulting decisions.
+> **§4 is resolved** from KWin's git history and wl-clipboard's release record. **§3 is partly wrong**: `wl-copy --sensitive` does not exist before wl-clipboard 2.3.0, so on Plasma with a 2.2.1 package the sensitive path **fails**, it does not degrade.
+
 ## 4. The one real question: which data-control protocol, and does the packaged wl-clipboard speak it?
 
 `wlr-data-control-unstable-v1` has been superseded by `ext-data-control-v1` in
@@ -96,9 +102,16 @@ wayland-protocols, and upstream marks the wlr version deprecated and "not intend
 production use" (OFFICIAL DOC VERIFIED, wayland-protocols). KWin has a merge request porting
 its implementation to `ext-data-control` (KDE `plasma/kwin` MR !6606).
 
-`wl-clipboard` gained `ext-data-control-v1` support at some point around release 2.3; the
-upstream issue requesting it (#242) and the release notes could not be reconciled with
-confidence from this session's sources. **EXTERNAL VERIFICATION REQUIRED.**
+**RESOLVED (V-01, V-02).** From primary sources:
+
+- wl-clipboard **2.3.0** (released **2026-03-22**) added `ext-data-control-v1`, contributed by
+  @zzag — stated verbatim in the upstream release body. Release 2.2.1 predates it (2023-08-27)
+  and its source tree contains only `wlr-data-control-unstable-v1.xml`.
+- KWin's commit history is unambiguous: *"Support wlr-data-control with the same impl as
+  ext-data-control"* (2024-11-22) → *"Port to ext-data-control"* (2025-04-10) → **"Drop
+  wlr-data-control support overlay"** (2025-04-12). That commit is absent from `v6.4.6` and
+  present from `v6.4.90`, so **the overlay disappears in Plasma 6.5**.
+- `zwlr_data_control` appears **zero times** in KWin `master`.
 
 Now cross that with what distributions ship (OFFICIAL DOC VERIFIED, 2026-08-31):
 
@@ -108,7 +121,7 @@ Now cross that with what distributions ship (OFFICIAL DOC VERIFIED, 2026-08-31):
 | Debian forky / sid | **2.3.0** |
 | Ubuntu 24.04 / 25.10 / **26.04 LTS** | 2.2.1 |
 | Ubuntu stonking (devel) | **2.3.0** |
-| Fedora current | to be confirmed |
+| Fedora current | `2.2.1^git20251124.e808203` — **has both protocols and `--sensitive`** (V-11) |
 
 So there is a plausible and testable failure mode:
 

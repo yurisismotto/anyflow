@@ -8,6 +8,7 @@
 | **Scope** | mDNS/DNS-SD stacks per platform, TXT records, address families, interface and network changes, interoperability testing. |
 | **Decision status** | PROPOSED |
 | **Evidence** | REPO VERIFIED for AnyFlow's record and behaviour; OFFICIAL DOC VERIFIED for platform APIs; POC REQUIRED for every coexistence claim. |
+| **⚠ Verification update** | **V-03 PARTIALLY VERIFIED**: `DNS_SERVICE_INSTANCE` carries host + IPv4 + IPv6, but on-wire A/AAAA publication is undocumented — demoted to a *contingent* question, since `mdns-sd` publishes its own address records. **V-12 STILL OPEN** and correctly a PoC. **New (iOS/macOS):** TN3179 confirms *all* Bonjour operations need local-network access, while **listening for and accepting incoming TCP does not**. `DnsServiceRegister` registration is *"tied to the lifetime of the calling process"*. See [26 §V-03, §V-05](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). |
 | **Related documents** | [04](04-LINUX-PORTABILITY.md), [08](08-WINDOWS-FEASIBILITY.md), [10](10-MACOS-FEASIBILITY.md), [11](11-IOS-IPADOS-FEASIBILITY.md), [20](20-SECURITY-THREAT-ANALYSIS.md) |
 
 ---

@@ -86,11 +86,13 @@ of the calling process. If the process goes away, the service will be automatica
 deregistered."** (OFFICIAL DOC VERIFIED.) That is exactly the semantics AnyFlow's
 `Advertisement`/`Drop` pair implements by hand today, so the models match.
 
-One caveat surfaced during research and is **EXTERNAL VERIFICATION REQUIRED**: there is a
-Microsoft Q&A thread titled *"Why doesn't DnsServiceRegister create mDNS A/AAAA records?"*.
-If the platform API registers `SRV`/`TXT` but not the address records, an Android client
-resolving the instance gets no address — which would be a silent, total discovery failure.
-`mdns-sd` publishes its own address records, so route 4.1 does not have this problem.
+One caveat is **PARTIALLY VERIFIED (V-03)**. `DNS_SERVICE_INSTANCE` carries `pszHostName`,
+`ip4Address` and `ip6Address` — documented as "the service-associated IPv4/IPv6 address" — so the
+capability exists. But Microsoft never documents whether A/AAAA records are emitted on the wire,
+or what a `NULL` address pointer does. If the platform API registers `SRV`/`TXT` but not the
+address records, an Android client resolving the instance gets no address — a silent, total
+discovery failure. `mdns-sd` publishes its own address records, so route 4.1 does not have this
+problem, which **demotes V-03 from a blocking question to a contingent one**.
 
 **Recommendation: try `mdns-sd` first (POC-WIN-02), keep the platform API as the fallback.**
 It reuses certified code, keeps one implementation across Linux/Windows/macOS, and avoids the
@@ -241,7 +243,7 @@ Windows has the best clipboard API of the three desktops for AnyFlow's purposes.
 | **watch** | `AddClipboardFormatListener(hwnd)` → `WM_CLIPBOARDUPDATE` (0x031D) | A genuine event, no polling. `RemoveClipboardFormatListener` on shutdown. Needs a window and a message pump. OFFICIAL DOC VERIFIED. |
 | **read** | `OpenClipboard` → `GetClipboardData(CF_UNICODETEXT)` → `GlobalLock` → `CloseClipboard` | UTF-16; convert to UTF-8 for `ClipboardText`. Must handle `OpenClipboard` failing because another process holds it — retry with backoff, never block forever. |
 | **write** | `OpenClipboard` → `EmptyClipboard` → `SetClipboardData(CF_UNICODETEXT, hMem)` → `CloseClipboard` | Ownership transfers to the system. |
-| **sensitive hint** | Register the format `"ExcludeClipboardContentFromMonitorProcessing"` (and/or `"CanIncludeInClipboardHistory"` = 0) and set it alongside the text | This is how Windows apps ask Cloud Clipboard / clipboard history to skip a clip. **EXTERNAL VERIFICATION REQUIRED** — these are documented as clipboard *formats* rather than a first-class API, and the exact set should be confirmed against current Microsoft guidance before implementation. |
+| **sensitive hint** | Register and set **all three**: `ExcludeClipboardContentFromMonitorProcessing` (any data), `CanIncludeInClipboardHistory` = DWORD 0, `CanUploadToCloudClipboard` = DWORD 0 | **VERIFIED (V-04)**, learn.microsoft.com *Clipboard Formats*. Research v1 named two of three. The two DWORD formats cover **disjoint** halves — history and device sync respectively — and each explicitly "does not affect" the other, so setting all three is belt-and-braces rather than redundant. All are obtained via `RegisterClipboardFormat`. WIN-008 is now implementable. |
 
 Mapping onto the existing trait is direct: `ClipboardBackend::{read_text, write_text,
 watch_changes, watch_availability, describe}` all have natural Windows implementations, and

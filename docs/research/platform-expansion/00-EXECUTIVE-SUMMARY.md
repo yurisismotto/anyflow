@@ -12,6 +12,22 @@
 
 ---
 
+> **⚠ UPDATED by the verification sprint (2026-08-31).** Every conclusion below was tested against
+> primary sources. **The headline survived; three specifics did not.** See
+> [26 §14](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) for the full OLD → NEW → WHY table.
+>
+> | Was | Now |
+> | --- | --- |
+> | "12 items EXTERNAL VERIFICATION REQUIRED" | **8 VERIFIED, 2 partial, 2 still open, 0 refuted.** Neither open item blocks Wave 0 |
+> | PLAT-DEC-001 POC REQUIRED | **READY FOR RFC.** The rustls seam is verified against 0.23.43; the refactor is **two call sites** |
+> | "`filename.rs` knows nothing about Windows" | **REFUTED.** Device names, trailing dots and `\` are present and tested. Real gaps: `:` (ADS) and `U+202E` (bidi — **a Linux defect today**) |
+> | "`wl-copy --sensitive` ✅ identical on Plasma" | **REFUTED.** It does not exist before wl-clipboard 2.3.0, so `sensitive_hint` clips **fail** on Debian 13 and every current Ubuntu LTS |
+> | R-03 silent identity regeneration = future hardware risk | **A present-tense defect.** `Path::exists()` returns `false` on any metadata error, and `initialize()` then **overwrites `state.json`**, destroying the trust store |
+> | macOS = "feasible with one compromise (polling)" | Polling confirmed — **and access is user-gated from macOS 15.4**, plus local-network privacy from macOS 15 |
+> | Not previously noticed | **`unsafe_code = "forbid"` is workspace-wide** and blocks every future platform adapter |
+>
+> **Wave 0 is READY** — specification in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md).
+
 ## 1. The headline
 
 **AnyFlow is in a much better position for cross-platform expansion than its own documentation
@@ -259,3 +275,20 @@ risks, and 12 items explicitly flagged **EXTERNAL VERIFICATION REQUIRED** rather
 ([24 §7](24-SOURCE-BIBLIOGRAPHY.md)).
 
 Nothing in `desktop/`, `android/`, `protocol/`, `packaging/` or `.github/` was modified.
+
+## 11. What the verification sprint added
+
+Three further documents, still no code:
+
+- **[26 — External verification closeout](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)** — all twelve
+  `V-nn` items taken to primary sources; two Research v1 claims refuted; four new defects and one
+  architectural blocker found in the repository.
+- **[27 — Architecture decision closeout](27-ARCHITECTURE-DECISION-CLOSEOUT.md)** — all twelve
+  `PLAT-DEC` revisited plus three new ones. **10 READY FOR RFC, 3 RECOMMENDED, 2 POC REQUIRED, 0
+  OPEN.** Risks re-scored; 37 PoCs reprioritised, of which **four are P0 and none blocks Wave 0
+  from starting**.
+- **[28 — Wave 0 implementation spec](28-WAVE-0-IMPLEMENTATION-SPEC.md)** — an implementable
+  specification: six seams (and six rejected), nine PRs, ≈17 engineer-days, twelve acceptance
+  gates, and **no hardware the project does not already have**.
+
+**Declaration: WAVE 0 READY.**

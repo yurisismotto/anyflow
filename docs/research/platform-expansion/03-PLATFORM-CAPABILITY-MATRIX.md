@@ -180,11 +180,18 @@ inbound rule is mandatory for the listener. The recommendation is a rule scoped 
 business network" (OFFICIAL DOC VERIFIED). Never `0.0.0.0/0`, never the Public profile.
 
 **²² macOS local-network privacy is a POC because the rules changed.** iOS-style local-network
-prompting was extended to Mac apps in recent macOS releases, and how it applies to a
-`launchd`-started background agent (as opposed to a foreground `.app`) is exactly the sort of
-thing that must be measured rather than assumed. Apple's TN3179 is the authoritative source;
-its content could not be retrieved through this session's fetch tooling —
-**EXTERNAL VERIFICATION REQUIRED**, see [24](24-SOURCE-BIBLIOGRAPHY.md).
+prompting was extended to Mac apps in recent macOS releases. **RESOLVED (V-05, V-06):**
+
+- TN3179 was retrieved in full. Local network privacy applies to **macOS from macOS 15**, and
+  *"the exception for `launchd` daemons doesn't apply to `launchd` agents"* — so AnyFlow's
+  per-user macOS agent **does** face the Local Network prompt.
+- `NSPasteboard.AccessBehavior` arrived in **macOS 15.4** with four cases. **The General
+  pasteboard defaults to asking on programmatic access.** So macOS clipboard **auto-send is
+  user-gated**, not merely polling-based.
+
+The residual question — whether reading `changeCount` alone trips the alert, or only the
+subsequent content read — is now the sharpened subject of **POC-MAC-05**.
+See [26 §V-05, §V-06](26-EXTERNAL-VERIFICATION-CLOSEOUT.md).
 
 **²³ Android needs no local-network permission**, but does need
 `CHANGE_WIFI_MULTICAST_STATE` and a held `MulticastLock`, or Wi-Fi hardware filters multicast

@@ -7,9 +7,10 @@
 | --- | --- |
 | **Status** | Research / Draft — planning only, no implementation |
 | **Last reviewed** | 2026-08-31 |
-| **Branch** | `research/platform-expansion-v1` |
+| **Branch** | `research/platform-expansion-v1`, then `research/platform-expansion-verification-v1` (docs 26–28) |
 | **Scope** | Linux (generic, Fedora, Debian, Ubuntu, GNOME, KDE Plasma, Wayland, X11), Windows 10/11, macOS, Android, iOS/iPadOS |
-| **Decision status** | **Nothing here is Approved.** All decisions are PROPOSED, POC REQUIRED, or OPEN |
+| **Decision status** | **Nothing here is Approved.** The strongest status assigned is **READY FOR RFC** — see [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) |
+| **Wave 0** | **READY** — specification in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md) |
 
 ---
 
@@ -23,9 +24,14 @@ The answer to one question:
 
 It is research, an architecture audit, a feasibility study and a plan. **No source file outside
 this directory was modified.** No protocol, TLS, pairing or capability behaviour was changed. No
-PoC was implemented. No branch was created. Nothing was committed.
+PoC was implemented.
 
-**Start with [00 — Executive summary](00-EXECUTIVE-SUMMARY.md).**
+Documents **00–25** are Research v1. Documents **26–28** are the external-verification sprint that
+closed it out: every claim Research v1 could not confirm was taken to a primary source, the
+repository was re-audited against the report, and the result is a Wave 0 specification.
+
+**Start with [00 — Executive summary](00-EXECUTIVE-SUMMARY.md), then
+[26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) for what changed.**
 
 ---
 
@@ -33,19 +39,24 @@ PoC was implemented. No branch was created. Nothing was committed.
 
 | Area | Status | One-line finding |
 | --- | --- | --- |
-| **Linux portability** | **RESEARCHED** | Almost nothing is Fedora-specific. The real constraint is the GTK 4.12 / libadwaita 1.5 floor, and it only affects the GUI |
-| **Debian / Ubuntu** | **READY** | Debian 13 and Ubuntu 26.04 exceed every requirement. **Ubuntu 24.04 LTS sits exactly on the libadwaita 1.5 floor** |
-| **KDE Plasma** | **POC REQUIRED** | The code already has a KWin-capable clipboard path that GNOME cannot use. One question about `wl-clipboard` versions |
-| **Windows** | **RESEARCHED** | Highly feasible. Agent, not service. `rustls-cng` already solves the hard part |
-| **macOS** | **RESEARCHED** | Feasible with one contract amendment (polling) and one hard cost (notarization + a Mac) |
-| **iOS / iPadOS** | **POC REQUIRED** | Structurally constrained. A foreground companion, or nothing. Gated on POC-IOS-06 |
-| **Packaging** | **RESEARCHED** | System packages first. Flatpak experimental, not primary — AnyFlow is closer to a system agent than an application |
-| **Security** | **RESEARCHED** | The model survives intact. Three items are defects that must be fixed before a platform ships |
-| **PoCs** | **POC REQUIRED** | 35 specified, ≈71 engineer-days, none implemented |
+| **Linux portability** | **VERIFIED** | Almost nothing is Fedora-specific. The GTK 4.12 / libadwaita 1.5 floor affects only the GUI. **New: `wl-copy --sensitive` fails on Debian 13 and every Ubuntu LTS** ([26 §5.1](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)) |
+| **Debian / Ubuntu** | **VERIFIED** | Debian 13 and Ubuntu 26.04 exceed every requirement. Ubuntu 24.04 LTS sits exactly on the libadwaita 1.5 floor. MSRV 1.82 needs a named `rustc-1.82` on 24.04 |
+| **KDE Plasma** | **VERIFIED** | Resolved from primary sources: KWin dropped `wlr-data-control` in **Plasma 6.5**; wl-clipboard gained `ext-data-control` in **2.3.0**. **Exactly one broken configuration: Ubuntu 26.04 LTS** |
+| **Windows** | **VERIFIED** | Agent, not service — settled by first-party doc. `rustls-cng` verified in source. Clipboard needs an `HWND` + message pump |
+| **macOS** | **VERIFIED** | Polling confirmed as the only mechanism. **New: auto-send is user-gated from macOS 15.4, and local-network privacy applies from macOS 15** |
+| **iOS / iPadOS** | **POC REQUIRED** | Structurally constrained. Verified: no `UIBackgroundModes` value fits; *listening* needs no local-network permission. Gated on POC-IOS-06 |
+| **Identity** | **READY FOR RFC** | The rustls signer seam is documentation-verified against 0.23.43. **The refactor is two call sites.** Secure Enclave cannot import existing keys |
+| **Clipboard** | **VERIFIED** | One `clipboard.v1`, six backends. macOS gets a declared-polling exception (PLAT-DEC-009) |
+| **Files** | **READY FOR RFC** | Windows rules mostly already present — Research v1's claim refuted. Real gaps: `:` (ADS) and `U+202E` (bidi, **all platforms**) |
+| **Packaging** | **RESEARCHED** | System packages first, Flatpak experimental. **Do not gate on `wl-clipboard >= 2.3`** — Fedora's `2.2.1^git` has the features |
+| **Security** | **VERIFIED** | The model survives intact. **Three defects, one of them present-tense on Linux today** (silent trust-store destruction) |
+| **PoCs** | **POC REQUIRED** | 37 specified. **Four are P0, all Wave 0 acceptance gates — none blocks Wave 0 from starting** |
+| **Wave 0** | **READY** | ≈17 engineer-days, nine PRs, no new hardware needed ([28](28-WAVE-0-IMPLEMENTATION-SPEC.md)) |
 
-Status vocabulary: **READY** (evidence complete, work can be planned) · **RESEARCHED**
-(analysis complete, some verification outstanding) · **POC REQUIRED** (a decision cannot be made
-from documentation) · **BLOCKED** · **DEFERRED**.
+Status vocabulary: **VERIFIED** (closed against a primary source in [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)) ·
+**READY FOR RFC** (evidence sufficient to write the ADR) · **RESEARCHED** (analysis complete, some
+verification outstanding) · **POC REQUIRED** (a decision cannot be made from documentation) ·
+**BLOCKED** · **DEFERRED**.
 
 ---
 
@@ -78,7 +89,10 @@ from documentation) · **BLOCKED** · **DEFERRED**.
 | 22 | [Implementation roadmap](22-IMPLEMENTATION-ROADMAP.md) | Waves, gates, hardware, CI | Research / Draft | Derived | 01–21 | — |
 | 23 | [Risks, questions, decisions](23-RISKS-OPEN-QUESTIONS-AND-DECISIONS.md) | Decision register — 12 open decisions, 16 risks | Research / Draft | Per decision | 01–22 | — |
 | 24 | [Source bibliography](24-SOURCE-BIBLIOGRAPHY.md) | Every source, with access dates and the verification list | Research / Draft | n/a — is the trail | — | — |
-| 25 | [Implementation backlog](25-IMPLEMENTATION-BACKLOG.md) | 81 items, 18 of them P0 | Research / Draft | Per item | 01–23 | all |
+| 25 | [Implementation backlog](25-IMPLEMENTATION-BACKLOG.md) | Backlog, with P0s tied to wave/decision/risk | Research / Draft | Per item | 01–23 | all |
+| **26** | **[External verification closeout](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)** | **Every `V-nn` closed against a primary source; claims refuted; new defects** | **VERIFIED** | **Primary sources** | 01–25 | — |
+| **27** | **[Architecture decision closeout](27-ARCHITECTURE-DECISION-CLOSEOUT.md)** | **All `PLAT-DEC` revisited; risks and PoCs reprioritised** | **READY FOR RFC ×10** | 26 | 23, 26 | — |
+| **28** | **[Wave 0 implementation spec](28-WAVE-0-IMPLEMENTATION-SPEC.md)** | **Implementable specification for Core Platform Abstraction** | **WAVE 0 READY** | 26, 27 + repo | 01, 02, 26, 27 | **0** |
 
 ---
 
@@ -88,7 +102,10 @@ from documentation) · **BLOCKED** · **DEFERRED**.
 → [00](00-EXECUTIVE-SUMMARY.md) → [23](23-RISKS-OPEN-QUESTIONS-AND-DECISIONS.md) → [22](22-IMPLEMENTATION-ROADMAP.md)
 
 **"I am about to start Wave 0."**
-→ [01](01-CURRENT-ARCHITECTURE-AUDIT.md) → [02](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md) → [14](14-CROSS-PLATFORM-IDENTITY-AND-KEY-STORAGE.md) → [25](25-IMPLEMENTATION-BACKLOG.md) (ARCH-\*, SEC-\*)
+→ **[28](28-WAVE-0-IMPLEMENTATION-SPEC.md)** → [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) → [01](01-CURRENT-ARCHITECTURE-AUDIT.md) → [02](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md) → [25](25-IMPLEMENTATION-BACKLOG.md) (ARCH-\*, SEC-\*)
+
+**"What changed since Research v1?"**
+→ [26 §14](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) → [27 §2](27-ARCHITECTURE-DECISION-CLOSEOUT.md)
 
 **"I am implementing Windows."**
 → [08](08-WINDOWS-FEASIBILITY.md) → [09](09-WINDOWS-SECURITY-AND-INTEGRATION.md) → [14](14-CROSS-PLATFORM-IDENTITY-AND-KEY-STORAGE.md) → [15](15-CROSS-PLATFORM-CLIPBOARD.md) → [21](21-POC-MASTER-PLAN.md) (POC-WIN-\*)
@@ -115,7 +132,9 @@ from documentation) · **BLOCKED** · **DEFERRED**.
 | **POC REQUIRED** | Cannot be settled from documentation |
 | **HYPOTHESIS** | Reasoned, unverified. Effort estimates are all of this kind |
 | **BLOCKED** | Cannot proceed without an external input |
-| **EXTERNAL VERIFICATION REQUIRED** | A source could not be retrieved in this session. **Listed in full in [24 §7](24-SOURCE-BIBLIOGRAPHY.md)** — twelve items, none of them guessed |
+| **EXTERNAL VERIFICATION REQUIRED** | A source could not be retrieved in Research v1. **All twelve are closed out in [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)**: 8 VERIFIED, 2 PARTIALLY VERIFIED, 2 STILL OPEN |
+| **VERIFIED** / **REFUTED** | Closed against a primary source in [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) |
+| **READY FOR RFC** | Evidence sufficient to write the ADR. Assigned only in [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) |
 | **NOT APPLICABLE** | — |
 
 **Identifiers.**
@@ -126,7 +145,7 @@ from documentation) · **BLOCKED** · **DEFERRED**.
 | `R-nn` | Risk | [23 §2](23-RISKS-OPEN-QUESTIONS-AND-DECISIONS.md) |
 | `Q-nn` | Open question, not yet a decision | [23 §3](23-RISKS-OPEN-QUESTIONS-AND-DECISIONS.md) |
 | `X-nn` | Cross-platform threat | [20](20-SECURITY-THREAT-ANALYSIS.md) |
-| `V-nn` | External verification needed | [24 §7](24-SOURCE-BIBLIOGRAPHY.md) |
+| `V-nn` | External verification needed | [24 §7](24-SOURCE-BIBLIOGRAPHY.md); **closed in [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)** |
 | `AUD-nn` | Audit finding | [01 §8](01-CURRENT-ARCHITECTURE-AUDIT.md) |
 | `POC-*` | Proof of concept | [21](21-POC-MASTER-PLAN.md) |
 | `ARCH/LINUX/KDE/PKG/WIN/MAC/IOS/SEC/PROTO/UX/CI-nnn` | Backlog item | [25](25-IMPLEMENTATION-BACKLOG.md) |

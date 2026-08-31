@@ -14,6 +14,17 @@
 
 ## 1. Decision register
 
+> **⚠ SUPERSEDED STATUSES.** Every decision below was revisited against verified evidence in
+> **[27 — Architecture decision closeout](27-ARCHITECTURE-DECISION-CLOSEOUT.md)**, which is now
+> authoritative for status. Summary: **9 READY FOR RFC · 3 RECOMMENDED · 3 POC REQUIRED · 0 OPEN**,
+> plus three new decisions (**PLAT-DEC-013/014/015**) the verification forced. The text below is
+> retained as the original statement of each question.
+>
+> Note also a drafting error inherited from Research v1:
+> [02 §4](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md) cites "PLAT-DEC-007" for the Windows UI↔agent
+> IPC question. **This register is authoritative** — PLAT-DEC-007 is Flatpak viability; the IPC
+> seam belongs to PLAT-DEC-001.
+
 Status vocabulary: **PROPOSED** (a direction is recommended, awaiting a decision) ·
 **POC REQUIRED** (cannot be decided from documentation) · **OPEN** (no recommendation yet).
 
@@ -195,6 +206,13 @@ Status vocabulary: **PROPOSED** (a direction is recommended, awaiting a decision
 
 ## 2. Risk register
 
+> **⚠ UPDATED.** Re-scored in [27 §6](27-ARCHITECTURE-DECISION-CLOSEOUT.md), where the three
+> defects (R-06, R-07, R-08) get concrete failure scenarios, mitigations, owning wave and tests.
+> Headline changes: **R-08 rises to High/Critical** — it is a **present-tense defect on Linux**,
+> not a future hardware risk. **R-02 and R-07 fall.** Three new risks: **R-17** (`--sensitive`
+> unavailable), **R-18** (`unsafe_code = "forbid"` blocks adapters), **R-19** (macOS clipboard
+> access user-gated).
+
 | ID | Risk | Likelihood | Impact | Mitigation | Owner doc |
 | --- | --- | --- | --- | --- | --- |
 | R-01 | Wave 0 introduces a regression in identity or the trust store | Medium | **Critical** | Existing tests are the spec; **no test may be modified to make a refactor pass**; POC-CORE-02 | [22](22-IMPLEMENTATION-ROADMAP.md) |
@@ -222,14 +240,14 @@ Things this research could not settle and that are not yet shaped as decisions.
 
 | # | Question | Why it is open | Next step |
 | --- | --- | --- | --- |
-| Q-01 | Is a C toolchain genuinely required (`ring`), or is `gcc` in the RPM spec vestigial? | Not tested | Build in a container with rustup and no `cc` ([04 §4](04-LINUX-PORTABILITY.md)) |
-| Q-02 | Does KWin still expose `wlr-data-control` alongside `ext-data-control`? | Primary sources conflicted | POC-KDE-01 |
-| Q-03 | Which wl-clipboard release actually added `ext-data-control` support? | Release notes and issue #242 disagree | Read `NEWS` in the wl-clipboard source |
-| Q-04 | Does `DnsServiceRegister` publish A/AAAA records? | A Microsoft Q&A thread suggests it may not | POC-WIN-02 fallback path |
-| Q-05 | What are the exact Windows clipboard-format names for excluding a clip from history and Cloud Clipboard? | Documented as formats, not a first-class API | Confirm on learn.microsoft.com before implementing WIN-008 |
-| Q-06 | Does macOS prompt when an unsandboxed, notarized background agent reads the pasteboard? | Apple's `NSPasteboard.AccessBehavior` page could not be retrieved | POC-MAC-05, measured first |
-| Q-07 | What is the current authoritative list of `UIBackgroundModes` values? | Apple's page is JS-rendered and could not be fetched | Read in Xcode's documentation; the conclusion does not depend on the edges |
-| Q-08 | Does an iOS Share Extension inherit the app's local-network permission? | Not documented in retrievable sources | POC-IOS-08 |
+| ~~Q-01~~ | Is a C toolchain genuinely required (`ring`)? | **ANSWERED (V-10)** — upstream: *"ring currently requires a C (but not C++) toolchain."* Whether anything *else* also needs `gcc` remains for POC-LINUX-01 |
+| ~~Q-02~~ | Does KWin still expose `wlr-data-control`? | **ANSWERED (V-02)** — no, from Plasma 6.5. Both up to 6.4 |
+| ~~Q-03~~ | Which wl-clipboard release added `ext-data-control`? | **ANSWERED (V-01)** — 2.3.0, 2026-03-22 |
+| Q-04 | Does `DnsServiceRegister` publish A/AAAA records? | **PARTIAL (V-03)** — the API accepts addresses; on-wire behaviour undocumented. Contingent on `mdns-sd` failing first → POC-WIN-02 |
+| ~~Q-05~~ | Exact Windows clipboard-format names? | **ANSWERED (V-04)** — three formats, semantics confirmed |
+| Q-06 | Does macOS prompt when a background agent reads the pasteboard? | **REFRAMED (V-06)** — yes by default from macOS 15.4. Residual: does `changeCount` polling *alone* prompt? → POC-MAC-05 |
+| ~~Q-07~~ | Authoritative `UIBackgroundModes` list? | **ANSWERED (V-07)** — eleven values; none fits |
+| Q-08 | Does an iOS Share Extension inherit the app's local-network permission? | **PARTIAL (V-09)** — in general yes; the background-undetermined case remains → POC-IOS-08 |
 | Q-09 | Should the desktop hold a pending clip for a disconnected peer, and for how long? | Product question, not technical | Design during Wave 9 (UX-008) |
 | Q-10 | Should iPadOS be its own `Platform` enum value? | Capability profiles differ; identity does not | Decide with PLAT-DEC-008 |
 | Q-11 | Is `Endpoints.kt`'s ordering logic worth moving into the shared Rust core? | It is pure, tested, and would otherwise be written a third time for iOS | ARCH-007, decide in Wave 9 |

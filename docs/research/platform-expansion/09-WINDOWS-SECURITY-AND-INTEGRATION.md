@@ -233,7 +233,7 @@ the threat model implies. It should be said in the docs, because the naive expec
 | # | Surface | Risk | Mitigation |
 | --- | --- | --- | --- |
 | W1 | Named-pipe squatting | A process that creates the pipe name first impersonates the agent; the UI connects to it and leaks control commands | `FILE_FLAG_FIRST_PIPE_INSTANCE`, per-SID DACL, and the UI verifying the server's process token |
-| W2 | Cloud Clipboard | A clip AnyFlow writes is uploaded to the user's Microsoft account — a local-first product silently touching a cloud | Set the "exclude from clipboard history / monitor processing" formats for `sensitive_hint` clips; document the general behaviour. **EXTERNAL VERIFICATION REQUIRED** on the exact format names |
+| W2 | Cloud Clipboard | A clip AnyFlow writes is uploaded to the user's Microsoft account — a local-first product silently touching a cloud | Set `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0 and `CanUploadToCloudClipboard`=0 for `sensitive_hint` clips; document the general behaviour. **VERIFIED (V-04)** — exact names and semantics confirmed |
 | W3 | Clipboard history | Every received clip lands in Win+V history | Same mitigation as W2 |
 | W4 | Firewall misconfiguration | A rule scoped to Public/Any exposes the listener on untrusted networks | Installer creates Private+LocalSubnet rules explicitly rather than relying on the Windows prompt, whose default includes Public |
 | W5 | Installer tampering / unsigned binaries | SmartScreen bypass, supply-chain | Authenticode + MSIX signing; reproducible CI artifacts; publish hashes |
