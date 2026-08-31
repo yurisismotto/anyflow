@@ -30,7 +30,8 @@ The phone always initiates. The desktop always listens. See ADR-0005.
 | `anyflow-core` | proto | Identity, pairing, TLS, framing, session, capability registry |
 | `anyflow-capability-battery` | core, proto | `battery.v1` |
 | `anyflow-capability-files` | core, proto | `files.v1`: transfer state machine, filename safety, data-stream auth |
-| `anyflow-daemon` | core, battery, files | mDNS, listener, control socket, `SessionHost` |
+| `anyflow-capability-clipboard` | core, proto | `clipboard.v1`: text rules, policy, loop suppression, Wayland/X11 backend |
+| `anyflow-daemon` | core, battery, files, clipboard | mDNS, listener, control socket, `SessionHost` |
 | `anyflow-cli` | daemon (types only) | `anyflow` |
 
 `anyflow-core` has no global state and no I/O policy. Everything it needs from

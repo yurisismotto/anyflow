@@ -4,7 +4,11 @@ import android.app.Application
 import android.util.Log
 import io.github.yurisismotto.anyflow.capability.BatteryCapability
 import io.github.yurisismotto.anyflow.capability.CapabilityRegistry
+import io.github.yurisismotto.anyflow.capability.ClipboardCapability
 import io.github.yurisismotto.anyflow.capability.FilesCapability
+import io.github.yurisismotto.anyflow.clipboard.ClipboardNotifications
+import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
+import io.github.yurisismotto.anyflow.clipboard.SystemClipboard
 import io.github.yurisismotto.anyflow.files.FileTransferManager
 import io.github.yurisismotto.anyflow.identity.DeviceIdentity
 import io.github.yurisismotto.anyflow.net.ConnectResult
@@ -41,6 +45,10 @@ class AnyFlowApp : Application() {
     lateinit var discovery: Discovery
         private set
     lateinit var files: FileTransferManager
+        private set
+    lateinit var clipboard: ClipboardSync
+        private set
+    lateinit var systemClipboard: SystemClipboard
         private set
 
     /**
@@ -93,7 +101,32 @@ class AnyFlowApp : Application() {
             isAuthorized = { peer -> isFileTransferAllowed(peer) },
         )
 
-        registry = CapabilityRegistry(listOf(battery, FilesCapability(files)))
+        // clipboard.v1. The grant and the per-peer policy are both re-read
+        // from the trust store on every question, so forgetting a computer —
+        // or withdrawing just its clipboard grant — stops traffic at once,
+        // including on a session that is already connected.
+        systemClipboard = SystemClipboard(this)
+        clipboard = ClipboardSync(
+            systemClipboard = systemClipboard,
+            authorizer = { peer -> clipboardPolicyFor(peer) },
+            localDeviceId = trustStore.deviceId,
+        )
+
+        // With `autoReceive` off — the default — an accepted clip is held in
+        // memory and offered here. The notification carries no clipboard
+        // text, only the computer's name and the size.
+        val notifications = ClipboardNotifications(this)
+        clipboard.onClipPending = notifications::show
+
+        registry = CapabilityRegistry(
+            listOf(
+                battery,
+                FilesCapability(files),
+                ClipboardCapability(clipboard) { peer ->
+                    trustStore.peer(peer)?.deviceName ?: "a paired computer"
+                },
+            ),
+        )
         discovery = Discovery(this)
 
         Log.i(
@@ -114,6 +147,18 @@ class AnyFlowApp : Application() {
         Boolean = runCatching {
         trustStore.peer(peer)?.grantedCapabilities?.contains(FilesCapability.ID) == true
     }.getOrDefault(false)
+
+    /**
+     * What a computer may do with this phone's clipboard, right now.
+     *
+     * Failing closed on any error is deliberate: an unreadable trust store is
+     * a reason to permit nothing, not a reason to permit everything.
+     */
+    private fun clipboardPolicyFor(
+        peer: io.github.yurisismotto.anyflow.identity.Fingerprint,
+    ): io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy = runCatching {
+        trustStore.clipboardPolicyFor(peer)
+    }.getOrDefault(io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy.DENIED)
 
     /**
      * Where to try reaching a paired computer, best guess first.
@@ -230,7 +275,14 @@ class AnyFlowApp : Application() {
                         ),
                         fingerprint = payload.fingerprint,
                         pairedAtUnix = System.currentTimeMillis() / 1000,
-                        grantedCapabilities = connection.negotiatedCapabilities.toSet(),
+                        // What the desktop advertises is what both sides
+                        // *support*, not what either has authorized. The
+                        // clipboard grant is withheld here and turned on from
+                        // the device card, because a computer that can write
+                        // this phone's clipboard can also see what is pasted
+                        // next — a side effect that needs its own yes.
+                        grantedCapabilities = connection.negotiatedCapabilities
+                            .toSet() - ClipboardCapability.ID,
                         addresses = listOf(Endpoints.format(address)),
                     )
                     trustStore.addPeer(peer)

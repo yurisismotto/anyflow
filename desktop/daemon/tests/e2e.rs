@@ -51,14 +51,25 @@ async fn pairing_then_ping_pong_then_battery() {
     // --- capabilities were negotiated -------------------------------------
     //
     // This is the *mutually supported* set, which is not the same as what the
-    // phone is allowed to do. `files.v1` appears here because both sides
-    // implement it, and is nevertheless not granted: the desktop's auto-grant
-    // policy covers `battery.v1` only, because writing files is a side effect
-    // (ADR-0008). The two lists being different is the point.
+    // phone is allowed to do. `files.v1` and `clipboard.v1` appear here
+    // because both sides implement them, and neither is granted: the
+    // desktop's auto-grant policy covers `battery.v1` only, because writing
+    // files and writing a clipboard are both side effects (ADR-0008). The two
+    // lists being different is the point.
     assert_eq!(
         session.negotiated_capabilities,
-        vec!["battery.v1".to_string(), "files.v1".to_string()]
+        vec![
+            "battery.v1".to_string(),
+            "clipboard.v1".to_string(),
+            "files.v1".to_string()
+        ]
     );
+    let store = server.state.store.lock().await;
+    let peer = store.trusted_peer(&phone.fingerprint).expect("paired");
+    assert!(peer.allows("battery.v1"), "battery is auto-granted");
+    assert!(!peer.allows("files.v1"), "files must not be");
+    assert!(!peer.allows("clipboard.v1"), "clipboard must not be either");
+    drop(store);
 
     let granted: Vec<String> = {
         let store = server.state.store.lock().await;
@@ -137,7 +148,11 @@ async fn a_paired_device_reconnects_without_pairing_again() {
 
     assert_eq!(
         second.negotiated_capabilities,
-        vec!["battery.v1".to_string(), "files.v1".to_string()]
+        vec![
+            "battery.v1".to_string(),
+            "clipboard.v1".to_string(),
+            "files.v1".to_string()
+        ]
     );
     assert!(second.handle.ping(Duration::from_secs(5)).await.is_some());
     second.close().await;

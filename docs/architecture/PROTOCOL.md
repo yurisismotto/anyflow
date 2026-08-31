@@ -19,7 +19,7 @@ new major version and a new threat-model review.
 
 ```
 ┌──────────────────────────────────────────┐
-│ capabilities        battery.v1, files.v1 │  own schemas, own versions
+│ capabilities   battery.v1 files.v1 clip… │  own schemas, own versions
 ├──────────────────────────────────────────┤
 │ session             HELLO, PAIR_*, PING  │  state machine, replay guard
 ├──────────────────────────────────────────┤
@@ -228,6 +228,51 @@ that negotiated the transfer; the MAC is defence in depth on that check, not a
 replacement for it.
 
 Full specification: [FILES.md](FILES.md).
+
+### `clipboard.v1`
+
+Capability id `clipboard.v1`, payload a `ClipboardControl` message, on the
+ordinary control session. **Text only**, and never a second socket: a clipboard
+is small by nature, so the `files.v1` split would buy nothing.
+
+```protobuf
+ClipboardUpdate {
+  bytes  event_id          = 1;  // exactly 16 CSPRNG bytes, per clipboard event
+  string origin_device_id  = 2;  // where the copy happened; NOT identity
+  string text_utf8         = 3;  // ≤ 32 KiB, valid UTF-8, no NUL
+  bytes  content_hash      = 4;  // SHA-256 over the UTF-8 bytes; NOT authentication
+  bool   sensitive_hint    = 5;  // a presentation hint; NOT an ACL
+  int64  timestamp_unix_ms = 6;  // informational only
+}
+ClipboardResult { bytes event_id = 1; ClipboardOutcome outcome = 2; }
+```
+
+`event_id` is 16 cryptographically random bytes and deliberately **not**
+derived from `message_id`, for the same reason `transfer_id` is not: a message
+id is meaningful for one frame and is aged out by the replay window, while a
+clipboard event id must stay recognisable across a reconnect. An id of any
+other length is refused and *not answered* — there is nothing to correlate a
+reply with.
+
+The text ceiling is 32 KiB, set by the capability and well below
+`MAX_FRAME_LEN`, because an update also carries an envelope, a hash, two ids
+and protobuf framing. Oversized content is **rejected, never truncated**.
+
+`content_hash` exists for de-duplication, loop suppression and diagnostics that
+must not log the content. A mismatch is refused; an *absent* hash is accepted,
+since the field is optional. It is not a security mechanism: TLS and the
+capability grant are.
+
+Outcomes: `APPLIED`, `PENDING_USER`, `DUPLICATE`, `NOT_AUTHORIZED`,
+`REJECTED_POLICY`, `REJECTED_SENSITIVE`, `TOO_LARGE`, `INVALID_TEXT`,
+`FAILED`. Every value is safe to send to a peer.
+
+Grant and policy are separate: `clipboard.v1` is never auto-granted, and a
+granted peer additionally has four locally-decided flags — `allow_send`,
+`allow_receive`, `auto_send`, `auto_receive`, the last two off by default. **No
+protocol message can write any of them.**
+
+Full specification: [CLIPBOARD.md](CLIPBOARD.md).
 
 ### `battery.v1`
 

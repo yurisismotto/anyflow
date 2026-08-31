@@ -9,8 +9,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
 use crate::control::{
-    BatteryReport, ConnectionReport, DeviceReport, DeviceState, Event, Request, Response,
-    StatusReport, TransferReport, BATTERY_STALE_AFTER_SECS,
+    BatteryReport, ClipboardFlag, ClipboardPeerReport, ClipboardStatusReport, ConnectionReport,
+    DeviceReport, DeviceState, Event, PendingClipReport, Request, Response, StatusReport,
+    TransferReport, BATTERY_STALE_AFTER_SECS,
 };
 use crate::state::DaemonState;
 
@@ -117,6 +118,26 @@ async fn serve_client(stream: UnixStream, state: Arc<DaemonState>) -> anyhow::Re
         }
         Request::Send { device, path } => {
             run_send_session(state, write, &device, &path).await?;
+        }
+        Request::ClipboardStatus => {
+            let report = build_clipboard_status(&state).await;
+            send(&mut write, &Response::Clipboard(report)).await?;
+        }
+        Request::ClipboardSend { device, sensitive } => {
+            let response = do_clipboard_send(&state, &device, sensitive).await;
+            send(&mut write, &response).await?;
+        }
+        Request::ClipboardApply { device } => {
+            let response = do_clipboard_apply(&state, &device).await;
+            send(&mut write, &response).await?;
+        }
+        Request::ClipboardPolicy {
+            device,
+            flag,
+            enabled,
+        } => {
+            let response = do_clipboard_policy(&state, &device, flag, enabled).await;
+            send(&mut write, &response).await?;
         }
     }
 
@@ -330,6 +351,11 @@ async fn do_unpair(state: &Arc<DaemonState>, device: &str) -> Response {
                 handle.shutdown().await;
             }
             state.drop_session(&fingerprint).await;
+            // `clipboard.v1` has no second connection to tear down, so
+            // stopping it means the watcher must re-read who wants
+            // auto-send. Without this a revoked device would keep being
+            // pushed to until something else happened to bump the epoch.
+            state.notify_clipboard_policy_changed();
             Response::Ok {
                 message: format!("revoked {}", fingerprint.to_display_short()),
             }
@@ -437,6 +463,14 @@ async fn do_grant(
         }
     }
 
+    // Either direction of a clipboard grant changes who the watcher should be
+    // pushing to, so both are reported. Inbound authorization needs no
+    // notification — it is re-read from the store per message — but the
+    // outbound watcher is a running task and has to be told.
+    if capability == anyflow_capability_clipboard::CAPABILITY_ID {
+        state.notify_clipboard_policy_changed();
+    }
+
     Response::Ok {
         message: format!(
             "{} {} for {}",
@@ -493,6 +527,214 @@ async fn do_cancel_transfer(state: &Arc<DaemonState>, selector: &str) -> Respons
                 many.len()
             ),
         },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// clipboard.v1
+// ---------------------------------------------------------------------------
+
+/// Everything `anyflow clipboard status` shows.
+///
+/// Deliberately assembled from three independent sources — the backend's
+/// probed capability, the trust store's grants, and the manager's live state
+/// — and it keeps them visibly separate. Collapsing "granted" into "will
+/// work" is how a user ends up believing auto-send is running on a desktop
+/// whose compositor cannot report clipboard changes at all.
+async fn build_clipboard_status(state: &Arc<DaemonState>) -> ClipboardStatusReport {
+    let Some(clipboard) = state.clipboard.clone() else {
+        return ClipboardStatusReport {
+            enabled: false,
+            backend: "none".into(),
+            backend_detail: "clipboard.v1 is not enabled in this daemon".into(),
+            watch_available: false,
+            event_cache_entries: 0,
+            suppression_cache_entries: 0,
+            peers: Vec::new(),
+            pending: Vec::new(),
+        };
+    };
+
+    let backend = clipboard.backend();
+    let watch_available = backend.watch_availability().is_ok();
+    let (event_cache_entries, suppression_cache_entries) = clipboard.cache_sizes().await;
+    let last_results = clipboard.last_results().await;
+
+    let rows: Vec<anyflow_core::store::TrustedPeer> = {
+        let store = state.store.lock().await;
+        store.peers().cloned().collect()
+    };
+
+    let mut peers = Vec::with_capacity(rows.len());
+    for p in &rows {
+        peers.push(ClipboardPeerReport {
+            device_id: p.device_id.clone(),
+            device_name: p.device_name.clone(),
+            fingerprint_short: p.fingerprint.to_display_short(),
+            granted: p.allows(anyflow_capability_clipboard::CAPABILITY_ID),
+            revoked: p.revoked,
+            connected: state.session_for(&p.fingerprint).await.is_some(),
+            allow_send: p.clipboard_policy.allow_send,
+            allow_receive: p.clipboard_policy.allow_receive,
+            auto_send: p.clipboard_policy.auto_send,
+            auto_receive: p.clipboard_policy.auto_receive,
+            last_outcome: last_results
+                .get(&p.fingerprint)
+                .map(|o| o.as_str().to_string()),
+        });
+    }
+
+    let pending = clipboard
+        .pending_clips()
+        .await
+        .into_iter()
+        .map(|clip| {
+            let name = rows
+                .iter()
+                .find(|p| p.fingerprint == clip.peer)
+                .map(|p| p.device_name.clone())
+                .unwrap_or_else(|| "unknown device".to_string());
+            PendingClipReport {
+                device_name: name,
+                fingerprint_short: clip.peer.to_display_short(),
+                bytes: clip.bytes,
+                hash_prefix: clip.hash_prefix,
+                sensitive: clip.sensitive,
+                origin_device_id: clip.origin_device_id,
+                age_secs: clip.age_secs,
+            }
+        })
+        .collect();
+
+    ClipboardStatusReport {
+        enabled: true,
+        backend: backend.id().to_string(),
+        backend_detail: backend.describe(),
+        watch_available,
+        event_cache_entries,
+        suppression_cache_entries,
+        peers,
+        pending,
+    }
+}
+
+async fn do_clipboard_send(state: &Arc<DaemonState>, device: &str, sensitive: bool) -> Response {
+    let Some(clipboard) = state.clipboard.clone() else {
+        return Response::Error {
+            message: "clipboard.v1 is not enabled".into(),
+        };
+    };
+    // An ambiguous or unknown selector fails here, loudly. Sending a
+    // clipboard — which may hold a password — to the wrong device because a
+    // prefix matched two of them is exactly the failure this refuses to have.
+    let fingerprint = match state.resolve_device(device).await {
+        Ok(f) => f,
+        Err(message) => return Response::Error { message },
+    };
+
+    match clipboard
+        .send_current_clipboard(&fingerprint, sensitive)
+        .await
+    {
+        // The byte count is reported; the content is not, here or anywhere.
+        Ok(bytes) => Response::Ok {
+            message: format!(
+                "sent {bytes} bytes of clipboard text to {}{}",
+                fingerprint.to_display_short(),
+                if sensitive { " (marked sensitive)" } else { "" }
+            ),
+        },
+        Err(e) => Response::Error {
+            message: e.to_string(),
+        },
+    }
+}
+
+async fn do_clipboard_apply(state: &Arc<DaemonState>, device: &str) -> Response {
+    let Some(clipboard) = state.clipboard.clone() else {
+        return Response::Error {
+            message: "clipboard.v1 is not enabled".into(),
+        };
+    };
+    let fingerprint = match state.resolve_device(device).await {
+        Ok(f) => f,
+        Err(message) => return Response::Error { message },
+    };
+
+    match clipboard.apply_pending(&fingerprint).await {
+        Ok(bytes) => Response::Ok {
+            message: format!("applied {bytes} bytes to the clipboard"),
+        },
+        Err(e) => Response::Error {
+            message: e.to_string(),
+        },
+    }
+}
+
+/// Sets one policy flag for one device.
+///
+/// Two things happen after the write and both matter. The store is persisted,
+/// so the answer survives a restart; and the clipboard manager is told, so a
+/// watcher starts or stops *now* rather than at the next reconnect. Turning
+/// `auto-send` off is a security action, and a security action that takes
+/// effect eventually is not one.
+async fn do_clipboard_policy(
+    state: &Arc<DaemonState>,
+    device: &str,
+    flag: ClipboardFlag,
+    enabled: bool,
+) -> Response {
+    let fingerprint = match state.resolve_device(device).await {
+        Ok(f) => f,
+        Err(message) => return Response::Error { message },
+    };
+
+    let (result, granted) = {
+        let mut store = state.store.lock().await;
+        let Some(peer) = store.trusted_peer(&fingerprint) else {
+            return Response::Error {
+                message: "that device is not paired (or its pairing was revoked)".into(),
+            };
+        };
+        let granted = peer.allows(anyflow_capability_clipboard::CAPABILITY_ID);
+        let mut policy = peer.clipboard_policy;
+        match flag {
+            ClipboardFlag::Send => policy.allow_send = enabled,
+            ClipboardFlag::Receive => policy.allow_receive = enabled,
+            ClipboardFlag::AutoSend => policy.auto_send = enabled,
+            ClipboardFlag::AutoReceive => policy.auto_receive = enabled,
+        }
+        (store.set_clipboard_policy(&fingerprint, policy), granted)
+    };
+
+    if let Err(e) = result {
+        return Response::Error {
+            message: format!("could not persist the policy: {e}"),
+        };
+    }
+
+    state.notify_clipboard_policy_changed();
+
+    // A policy set on a peer with no grant is stored and inert. Saying so is
+    // the difference between a setting that does not work and a setting the
+    // user believes is working.
+    let caveat = if granted {
+        String::new()
+    } else {
+        format!(
+            "\nNote: {} is not granted for this device, so clipboard policy \
+             has no effect yet. Run: anyflow grant {} clipboard.v1",
+            anyflow_capability_clipboard::CAPABILITY_ID,
+            device
+        )
+    };
+
+    Response::Ok {
+        message: format!(
+            "clipboard {flag} is now {} for {}{caveat}",
+            if enabled { "on" } else { "off" },
+            fingerprint.to_display_short()
+        ),
     }
 }
 

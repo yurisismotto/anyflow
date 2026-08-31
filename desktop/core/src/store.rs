@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::clipboard_policy::ClipboardPolicy;
 use crate::error::{Error, Result};
 use crate::fingerprint::Fingerprint;
 use crate::identity::LocalIdentity;
@@ -57,6 +58,20 @@ pub struct TrustedPeer {
     /// recognisable and cannot silently re-pair without the user noticing.
     #[serde(default)]
     pub revoked: bool,
+    /// Per-peer `clipboard.v1` direction and automation settings.
+    ///
+    /// Stored next to the grant but deliberately separate from it: the grant
+    /// says whether this device may speak clipboard at all, and this says in
+    /// which directions and how automatically. Both are decided locally — no
+    /// protocol message writes either — and neither holds clipboard content.
+    ///
+    /// `#[serde(default)]` matters here: a trust store written before this
+    /// capability existed has no such object, and it must deserialize to the
+    /// safe defaults (automatic directions off) rather than failing the load
+    /// or, worse, defaulting to `false` across the board and silently
+    /// disabling a direction the user had enabled.
+    #[serde(default)]
+    pub clipboard_policy: ClipboardPolicy,
 }
 
 impl TrustedPeer {
@@ -269,6 +284,22 @@ impl Store {
         if let Some(p) = self.peers.get_mut(fp) {
             p.granted_capabilities
                 .insert(capability_id.to_string(), granted);
+        }
+        self.persist()
+    }
+
+    /// Replaces one peer's clipboard policy.
+    ///
+    /// Persisted immediately, because the two questions a user asks after
+    /// changing it — "did that take?" and "will it survive a restart?" —
+    /// should have the same answer.
+    pub fn set_clipboard_policy(
+        &mut self,
+        fp: &Fingerprint,
+        policy: ClipboardPolicy,
+    ) -> Result<()> {
+        if let Some(p) = self.peers.get_mut(fp) {
+            p.clipboard_policy = policy;
         }
         self.persist()
     }

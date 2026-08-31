@@ -1,9 +1,13 @@
 package io.github.yurisismotto.anyflow.store
 
 import android.content.Context
+import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.identity.Fingerprint
 import java.io.File
 import java.security.SecureRandom
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -25,11 +29,29 @@ import org.json.JSONObject
  *
  * The `schemaVersion` field exists from the first commit so later migrations
  * are possible.
+ *
+ * ## Observability
+ *
+ * [peersFlow] is the single source of truth for the UI. Reading [peers] once
+ * during composition is what made the previous release's device card ignore a
+ * grant that changed elsewhere: the value was correct when read and never
+ * read again. Every mutator below publishes, so a screen that collects the
+ * flow cannot show stale trust state.
  */
 class TrustStore(context: Context) {
 
     private val file = File(context.filesDir, FILE_NAME)
     private var state: JSONObject = load()
+
+    private val _peersFlow = MutableStateFlow(readPeers())
+
+    /**
+     * Every known computer, republished on every change.
+     *
+     * The UI must observe this rather than calling [peers], so that a grant
+     * or a clipboard policy changed on one screen is visible on every other.
+     */
+    val peersFlow: StateFlow<List<TrustedPeer>> = _peersFlow.asStateFlow()
 
     val deviceId: String get() = state.getString(KEY_DEVICE_ID)
 
@@ -47,9 +69,23 @@ class TrustStore(context: Context) {
         val pairedAtUnix: Long,
         val grantedCapabilities: Set<String>,
         val addresses: List<String>,
-    )
+        /**
+         * Per-peer `clipboard.v1` direction and automation settings.
+         *
+         * Stored next to the grant but deliberately separate from it: the
+         * grant says whether this computer may speak clipboard at all, this
+         * says in which directions and how automatically. Both are decided
+         * locally — no protocol message writes either — and neither holds
+         * clipboard content.
+         */
+        val clipboardPolicy: ClipboardPolicy = ClipboardPolicy(),
+    ) {
+        fun allows(capabilityId: String): Boolean = capabilityId in grantedCapabilities
+    }
 
-    fun peers(): List<TrustedPeer> {
+    fun peers(): List<TrustedPeer> = _peersFlow.value
+
+    private fun readPeers(): List<TrustedPeer> {
         val array = state.optJSONArray(KEY_PEERS) ?: return emptyList()
         return (0 until array.length()).mapNotNull { index ->
             val entry = array.optJSONObject(index) ?: return@mapNotNull null
@@ -67,6 +103,12 @@ class TrustStore(context: Context) {
                 addresses = entry.optJSONArray(KEY_ADDRESSES)
                     ?.let { list -> (0 until list.length()).map { list.getString(it) } }
                     ?: emptyList(),
+                // A record written before this capability existed has no
+                // policy object; `fromJson` supplies the documented defaults
+                // rather than turning everything off — or, worse, on.
+                clipboardPolicy = ClipboardPolicy.fromJson(
+                    entry.optJSONObject(KEY_CLIPBOARD_POLICY),
+                ),
             )
         }
     }
@@ -82,6 +124,40 @@ class TrustStore(context: Context) {
     /** Forgets a computer. It cannot reconnect without pairing again. */
     fun removePeer(fingerprint: Fingerprint) {
         writePeers(peers().filterNot { it.fingerprint.contentEquals(fingerprint) })
+    }
+
+    /**
+     * Grants or withdraws one capability for one computer.
+     *
+     * Takes effect immediately: the grant is re-read from here on every
+     * question, so withdrawing it stops traffic on a session that is already
+     * connected rather than at the next reconnect.
+     */
+    fun setGrant(fingerprint: Fingerprint, capabilityId: String, granted: Boolean) {
+        val peer = peer(fingerprint) ?: return
+        val grants = peer.grantedCapabilities.toMutableSet()
+        if (granted) grants += capabilityId else grants -= capabilityId
+        addPeer(peer.copy(grantedCapabilities = grants))
+    }
+
+    /** Replaces one computer's clipboard policy. */
+    fun setClipboardPolicy(fingerprint: Fingerprint, policy: ClipboardPolicy) {
+        val peer = peer(fingerprint) ?: return
+        addPeer(peer.copy(clipboardPolicy = policy))
+    }
+
+    /**
+     * The effective clipboard policy for a computer, right now.
+     *
+     * One call answers the grant *and* the policy on purpose. A caller that
+     * had to ask both separately could do the second and forget the first,
+     * and the failure would be silent — a forgotten computer whose stored
+     * policy still said `allowReceive`.
+     */
+    fun clipboardPolicyFor(fingerprint: Fingerprint): ClipboardPolicy {
+        val peer = peer(fingerprint) ?: return ClipboardPolicy.DENIED
+        if (!peer.allows(CLIPBOARD_CAPABILITY_ID)) return ClipboardPolicy.DENIED
+        return peer.clipboardPolicy
     }
 
     /** Remembers where a peer was last reachable, to skip discovery next time. */
@@ -101,11 +177,17 @@ class TrustStore(context: Context) {
                     put(KEY_PAIRED_AT, peer.pairedAtUnix)
                     put(KEY_GRANTS, JSONArray(peer.grantedCapabilities.toList()))
                     put(KEY_ADDRESSES, JSONArray(peer.addresses))
+                    // Settings, never content: the policy flags are stored,
+                    // and no clipboard text ever reaches this file.
+                    put(KEY_CLIPBOARD_POLICY, peer.clipboardPolicy.toJson())
                 },
             )
         }
         state.put(KEY_PEERS, array)
         persist()
+        // Published after the write, so an observer that reacts by reading
+        // the file sees what was published.
+        _peersFlow.value = readPeers()
     }
 
     private fun load(): JSONObject {
@@ -147,6 +229,10 @@ class TrustStore(context: Context) {
         private const val KEY_PAIRED_AT = "pairedAtUnix"
         private const val KEY_GRANTS = "grantedCapabilities"
         private const val KEY_ADDRESSES = "addresses"
+        private const val KEY_CLIPBOARD_POLICY = "clipboardPolicy"
+
+        /** Duplicated from `ClipboardCapability.ID` to avoid a cycle. */
+        const val CLIPBOARD_CAPABILITY_ID = "clipboard.v1"
 
         /** 128 random bits, hex. Not derived from any hardware identifier. */
         fun randomDeviceId(): String {

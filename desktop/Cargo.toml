@@ -6,6 +6,7 @@ members = [
     "daemon",
     "cli",
     "capabilities/battery",
+    "capabilities/clipboard",
     "capabilities/files",
 ]
 

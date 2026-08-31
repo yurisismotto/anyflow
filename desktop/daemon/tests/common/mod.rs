@@ -49,6 +49,10 @@ pub struct TestServer {
     pub families: anyflow_daemon::listener::Families,
     /// `files.v1`, in the acceptor role: this is the end that listens.
     pub transfers: Arc<TransferManager>,
+    /// `clipboard.v1`, with an in-memory clipboard so the suite never touches
+    /// the developer's real one.
+    pub clipboard: Arc<ClipboardManager>,
+    pub clipboard_backend: Arc<MemoryBackend>,
     /// Where this server stores received files.
     pub downloads: std::path::PathBuf,
     /// Steers the "does a human accept this file?" answer.
@@ -97,9 +101,19 @@ impl TestServer {
             Arc::clone(&approvals) as Arc<dyn TransferApproval>,
         );
 
+        // A memory clipboard, never the machine's own: a test suite that
+        // overwrote the developer's clipboard would be intolerable, and one
+        // that read it could leak into a failure message.
+        let clipboard_backend = Arc::new(MemoryBackend::new());
+        let clipboard = ClipboardManager::new(
+            Arc::clone(&clipboard_backend) as Arc<dyn ClipboardBackend>,
+            store.identity().device_id().to_string(),
+        );
+
         let registry = CapabilityRegistry::builder()
             .register(Arc::new(BatteryCapability::new(Arc::clone(&battery))))
             .register(Arc::new(FilesCapability::new(Arc::clone(&transfers))))
+            .register(Arc::new(ClipboardCapability::new(Arc::clone(&clipboard))))
             .build();
 
         let tls = anyflow_core::tls::server_config(store.identity()).expect("server config");
@@ -107,7 +121,8 @@ impl TestServer {
 
         let state = Arc::new(
             DaemonState::new(store, registry, Arc::clone(&battery))
-                .with_transfers(Arc::clone(&transfers)),
+                .with_transfers(Arc::clone(&transfers))
+                .with_clipboard(Arc::clone(&clipboard)),
         );
 
         // The real authorizer: the trust store, asked fresh every time. The
@@ -116,6 +131,12 @@ impl TestServer {
             .set_authorizer(Arc::clone(&state) as Arc<dyn FilesAuthorizer>)
             .await;
         transfers.spawn_reaper();
+
+        // Same rule for the clipboard: the real trust store answers every
+        // grant question, so the tests exercise production authorization.
+        clipboard
+            .set_authorizer(Arc::clone(&state) as Arc<dyn ClipboardAuthorizer>)
+            .await;
 
         let (listeners, addr, families) = if dual_stack {
             let bound = anyflow_daemon::listener::bind_endpoints(0).expect("bind");
@@ -146,10 +167,31 @@ impl TestServer {
             battery,
             families,
             transfers,
+            clipboard,
+            clipboard_backend,
             downloads,
             approvals,
             _dir: dir,
         }
+    }
+
+    /// Where this server's identity and trust store live.
+    ///
+    /// Exposed so the persistence audit can read every byte the daemon
+    /// writes, rather than trusting that it wrote the right things.
+    pub fn data_dir(&self) -> std::path::PathBuf {
+        self._dir.path().to_path_buf()
+    }
+
+    /// Sets one peer's clipboard policy through the real store.
+    pub async fn set_clipboard_policy(&self, peer: Fingerprint, policy: ClipboardPolicy) {
+        {
+            let mut store = self.state.store.lock().await;
+            store
+                .set_clipboard_policy(&peer, policy)
+                .expect("persist policy");
+        }
+        self.state.notify_clipboard_policy_changed();
     }
 
     /// Grants or withdraws a capability for a peer, through the real store.
@@ -254,7 +296,11 @@ impl SessionHost for ClientHost {
             PeerStatus::Trusted {
                 device_id: "server".into(),
                 device_name: "Fedora".into(),
-                granted_capabilities: vec!["battery.v1".into(), "files.v1".into()],
+                granted_capabilities: vec![
+                    "battery.v1".into(),
+                    "files.v1".into(),
+                    "clipboard.v1".into(),
+                ],
             }
         } else {
             PeerStatus::Unknown
@@ -293,15 +339,34 @@ impl TestClient {
     pub fn new_raw(name: &str) -> (Self, Arc<Captured>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let captured = Arc::new(Captured { rx: Mutex::new(rx) });
-        let client = Self::build(name, Some(tx));
+        let client = Self::build(name, Some(tx), None);
+        (client, captured)
+    }
+
+    /// A client that speaks `clipboard.v1` by hand.
+    ///
+    /// The same idea as [`new_raw`], and needed for the same reason: a
+    /// security test has to be able to send what a correct implementation
+    /// never would — a duplicate event id, an oversized clip, a malformed
+    /// frame — and to read exactly what the desktop replies.
+    ///
+    /// [`new_raw`]: Self::new_raw
+    pub fn new_raw_clipboard(name: &str) -> (Self, Arc<CapturedClipboard>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let captured = Arc::new(CapturedClipboard { rx: Mutex::new(rx) });
+        let client = Self::build(name, None, Some(tx));
         (client, captured)
     }
 
     pub fn new(name: &str) -> Self {
-        Self::build(name, None)
+        Self::build(name, None, None)
     }
 
-    fn build(name: &str, capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>) -> Self {
+    fn build(
+        name: &str,
+        capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+        clipboard_capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+    ) -> Self {
         init_crypto();
         let identity =
             Arc::new(LocalIdentity::generate(name, v1::Platform::Android).expect("identity"));
@@ -334,6 +399,19 @@ impl TestClient {
                 tx,
             })),
             None => builder.register(Arc::new(FilesCapability::new(Arc::clone(&transfers)))),
+        };
+        builder = match clipboard_capture {
+            Some(tx) => builder.register(Arc::new(CapturingCapability {
+                id: "clipboard.v1".to_string(),
+                tx,
+            })),
+            // A client that is not driving the clipboard by hand still has to
+            // *advertise* it, or the capability would never be negotiated and
+            // every clipboard test would silently test nothing.
+            None => builder.register(Arc::new(CapturingCapability {
+                id: "clipboard.v1".to_string(),
+                tx: tokio::sync::mpsc::unbounded_channel().0,
+            })),
         };
         let registry = builder.build();
         let trusted = Arc::new(Mutex::new(Vec::new()));
@@ -565,6 +643,10 @@ where
 // a real TLS data stream, real pinning, the real MAC. A test that expects a
 // refusal gets it from the code that runs in production, never from a stub.
 
+use anyflow_capability_clipboard::backend::{ClipboardBackend, MemoryBackend};
+use anyflow_capability_clipboard::{
+    ClipboardAuthorizer, ClipboardCapability, ClipboardManager, ClipboardPolicy,
+};
 use anyflow_capability_files::transfer::{FailureReason, TransferId, TransferState};
 use anyflow_capability_files::{
     DataStreamDialer, DataStreamIo, Destination, FilesAuthorizer, FilesCapability, FilesConfig,
@@ -779,6 +861,59 @@ impl anyflow_core::capability::Capability for CapturingCapability {
     }
 }
 
+/// The raw clipboard side of a client: what the desktop said, undigested.
+pub struct CapturedClipboard {
+    rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
+}
+
+impl CapturedClipboard {
+    /// Waits for the next `clipboard.v1` message from the desktop.
+    pub async fn next_control(&self, timeout: Duration) -> clip_pb::ClipboardControl {
+        let mut rx = self.rx.lock().await;
+        let payload = tokio::time::timeout(timeout, rx.recv())
+            .await
+            .expect("the desktop said nothing in time")
+            .expect("the capture channel closed");
+        <clip_pb::ClipboardControl as prost::Message>::decode(&payload[..])
+            .expect("decodable ClipboardControl")
+    }
+
+    /// The next message, as a result, failing if it is anything else.
+    pub async fn next_result(&self, timeout: Duration) -> clip_pb::ClipboardResult {
+        match self.next_control(timeout).await.body {
+            Some(clip_pb::clipboard_control::Body::Result(r)) => r,
+            other => panic!("expected a ClipboardResult, got {other:?}"),
+        }
+    }
+
+    /// Everything received so far, without waiting.
+    pub async fn drain(&self) -> Vec<clip_pb::ClipboardControl> {
+        let mut rx = self.rx.lock().await;
+        let mut out = Vec::new();
+        while let Ok(payload) = rx.try_recv() {
+            out.push(
+                <clip_pb::ClipboardControl as prost::Message>::decode(&payload[..])
+                    .expect("decodable ClipboardControl"),
+            );
+        }
+        out
+    }
+
+    /// Asserts nothing arrived within `window`.
+    ///
+    /// A negative assertion needs a real wait: checking immediately would
+    /// pass even when a message was one scheduler tick away.
+    pub async fn expect_silence(&self, window: Duration) {
+        tokio::time::sleep(window).await;
+        let messages = self.drain().await;
+        assert!(
+            messages.is_empty(),
+            "expected silence, got {} message(s): {messages:?}",
+            messages.len()
+        );
+    }
+}
+
 /// The raw side of a client: what the desktop said, undigested.
 pub struct Captured {
     rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
@@ -814,6 +949,8 @@ impl Captured {
 }
 
 pub use anyflow_proto::v1::capabilities as pb;
+/// The same module, under a name the clipboard helpers read better with.
+pub use anyflow_proto::v1::capabilities as clip_pb;
 
 /// Sends one `files.v1` control message over a live session.
 pub async fn send_files_control(session: &ConnectedSession, body: pb::file_control::Body) -> bool {

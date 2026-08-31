@@ -1,6 +1,7 @@
 package io.github.yurisismotto.anyflow.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -11,15 +12,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -27,17 +34,28 @@ import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import io.github.yurisismotto.anyflow.AnyFlowApp
+import io.github.yurisismotto.anyflow.capability.ClipboardCapability
+import io.github.yurisismotto.anyflow.capability.FilesCapability
+import io.github.yurisismotto.anyflow.clipboard.ClipboardNotifications
+import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
+import io.github.yurisismotto.anyflow.clipboard.ClipboardSendFailed
+import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
+import io.github.yurisismotto.anyflow.identity.Fingerprint
 import io.github.yurisismotto.anyflow.pairing.QrPayload
 import io.github.yurisismotto.anyflow.service.ConnectionService
-import io.github.yurisismotto.anyflow.capability.FilesCapability
 import io.github.yurisismotto.anyflow.store.TrustStore
 import kotlinx.coroutines.launch
 
 /**
- * The whole UI for this Sprint: identity, pairing, connection status.
+ * Identity, pairing, connection status, transfers and clipboard.
  *
- * Compose, kept minimal on purpose — the foundation is the protocol, and a
- * larger UI now would be guesswork about features that do not exist yet.
+ * ## Why the clipboard is read here and nowhere else
+ *
+ * Android refuses `getPrimaryClip` to an app without input focus. An Activity
+ * that the person is looking at has it; a service, a tile or a broadcast
+ * receiver does not. So every clipboard *read* in this app originates from a
+ * button on this screen — which is also the honest place for it, because
+ * sending a clipboard is a decision, not a background sync.
  */
 class MainActivity : ComponentActivity() {
 
@@ -67,7 +85,20 @@ class MainActivity : ComponentActivity() {
             if (granted) launchScanner() else showError("Camera access is needed to scan the code.")
         }
 
-    private var error: String? = null
+    /** Set when a send needs the sensitive-clip confirmation. */
+    private var sensitivePrompt by mutableStateOf<SensitivePrompt?>(null)
+
+    private data class SensitivePrompt(
+        val peer: Fingerprint,
+        val computerName: String,
+        val bytes: Int,
+    )
+
+    /**
+     * A clip the notification asked us to offer, if the Activity was started
+     * from one.
+     */
+    private var requestedClip by mutableStateOf<Fingerprint?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,6 +106,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        handleIntent(intent)
 
         setContent {
             MaterialTheme {
@@ -89,21 +121,117 @@ class MainActivity : ComponentActivity() {
                             ConnectionService.stop(this)
                         },
                         onSetFilesGrant = { peer, granted ->
-                            // Written straight to the trust store, which is
-                            // what `isFileTransferAllowed` reads on every
-                            // question — so withdrawing it stops a transfer
-                            // that is already running.
-                            val grants = peer.grantedCapabilities.toMutableSet()
-                            if (granted) {
-                                grants += FilesCapability.ID
-                            } else {
-                                grants -= FilesCapability.ID
-                            }
-                            app.trustStore.addPeer(peer.copy(grantedCapabilities = grants))
+                            app.trustStore.setGrant(peer.fingerprint, FilesCapability.ID, granted)
                         },
+                        onSetClipboardGrant = { peer, granted ->
+                            app.trustStore
+                                .setGrant(peer.fingerprint, ClipboardCapability.ID, granted)
+                        },
+                        onSetClipboardPolicy = { peer, policy ->
+                            app.trustStore.setClipboardPolicy(peer.fingerprint, policy)
+                        },
+                        onSendClipboard = ::sendClipboard,
+                        onApplyClip = ::applyClip,
+                        onDismissClip = { peer ->
+                            lifecycleScope.launch { app.clipboard.dismissPending(peer) }
+                            ClipboardNotifications(this).clear(peer)
+                        },
+                        pendingRequest = requestedClip,
+                        onPendingRequestHandled = { requestedClip = null },
                     )
+
+                    sensitivePrompt?.let { prompt ->
+                        SensitiveClipDialog(
+                            computerName = prompt.computerName,
+                            bytes = prompt.bytes,
+                            onConfirm = {
+                                sensitivePrompt = null
+                                sendClipboard(prompt.peer, confirmedSensitive = true)
+                            },
+                            onDismiss = { sensitivePrompt = null },
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        when (intent?.action) {
+            ClipboardNotifications.ACTION_APPLY_CLIP -> {
+                val hex = intent.getStringExtra(ClipboardNotifications.EXTRA_PEER_FINGERPRINT)
+                    ?: return
+                requestedClip = Fingerprint.fromHex(hex)
+            }
+
+            ACTION_SEND_CLIPBOARD -> sendClipboardFromShortcut()
+        }
+    }
+
+    /**
+     * The Quick Settings tile asked for a send.
+     *
+     * The clipboard is read here rather than in the tile because this is
+     * where the app has input focus, which is what Android requires. The
+     * target is resolved without guessing: with exactly one eligible computer
+     * the send starts, and with none or several the screen simply opens so
+     * the person picks. Sending a password to the wrong computer because
+     * something chose for them is not a failure mode worth having — the same
+     * rule the CLI follows for an ambiguous device prefix.
+     */
+    private fun sendClipboardFromShortcut() {
+        val eligible = runCatching {
+            app.trustStore.peers().filter {
+                it.allows(ClipboardCapability.ID) && it.clipboardPolicy.allowSend
+            }
+        }.getOrDefault(emptyList())
+
+        when (eligible.size) {
+            0 -> showError("No computer is set up to receive your clipboard.")
+            1 -> sendClipboard(eligible.first().fingerprint)
+            else -> showError("Choose which computer to send the clipboard to.")
+        }
+    }
+
+    /**
+     * Reads the clipboard and sends it.
+     *
+     * This runs with the Activity in the foreground, which is the only state
+     * in which Android permits the read. A clip the platform marked sensitive
+     * comes back as [ClipboardSync.SendFailure.NeedsConfirmation] and is not
+     * sent until the person answers the dialog.
+     */
+    private fun sendClipboard(peer: Fingerprint, confirmedSensitive: Boolean = false) {
+        lifecycleScope.launch {
+            val name = app.trustStore.peer(peer)?.deviceName ?: "the computer"
+            app.clipboard.sendCurrentClipboard(peer, confirmedSensitive)
+                .onSuccess { bytes -> showError("Sent $bytes bytes to $name.") }
+                .onFailure { failure ->
+                    when (val reason = (failure as? ClipboardSendFailed)?.failure) {
+                        is ClipboardSync.SendFailure.NeedsConfirmation ->
+                            sensitivePrompt = SensitivePrompt(peer, name, reason.bytes)
+                        // Every other failure carries a message that names the
+                        // cause without naming the content.
+                        else -> showError(failure.message ?: "Could not send the clipboard.")
+                    }
+                }
+        }
+    }
+
+    private fun applyClip(peer: Fingerprint) {
+        lifecycleScope.launch {
+            app.clipboard.applyPending(peer)
+                .onSuccess { bytes ->
+                    ClipboardNotifications(this@MainActivity).clear(peer)
+                    showError("Copied $bytes bytes to your clipboard.")
+                }
+                .onFailure { showError(it.message ?: "Could not copy that clipboard.") }
         }
     }
 
@@ -122,9 +250,20 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /**
+     * One-line feedback.
+     *
+     * Callers must never pass clipboard text: a toast is on screen and in the
+     * accessibility event stream. Every call site here passes a count and a
+     * device name.
+     */
     private fun showError(message: String) {
-        error = message
         android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+    }
+
+    companion object {
+        /** Asks this screen to send the clipboard as soon as it has focus. */
+        const val ACTION_SEND_CLIPBOARD = "io.github.yurisismotto.anyflow.SEND_CLIPBOARD"
     }
 }
 
@@ -136,15 +275,33 @@ private fun MainScreen(
     onDisconnect: () -> Unit,
     onForget: (TrustStore.TrustedPeer) -> Unit,
     onSetFilesGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
+    onSetClipboardGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
+    onSetClipboardPolicy: (TrustStore.TrustedPeer, ClipboardPolicy) -> Unit,
+    onSendClipboard: (Fingerprint, Boolean) -> Unit,
+    onApplyClip: (Fingerprint) -> Unit,
+    onDismissClip: (Fingerprint) -> Unit,
+    pendingRequest: Fingerprint?,
+    onPendingRequestHandled: () -> Unit,
 ) {
     val state by app.connectionState.collectAsState()
-    val peers = app.trustStore.peers()
+    // Observed, not read once. The previous release read the peer list during
+    // composition and never again, so a grant changed anywhere else stayed
+    // invisible until the screen was recreated.
+    val peers by app.trustStore.peersFlow.collectAsState()
     val offers by app.files.pendingOffers.collectAsState()
     val transfers by app.files.visible.collectAsState()
+    val pendingClips by app.clipboard.pendingClips.collectAsState()
+    val clipboardOutcomes by app.clipboard.lastOutcome.collectAsState()
+
+    val connectedPeer = (state as? AnyFlowApp.ConnectionState.Connected)?.fingerprintShort
 
     Scaffold { padding ->
         Column(
-            modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize(),
+            modifier = Modifier
+                .padding(padding)
+                .padding(16.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("AnyFlow", style = MaterialTheme.typography.headlineSmall)
@@ -167,13 +324,26 @@ private fun MainScreen(
                 }
             }
 
-            // Offers come first: they are the only thing on this screen that
-            // is waiting on the person looking at it.
+            // Anything waiting on the person comes first.
             for (offer in offers) {
                 IncomingOfferCard(
                     offer = offer,
                     onRespond = { accept -> app.files.respondToOffer(offer.transferId, accept) },
                 )
+            }
+
+            for (clip in pendingClips) {
+                PendingClipCard(
+                    clip = clip,
+                    onApply = { onApplyClip(clip.peer) },
+                    onDismiss = { onDismissClip(clip.peer) },
+                )
+            }
+
+            // A notification tapped while a clip is already gone should not
+            // leave the request hanging around forever.
+            if (pendingRequest != null && pendingClips.none { it.peer == pendingRequest }) {
+                onPendingRequestHandled()
             }
 
             for (transfer in transfers) {
@@ -210,18 +380,14 @@ private fun MainScreen(
                 Button(onClick = onPair) { Text("Scan pairing code") }
             } else {
                 for (peer in peers) {
+                    val connected = connectedPeer == peer.fingerprint.toDisplayShort()
                     Card {
                         Column(Modifier.padding(12.dp), Arrangement.spacedBy(4.dp)) {
                             Text(peer.deviceName, style = MaterialTheme.typography.titleMedium)
                             Text("Fingerprint ${peer.fingerprint.toDisplayShort()}")
-                            Text("Allowed: ${peer.grantedCapabilities.joinToString(", ")}")
 
-                            // Files can be withdrawn without unpairing. The
-                            // grant is re-read per message, so revoking it
-                            // stops an in-flight transfer, not just the next
-                            // one.
-                            val filesAllowed = FilesCapability.ID in peer.grantedCapabilities
-                            Button(onClick = { onSetFilesGrant(peer, !filesAllowed) }) {
+                            val filesAllowed = peer.allows(FilesCapability.ID)
+                            OutlinedButton(onClick = { onSetFilesGrant(peer, !filesAllowed) }) {
                                 Text(
                                     if (filesAllowed) {
                                         "Stop allowing file transfer"
@@ -231,12 +397,23 @@ private fun MainScreen(
                                 )
                             }
 
-                            Button(onClick = { onForget(peer) }) { Text("Forget this computer") }
+                            ClipboardSection(
+                                peer = peer,
+                                connected = connected,
+                                lastOutcome = clipboardOutcomes[peer.fingerprint.toHex()],
+                                onSetGrant = { granted -> onSetClipboardGrant(peer, granted) },
+                                onSetPolicy = { policy -> onSetClipboardPolicy(peer, policy) },
+                                onSendClipboard = { onSendClipboard(peer.fingerprint, false) },
+                            )
+
+                            OutlinedButton(onClick = { onForget(peer) }) {
+                                Text("Forget this computer")
+                            }
                         }
                     }
                 }
                 Button(onClick = onConnect) { Text("Connect") }
-                Button(onClick = onDisconnect) { Text("Disconnect") }
+                OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
             }
         }
     }

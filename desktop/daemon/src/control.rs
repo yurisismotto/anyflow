@@ -57,6 +57,55 @@ pub enum Request {
 
     /// Cancels a transfer by id, or by an unambiguous id prefix.
     CancelTransfer { transfer: String },
+
+    /// What `clipboard.v1` can do on this machine, and per-peer policy.
+    ClipboardStatus,
+
+    /// Sends the current local clipboard to one device.
+    ///
+    /// Manual and explicit: it is not gated on `auto_send`, because a human
+    /// asking is a different act from a watcher firing.
+    ClipboardSend {
+        device: String,
+        /// Ask the receiver to treat the clip as sensitive. On Android this
+        /// sets `ClipDescription.EXTRA_IS_SENSITIVE`, which is a presentation
+        /// hint and nothing more.
+        sensitive: bool,
+    },
+
+    /// Writes a clip that arrived while `auto_receive` was off.
+    ClipboardApply { device: String },
+
+    /// Changes one per-peer clipboard policy flag.
+    ///
+    /// One request rather than four so that adding a flag is a new enum
+    /// variant in [`ClipboardFlag`] and nothing else.
+    ClipboardPolicy {
+        device: String,
+        flag: ClipboardFlag,
+        enabled: bool,
+    },
+}
+
+/// Which per-peer clipboard policy flag a [`Request::ClipboardPolicy`] sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipboardFlag {
+    Send,
+    Receive,
+    AutoSend,
+    AutoReceive,
+}
+
+impl std::fmt::Display for ClipboardFlag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Send => "send",
+            Self::Receive => "receive",
+            Self::AutoSend => "auto-send",
+            Self::AutoReceive => "auto-receive",
+        })
+    }
 }
 
 /// A single-shot reply.
@@ -66,6 +115,7 @@ pub enum Response {
     Status(StatusReport),
     Devices(Vec<DeviceReport>),
     Transfers(Vec<TransferReport>),
+    Clipboard(ClipboardStatusReport),
     Pong { rtt_ms: u64 },
     Ok { message: String },
     Error { message: String },
@@ -121,6 +171,71 @@ pub struct TransferReport {
     /// Set once the transfer is not going to complete.
     pub failure: Option<String>,
     pub stored_at: Option<String>,
+}
+
+/// What `clipboard.v1` can actually do here, and for whom.
+///
+/// Note what is *not* in this type: no clipboard text, not even a preview.
+/// A pending clip is described by its size, a hash prefix and its age. That
+/// is enough to tell two clips apart and to decide whether to apply one, and
+/// it means the control socket never carries clipboard content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipboardStatusReport {
+    /// Whether the capability is registered at all.
+    pub enabled: bool,
+    /// The platform backend, e.g. `wl-clipboard`.
+    pub backend: String,
+    /// One line on what the backend can do here, including where clipboard
+    /// change notifications come from — or why there are none.
+    pub backend_detail: String,
+    /// True when this session can report clipboard changes, which is what
+    /// `auto_send` needs. False is a normal, documented state (GNOME).
+    pub watch_available: bool,
+    /// How many events and suppression entries the caches hold. Present so
+    /// the bounded-growth property is observable rather than merely claimed.
+    pub event_cache_entries: usize,
+    pub suppression_cache_entries: usize,
+    pub peers: Vec<ClipboardPeerReport>,
+    pub pending: Vec<PendingClipReport>,
+}
+
+/// One device's clipboard grant and policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipboardPeerReport {
+    pub device_id: String,
+    pub device_name: String,
+    pub fingerprint_short: String,
+    /// Whether `clipboard.v1` is granted. Without it every flag below is
+    /// inert, which is why it is reported next to them.
+    pub granted: bool,
+    /// Whether the pairing itself was revoked.
+    ///
+    /// Reported separately from `granted` because "not granted" and "this
+    /// device is no longer trusted at all" are different situations with
+    /// different fixes, and showing the second as the first understates it.
+    pub revoked: bool,
+    pub connected: bool,
+    pub allow_send: bool,
+    pub allow_receive: bool,
+    pub auto_send: bool,
+    pub auto_receive: bool,
+    /// The last outcome this peer reported for something we sent it.
+    pub last_outcome: Option<String>,
+}
+
+/// A clip held in memory because `auto_receive` is off. No content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingClipReport {
+    pub device_name: String,
+    pub fingerprint_short: String,
+    /// Size in UTF-8 bytes.
+    pub bytes: usize,
+    /// First 8 hex characters of the SHA-256 of the content. Enough to tell
+    /// two clips apart; useless for recovering either.
+    pub hash_prefix: String,
+    pub sensitive: bool,
+    pub origin_device_id: String,
+    pub age_secs: u64,
 }
 
 /// How a known device stands *right now*.
