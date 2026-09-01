@@ -113,7 +113,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 > | **Split** — `mdns-sd` coexistence (V-12) stays P1; the `DnsServiceRegister` A/AAAA half (V-03) becomes contingent, run only if `mdns-sd` fails | POC-WIN-02 |
 > | **Requestioned** — no longer "does anything prompt?" (V-06 says yes, by default, from macOS 15.4) but *"does `changeCount` polling **alone** trigger the access alert, or only the subsequent content read?"* | POC-MAC-05 |
 > | **Narrowed** — TN3179 answers most of it; what remains is whether the listen-only path avoids the prompt, and whether the multicast entitlement is needed for a single declared service type | POC-IOS-02 |
-> | **NEW** — `cargo check --target x86_64-pc-windows-msvc` on a **Windows runner** for the portable crates (a Linux cross-compile cannot work: `ring` needs MSVC, V-10) | **POC-CORE-04** |
+> | **NEW** — `cargo check --target x86_64-pc-windows-msvc` on a **Windows runner** for the portable crates (a Linux cross-compile cannot work: `ring` needs MSVC, V-10) · **PASS 2026-09-01** | **POC-CORE-04** |
 > | **NEW** — confirm on real Debian 13 / Ubuntu 24.04 / 26.04 that `wl-copy --sensitive` fails as predicted, and that the probe detects it | **POC-LINUX-05** |
 >
 > No PoC is deleted.
@@ -519,6 +519,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 | **VM?** | ✅ GitHub-hosted `windows-latest` has MSVC |
 | **Hardware?** | None beyond a CI runner |
 | **Blocks** | Wave 0 acceptance (G3), CI-001 |
+| **Result** | ✅ **PASS — 2026-09-01.** Green on a GitHub-hosted `windows-2025-vs2026` runner (Windows Server 2025 10.0.26100), `rustc 1.98.0` with **`host: x86_64-pc-windows-msvc`**, `cargo 1.98.0`, Visual Studio Enterprise 2026 18.9.12112.369. The specified `cargo check --no-default-features --target x86_64-pc-windows-msvc` over the six portable crates is clean; the same six also **build**, and their portable test targets link — 14 MSVC executables. `ring` was compiled by MSVC (`ring_core_0_17_14_.lib`), not substituted. The boundary was additionally asserted on the **resolved** dependency graph (87 packages, no platform crate, no `unix-fs`/`linux-backends`/`upower`), because the failure POC-CORE-01 actually hit was Cargo feature unification, which a source grep cannot see. `anyflow-runtime` excluded as specified. 12/12 steps `success`, no `continue-on-error`. **This is CI-001**, permanent on PRs to `main`/`develop`. [Run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649) · commit `cfd33f6` · [full evidence](../../sprints/wave-0-platform-abstraction.md) |
 | **Class** | **P0 — architecture blocking** |
 
 ### POC-LINUX-05 — `wl-copy --sensitive` on real Debian/Ubuntu 🆕

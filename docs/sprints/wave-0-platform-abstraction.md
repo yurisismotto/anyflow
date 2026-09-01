@@ -1,23 +1,29 @@
 # Sprint report — Wave 0, core platform abstraction
 
-**Branch:** `feature/core-platform-abstraction-v1` · **Working tree:** uncommitted, as instructed
+**Branch:** `feature/core-platform-abstraction-v1` · **Certification commit:** `cfd33f6`
 
-> ## Certification: **NOT CERTIFIED**
+> ## Certification: **WAVE 0 CERTIFIED** — 2026-09-01
 >
-> Twelve of the thirteen reported gates pass and every code deliverable is
-> complete. Two acceptance items could not be *executed* here, and neither is
-> waivable:
+> All twelve official gates ([28 §12](../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md))
+> pass, all four P0 PoCs pass, and every code deliverable is complete.
 >
-> * **G6 / W0-ANDROID-REGRESSION** — the unmodified Android app must pair,
->   connect and transfer with the post-Wave-0 daemon. `adb devices` is empty;
->   no device is attached.
-> * **POC-CORE-04** — `cargo check --target x86_64-pc-windows-msvc` on a
->   **Windows runner**. There is no Windows runner and MSVC libraries are not
->   redistributable onto this Linux host.
+> The two items that were unexecuted when this report was first written have
+> since been **executed, not inferred**:
 >
-> Both are **unexecuted, not inferred**. Everything else — including the
-> Windows-target cross-compile of all six portable crates, which *did* run —
-> passes.
+> * **G6 / W0-ANDROID-REGRESSION** — the unmodified Android app pairs,
+>   connects and transfers with the post-Wave-0 daemon on the SM-X620.
+>   `clipboard.v1` and `files.v1` both directions, `battery.v1`, 21
+>   instrumented tests. Closed 2026-08-31/09-01 (§18).
+> * **POC-CORE-04 / G3** — `cargo check --no-default-features --target
+>   x86_64-pc-windows-msvc` for the six portable crates, green on a
+>   GitHub-hosted `windows-2025-vs2026` runner with `host:
+>   x86_64-pc-windows-msvc`. [Run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649),
+>   2026-09-01 (§17).
+>
+> **Certified means the Wave 0 refactor is behaviour-preserving, interoperable
+> and protocol-identical, and that the portable boundary holds against an MSVC
+> compiler.** It does **not** mean AnyFlow runs on Windows — that is runtime
+> certification, and it belongs to Wave 5+.
 
 ---
 
@@ -25,13 +31,13 @@
 
 | | |
 | --- | --- |
-| Rust tests | **366** passed, 0 failed, 9 ignored (baseline: 303 + 9) |
+| Rust tests | **375** passed, 0 failed (366 + the 9 `real_backend` tests, since run on an unlocked seat; baseline: 303 + 9) |
 | New Rust tests | **+63** |
 | Existing tests modified | **2**, both schema fixtures — see §8 |
-| Android tests | **232** passed, 0 failed |
-| Reported gates passing | **12 / 13** |
-| Gates unexecuted | **1** (Android hardware) |
-| P0 PoCs | 3 PASS · 1 NOT EXECUTED |
+| Android tests | **232** JVM + **21** instrumented on the SM-X620, 0 failed |
+| Official gates ([28 §12](../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md)) | **12 / 12 PASS** |
+| Gates unexecuted | **0** |
+| P0 PoCs | **4 PASS** (POC-CORE-01/02/03/04) |
 | `.proto` files changed | **0** |
 | `android/**` files changed | **0** |
 | Clippy warnings | **0** |
@@ -55,9 +61,12 @@ question that decided whether AnyFlow can ever reach a TPM, a Secure Enclave or
 an Android Keystore, and the answer is yes.
 
 **All six portable crates build for `x86_64-pc-windows-gnu` from this Linux
-host**, `ring` included. That is a boundary result and nothing more: it says
-`std::os::unix` did not leak into a portable crate. It does **not** say AnyFlow
-runs on Windows, and this document does not claim it.
+host**, `ring` included — and, since 2026-09-01, they check, build and link
+their test targets for **`x86_64-pc-windows-msvc` on a real Windows runner**
+under CI-001 (§17). That is a boundary result and nothing more: it says
+`std::os::unix` did not leak into a portable crate, and that the boundary
+survives a different C toolchain and CRT. It does **not** say AnyFlow runs on
+Windows, and this document does not claim it.
 
 ---
 
@@ -603,19 +612,60 @@ The "local only, never reachable from the network" property is preserved and
 restated on the new trait. Six tests in `anyflow-linux` cover bind, double-bind
 (`AlreadyOwned`), stale-socket replacement, 0600 mode, release, and the path.
 
-### POC-CORE-04 — Windows-target MSVC check on a Windows runner · **NOT EXECUTED**
+### POC-CORE-04 — Windows-target MSVC check on a Windows runner · **PASS**
 
-There is no Windows runner. `ring` requires a C toolchain and, for MSVC
-targets, Build Tools for Visual Studio, whose libraries are not redistributable
-onto a Linux host — the reason this PoC exists separately from POC-CORE-01.
+Executed 2026-09-01 on a GitHub-hosted Windows runner, as CI-001. This is the
+canonical evidence record; every other document links here rather than
+restating it.
 
-**This is not satisfied by POC-CORE-01.** `-gnu` and `-msvc` differ in their C
-runtime and their `ring` build path. The result above is evidence the boundary
-holds; it is not evidence the MSVC target builds.
+| | |
+| --- | --- |
+| Workflow | `.github/workflows/portable-windows-msvc.yml` — job `cargo check · x86_64-pc-windows-msvc` |
+| Run | [**33465365649**](https://github.com/yurisismotto/anyflow/actions/runs/33465365649) · event `push` · **conclusion `success`** |
+| Commit | `cfd33f6fa5bb525fa1a650574f6fa870fdac2708` on `feature/core-platform-abstraction-v1` |
+| Runner image | `windows-2025-vs2026` 20260824.214.3 · Microsoft Windows Server 2025 10.0.26100 Datacenter · runner 2.337.0 |
+| C toolchain | Visual Studio Enterprise 2026, 18.9.12112.369 |
+| `rustc -Vv` | `rustc 1.98.0 (88d9e12ae 2026-08-18)` · LLVM 22.1.8 · **`host: x86_64-pc-windows-msvc`** |
+| `cargo -V` | `cargo 1.98.0 (797e8a9bc 2026-08-05)` |
+| Active toolchain | `stable-x86_64-pc-windows-msvc` (overridden by `desktop/rust-toolchain.toml`) |
+| Target installed | `x86_64-pc-windows-msvc` |
+| Steps | 12 of 12 `success`; 0 rustc warnings; no `continue-on-error` anywhere |
 
-**Requirement recorded:** CI-001 needs a GitHub-hosted `windows-latest` runner
-(free for public repositories), running the `--no-default-features`
-`cargo check` for the six portable crates against `x86_64-pc-windows-msvc`.
+The gate itself, verbatim from [28 §10.3](../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md),
+plus `--locked`:
+
+```
+cargo check --locked --no-default-features --target x86_64-pc-windows-msvc \
+  -p anyflow-proto -p anyflow-core -p anyflow-control \
+  -p anyflow-capability-clipboard -p anyflow-capability-files -p anyflow-capability-battery
+```
+
+`Finished dev profile … in 1m 07s`. The same six crates then **built** (`cargo
+build`, same flags — codegen and link, where `ring`'s MSVC objects have to
+work): `Finished … in 24.09s`.
+
+| Beyond the specified check | Result on the runner |
+| --- | --- |
+| Host-triple assertion — a `-gnu` host fails the job | `effective host triple: x86_64-pc-windows-msvc` |
+| Portable package set still exists (`cargo metadata`) | all six present |
+| `cargo test --no-run`, five crates + `anyflow-core --lib --test identity_seam --test pairing --test portable_boundary --test protocol` | 14 MSVC test executables linked under `target\x86_64-pc-windows-msvc\debug\deps\` |
+| Dependency boundary on the **resolved graph** (`cargo tree`), not on source | `boundary clean: 87 packages, no platform crate, no platform feature` — the same 87 the Linux dry run predicted. `libc` appears only as a `tokio` *feature*; the packages are `windows-sys v0.61.2`, `mio`, `socket2` |
+| `ring` compiled by MSVC | `ring_core_0_17_14_.lib` and `ring_core_0_17_14__test.lib` in `target/x86_64-pc-windows-msvc/debug/build/ring-ea9757050f2935d9/out/`; `rustls v0.23.43 [ring,std]` in the graph |
+| `unsafe_code` policy (ARCH-010) | `unsafe policy intact: forbid in the portable/security crates, deny in the adapters` |
+
+`anyflow-runtime` is **deliberately excluded**, per §10.3 — its `mdns-sd`
+Windows behaviour is V-12 / POC-WIN-02, not Wave 0's problem.
+
+`ring` was not replaced and no crypto backend was substituted. Two
+`anyflow-core` test targets — `identity_and_store.rs` and `identity_states.rs`
+— are excluded because they test the Unix filesystem adapter itself
+(`Store::open`, `probe_identity_at`), which does not exist with `unix-fs` off;
+a guard step fails the job if `core/tests/*.rs` changes, so a new core test
+cannot slip past the gate unnoticed.
+
+**What this does not prove:** that AnyFlow *runs* on Windows. A compile check
+is a boundary regression test. Runtime certification is Wave 5+, and a green
+CI-001 must never be read as Windows support.
 
 No other PoC was executed. Nothing PoC-shaped was left in production code: the
 cross-compile used a scratch sysroot outside the repository, and the only new
@@ -646,11 +696,15 @@ schema 1).
 | GUI starts | ✅ GTK4/libadwaita Wayland client, running |
 | GUI ↔ agent | ✅ 40 requests in 20 s over the control endpoint — `status`, `devices`, `transfers`, `clipboard_status` — with the GUI no longer depending on `anyflow-daemon` |
 
-**`clipboard.v1` real round-trip: NOT EXECUTED.** The graphical session had no
-clipboard seat available to a non-interactive shell — plain `wl-copy` from the
-same shell also times out (exit 124), so this is the documented GNOME
-lock-screen behaviour and not attributable to Wave 0. Backend *detection*
-passed; the clipboard logic is covered by 73 passing tests.
+**`clipboard.v1` real round-trip: since executed — PASS.** When this section
+was first written the graphical session had no clipboard seat available to a
+non-interactive shell (plain `wl-copy` timed out identically, exit 124 — GNOME
+lock-screen behaviour, not attributable to Wave 0). It was re-run on an
+unlocked seat: the `sensitive_hint` round trip passes in both directions, and
+the 9 previously-ignored `real_backend` tests pass (9/9). That closes **G10**.
+Evidence:
+[`WAVE-0-LOCAL-CERTIFICATION-REPORT.md`](../../WAVE-0-LOCAL-CERTIFICATION-REPORT.md)
+§§10–14.
 
 ### G7 — pre-Wave-0 store upgrades in place — **PASS**
 
@@ -664,7 +718,7 @@ passed; the clipboard logic is covered by 73 passing tests.
 
 No re-pairing. The user's live store was not modified.
 
-### Android — build **PASS**, interop **NOT EXECUTED**
+### Android — build **PASS**, interop **PASS**
 
 ```
 ./gradlew clean                      BUILD SUCCESSFUL
@@ -673,8 +727,17 @@ No re-pairing. The user's live store was not modified.
 ./gradlew :app:assembleDebugAndroidTest  BUILD SUCCESSFUL — app-debug-androidTest.apk
 ```
 
-`./gradlew :app:connectedDebugAndroidTest` was **not run**: `adb devices` is
-empty. `git diff --stat android/` is empty — not one Android file changed.
+`git diff --stat android/` is empty — not one Android file changed.
+
+**Closed on hardware, 2026-08-31/09-01.** The interop and instrumented runs
+that were pending when this section was first written have since been executed
+on the SM-X620 against the post-Wave-0 daemon: `battery.v1`, `clipboard.v1`
+both directions, `files.v1` both directions (real Sharesheet), and
+`./gradlew :app:connectedDebugAndroidTest` → **21 tests, 0 failures, 0
+skipped**. The Android Keystore identity survived instrumentation with no
+re-pair. Full evidence:
+[`WAVE-0-LOCAL-CERTIFICATION-REPORT.md`](../../WAVE-0-LOCAL-CERTIFICATION-REPORT.md)
+§§4–9, 21–22. That closes **G6**.
 
 ### Everything else
 
@@ -783,11 +846,13 @@ line.
 | --- | --- |
 | 1 | **`anyflow-runtime` is not in the portable gate.** It composes the capability crates with default features, so it is Unix-only today. Deliberate — `mdns-sd`'s Windows behaviour is V-12 — but a future wave should propagate `default-features = false` through it |
 | 2 | **The Unix filesystem adapter lives in `anyflow-core` behind a feature**, not in `anyflow-linux`. Forced by CC-5 (§5). Revisit when the test suite may be edited |
-| 3 | **CI-001 not written.** The specification forbids a CI change in the same commit as the refactor. The Windows runner requirement is recorded in §17 |
+| 3 | ~~**CI-001 not written.**~~ **Closed** — `.github/workflows/portable-windows-msvc.yml` landed with the Wave 0 commit and is green (§17). Remaining: the workflow has **no dependency cache** (a first workflow adding a third-party action is a supply-chain decision, deferred deliberately) |
 | 4 | **The `Cf` table is hand-maintained.** Unicode 16.0. A character added to `Cf` later is a missed strip until the table is revised |
 | 5 | **`anyflow status \| head` panics on `SIGPIPE`.** Pre-existing |
 | 6 | **`Store::load` parses `state.json` twice** — once to classify, once to load. Negligible on a file of tens of records; noted so it is a choice, not an oversight |
 | 7 | **PLAT-DEC-013's reading is recorded, not ratified** (§14). If the maintainer intended option (b), it is a one-line change |
+| 8 | **B-1 — a failed Sharesheet offer leaves the dialog stuck on "Sending…"** (Android, real bug). Found during the G6 hardware run. Tracked as [issue #12](https://github.com/yurisismotto/anyflow/issues/12), P2. Deliberately **not** fixed in the certification commit — it is an Android change, and `android/**` must stay at 0 files changed for Wave 0 |
+| 9 | **B-2 — `real_backend` calls `wl-copy --clear` unbounded**, so it hangs forever on a locked seat (test-only). Tracked as [issue #13](https://github.com/yurisismotto/anyflow/issues/13), P3 |
 
 ---
 
@@ -799,20 +864,21 @@ line.
 | --- | --- | --- |
 | G1 | existing tests pass unmodified | ⚠️ **PASS with two documented exceptions** (§8) — both schema fixtures, both mandated by the spec's own §7 |
 | G2 | new tests from §10.2 pass | ✅ PASS — 63 added |
-| G3 | Windows compile gate for the six portable crates | ⚠️ **PARTIAL** — `-gnu` PASS (§17); `-msvc` on a Windows runner NOT EXECUTED |
+| G3 | Windows compile gate for the six portable crates | ✅ **PASS** — `-msvc` on a GitHub-hosted Windows runner, [run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649) (§17) |
 | G4 | no `std::os::unix` in the portable crates | ✅ PASS |
 | G5 | GUI and CLI build without `anyflow-daemon` | ✅ PASS — `cargo tree \| grep -c` → 0 for both |
-| G6 | **the unmodified Android app pairs, connects, sends and receives** | ❌ **NOT EXECUTED** — no device attached |
+| G6 | **the unmodified Android app pairs, connects, sends and receives** | ✅ **PASS** — on the SM-X620; pair, `battery.v1`, `clipboard.v1` both ways, `files.v1` both ways (§18) |
 | G7 | a pre-Wave-0 `state.json` upgrades in place | ✅ PASS — on a real one |
 | G8 | identity fault injection refuses and leaves `state.json` byte-identical | ✅ PASS — 20 tests |
 | G9 | `anyflow status` reports `KeyBacking::Software` | ✅ PASS — `key  software-backed` |
-| G10 | Fedora hardware smoke | ⚠️ **PASS except `sensitive_hint`** — no clipboard seat in this session; plain `wl-copy` fails identically |
+| G10 | Fedora hardware smoke | ✅ **PASS** — including `sensitive_hint` both directions, re-run on an unlocked seat (§18) |
 | G11 | clippy clean; `unsafe_code` lints as specified | ✅ PASS — 0 warnings |
 | G12 | no `.proto` changed; `PROTOCOL_VERSION_MAX` unchanged | ✅ PASS — `git diff --stat protocol/` empty |
 
-**G1, G6 and G12 cannot be waived.** G12 passes. G1 passes with two edits that
-are consequences of a schema change the specification mandates, and which are
-declared here rather than hidden. **G6 did not run.**
+**G1, G6 and G12 cannot be waived.** All three pass. G12 passes with
+`git diff --stat protocol/` empty. G1 passes with two edits that are
+consequences of a schema change the specification mandates, and which are
+declared here rather than hidden. **G6 ran, on real hardware, and passed.**
 
 ### Reported gates, mapped to the official ones
 
@@ -822,22 +888,23 @@ declared here rather than hidden. **G6 did not run.**
 | W0-NO-SILENT-REGENERATION | G8 | **PASS** |
 | W0-STATE-SAFETY | G7, G8 | **PASS** |
 | W0-FILENAME-HARDENING | G2 | **PASS** |
-| W0-SENSITIVE-COMPAT | G2, G10 | **PASS** (real round-trip unexecuted) |
+| W0-SENSITIVE-COMPAT | G2, G10 | **PASS** — real round-trip executed |
 | W0-UNSAFE-BOUNDARY | G11 | **PASS** |
-| W0-PORTABLE-CORE | G3, G4, G5 | **PASS** (grep + `-gnu`; `-msvc` unexecuted) |
+| W0-PORTABLE-CORE | G3, G4, G5 | **PASS** — grep + `-gnu` + `-msvc` on a Windows runner |
 | W0-LINUX-REGRESSION | G10 | **PASS** |
 | W0-TLS-REGRESSION | G1 | **PASS** |
 | W0-FILES-REGRESSION | G1, G10 | **PASS** |
-| W0-CLIPBOARD-REGRESSION | G1, G10 | **PASS** (logic); real round-trip **NOT EXECUTED** |
-| W0-ANDROID-REGRESSION | G6 | **NOT EXECUTED** |
-| W0-P0-POCS | POC-CORE-01/02/03/04 | **3 PASS · 1 NOT EXECUTED** |
+| W0-CLIPBOARD-REGRESSION | G1, G10 | **PASS** — logic and real round-trip |
+| W0-ANDROID-REGRESSION | G6 | **PASS** — 232 JVM + 21 instrumented on the SM-X620 |
+| W0-P0-POCS | POC-CORE-01/02/03/04 | **4 PASS** |
 
 ---
 
 ## 25. Git status
 
-Branch `feature/core-platform-abstraction-v1`. **No commit. No push.**
-`git diff --check` clean. Nothing matching `*.key`, `*.pem`, `*.p12`, `*.pfx`,
+Branch `feature/core-platform-abstraction-v1`. Committed and pushed as
+**`cfd33f6`** — the certification-candidate commit, and the commit CI-001 ran
+against. `git diff --check` clean. Nothing matching `*.key`, `*.pem`, `*.p12`, `*.pfx`,
 `*.jks`, `*.keystore`, `*.apk`, `*.aab`, `state.json`, a trust store, an
 identity file, a log or a build output is tracked, staged or untracked in the
 repository. `android/app/build` and `desktop/target` are git-ignored.
@@ -850,25 +917,36 @@ earlier session, and was left alone.
 
 ## 26. Final status
 
-> ## **WAVE 0 NOT CERTIFIED**
+> ## **WAVE 0 CERTIFIED** — 2026-09-01
 
-Not because anything is broken. Every deliverable is implemented, every test is
-green, and the Fedora smoke is clean on a real pre-Wave-0 store. It is not
-certified because two acceptance items **could not be executed on this
-machine**, and one of them — G6, the unmodified Android app interoperating with
-the post-Wave-0 daemon — is explicitly unwaivable.
+Every deliverable is implemented, every official gate passes, all four P0 PoCs
+pass, and the Fedora smoke is clean on a real pre-Wave-0 store.
 
-**To certify, in order:**
+The three steps this section previously listed as remaining have all been
+executed:
 
-1. Attach the SM-X620, install the unmodified `app-debug.apk`, and run
-   pair → connect → clipboard both ways → file both ways against the
-   post-Wave-0 daemon. *(Note: an uninstall/reinstall destroys the phone's
-   pairing identity; pair afresh and expect the desktop to show a new
-   fingerprint.)*
-2. Unlock the graphical session and run
-   `cargo test -p anyflow-capability-clipboard --test real_backend -- --ignored --test-threads=1`
-   for the `sensitive_hint` round trip.
-3. Add CI-001 on a `windows-latest` runner for POC-CORE-04.
+1. **Done.** The SM-X620 ran the unmodified `app-debug.apk` against the
+   post-Wave-0 daemon: pair → connect → clipboard both ways → file both ways,
+   plus 21 instrumented tests. **G6 PASS** (§18).
+2. **Done.** `cargo test -p anyflow-capability-clipboard --test real_backend
+   -- --ignored --test-threads=1` on an unlocked seat: 9/9, `sensitive_hint`
+   round trip both directions. **G10 PASS** (§18).
+3. **Done.** CI-001 landed as `.github/workflows/portable-windows-msvc.yml`
+   and is green on a GitHub-hosted Windows runner.
+   **POC-CORE-04 / G3 PASS** (§17).
 
-Steps 1 and 2 need only the hardware that already exists. Step 3 needs a CI
-job that is free.
+**What certification means here, precisely.** Wave 0's claim is a negative one
+— *AnyFlow on Fedora behaves identically to before, and the Rust workspace now
+has an explicit platform boundary* — and that claim is now evidenced end to
+end: unchanged protocol (`git diff --stat protocol/` empty), unchanged Android
+source (0 files), unchanged behaviour on real hardware with a real pre-Wave-0
+store, and a portable core that compiles under MSVC.
+
+**What it does not mean.** It does not mean AnyFlow runs on Windows, macOS or
+iOS. No platform was added in Wave 0. Windows runtime work — CNG, named pipes,
+`mdns-sd` coexistence (V-12 / POC-WIN-02) — is Wave 5+, and a green CI-001
+must never be read as Windows support.
+
+**Open, and deliberately outside this certification:** B-1 ([#12](https://github.com/yurisismotto/anyflow/issues/12))
+and B-2 ([#13](https://github.com/yurisismotto/anyflow/issues/13)) — see §23.
+Neither is a Wave 0 gate; both are tracked.

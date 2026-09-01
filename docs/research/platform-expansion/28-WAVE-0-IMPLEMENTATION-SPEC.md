@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | **Title** | Wave 0 — Core platform abstraction: an implementable specification |
-| **Status** | **IMPLEMENTED** on `feature/core-platform-abstraction-v1`, 2026-08-31. Wave 0 is **NOT CERTIFIED**: two acceptance items could not be executed. See [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
+| **Status** | **IMPLEMENTED AND CERTIFIED** — `feature/core-platform-abstraction-v1`, commit `cfd33f6`. **WAVE 0 CERTIFIED 2026-09-01**: all 12 acceptance gates and all four P0 PoCs pass. See [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
 | **Last reviewed** | 2026-08-31 |
 | **Sprint** | `research/platform-expansion-verification-v1` |
 | **Scope** | The refactor that makes AnyFlow's Rust workspace portable, without adding a platform |
@@ -538,6 +538,14 @@ cargo check -p anyflow-proto -p anyflow-core -p anyflow-control \
 Windows behaviour is V-12/POC-WIN-02 — unresolved and not Wave 0's problem. Adding it later is a
 one-line CI change.
 
+> **Executed 2026-09-01 — PASS.** This gate is now
+> `.github/workflows/portable-windows-msvc.yml` (CI-001), green on a GitHub-hosted
+> `windows-2025-vs2026` runner with `host: x86_64-pc-windows-msvc`:
+> [run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649),
+> commit `cfd33f6`. Evidence — runner, toolchain, exact commands, dependency graph and `ring`'s
+> MSVC objects — is recorded once, in
+> [the sprint report §17](../../sprints/wave-0-platform-abstraction.md).
+
 **Distinguish clearly**, because conflating them is how a project convinces itself a platform works:
 
 | | Proves |
@@ -684,7 +692,7 @@ content and should not wait for the refactor to land.
 
 | Job | When | Proves |
 | --- | --- | --- |
-| **CI-001** — Windows compile gate (§10.3) | **After** Wave 0 lands green | A `std::os::unix` call in a portable crate fails the PR |
+| **CI-001** — Windows compile gate (§10.3) · ✅ **landed and green**, `.github/workflows/portable-windows-msvc.yml` | **After** Wave 0 lands green | A `std::os::unix` call in a portable crate fails the PR |
 | **CI-002** — portable-crate purity grep | With CI-001 | Cheap backstop for CI-001 |
 | **CI-003** — GUI against Ubuntu 24.04 libadwaita 1.5 | Wave 2 | The floor is a contract, not a coincidence (R-11) |
 | macOS compile gate | Wave 7 | Deferred — needs a macOS runner |
@@ -746,11 +754,11 @@ Wave 0 was implemented against this specification on
 
 | | |
 | --- | --- |
-| Rust tests | 366 passed, 0 failed (baseline 303) |
-| Android tests | 232 passed, 0 failed; `android/**` unchanged |
-| Official gates | 12 of 13; **G6 NOT EXECUTED** |
-| P0 PoCs | POC-CORE-01 **PASS** · -02 **PASS** · -03 **PASS** · -04 **NOT EXECUTED** |
-| Status | **WAVE 0 NOT CERTIFIED** |
+| Rust tests | 375 passed, 0 failed (366 + 9 `real_backend` on an unlocked seat; baseline 303) |
+| Android tests | 232 JVM + 21 instrumented (SM-X620), 0 failed; `android/**` unchanged |
+| Official gates | **12 of 12 PASS** (§12) |
+| P0 PoCs | POC-CORE-01 **PASS** · -02 **PASS** · -03 **PASS** · -04 **PASS** ([run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649)) |
+| Status | **WAVE 0 CERTIFIED — 2026-09-01** |
 
 **What the spec got right.** The identity refactor was two call sites, exactly
 as §6.2 predicted; `rustls::sign::SingleCertAndKey` implements both resolver
