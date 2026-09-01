@@ -5,8 +5,21 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Adapter/binary crate: `unsafe` needs a deliberate, reviewable
+# `#[allow(unsafe_code)]` with a justification comment. None exists today.
+unsafe_code = "deny"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
 
 [[bin]]
 name = "anyflowd"
@@ -14,11 +27,14 @@ path = "src/main.rs"
 
 [features]
 default = ["upower"]
-upower = ["anyflow-capability-battery/upower"]
+upower = ["anyflow-runtime/upower"]
 
 [dependencies]
 anyflow-core = { version = "0.1.0", path = "../core" }
 anyflow-proto = { version = "0.1.0", path = "../proto" }
+anyflow-control = { version = "0.1.0", path = "../control" }
+anyflow-runtime = { version = "0.1.0", path = "../runtime", default-features = false }
+anyflow-linux = { version = "0.1.0", path = "../platform-linux" }
 anyflow-capability-battery = { version = "0.1.0", path = "../capabilities/battery" }
 anyflow-capability-clipboard = { version = "0.1.0", path = "../capabilities/clipboard" }
 anyflow-capability-files = { version = "0.1.0", path = "../capabilities/files" }
@@ -30,7 +46,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-mdns-sd = "0.15"
 clap = { version = "4", features = ["derive"] }
 qrcode = { version = "0.14", default-features = false }
 anyhow = "1"

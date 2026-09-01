@@ -5,8 +5,21 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Adapter/binary crate: `unsafe` needs a deliberate, reviewable
+# `#[allow(unsafe_code)]` with a justification comment. None exists today.
+unsafe_code = "deny"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
 
 [lib]
 name = "anyflow_gui"
@@ -17,9 +30,15 @@ name = "anyflow-gui"
 path = "src/main.rs"
 
 [dependencies]
-# The control protocol types, from the daemon crate the CLI already uses.
-# Sharing them is the point: the GUI cannot drift from the socket contract.
-anyflow-daemon = { version = "0.1.0", path = "../daemon", default-features = false }
+# The control protocol types, shared with the CLI and the agent. Sharing them
+# is the point: the GUI cannot drift from the socket contract. What it no
+# longer does is depend on the *agent* to get them — before Wave 0 a GTK
+# application pulled in mDNS, UPower and every capability crate for this
+# (audit C1).
+anyflow-control = { version = "0.1.0", path = "../control" }
+# The Linux control endpoint. A desktop UI is a platform application; it is
+# the *portable* crates that must not name a platform.
+anyflow-linux = { version = "0.1.0", path = "../platform-linux" }
 gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
 adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "sync"] }

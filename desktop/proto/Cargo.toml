@@ -5,8 +5,20 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Portable, security-critical: `unsafe` is forbidden outright.
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
 
 [dependencies]
 prost = "0.14.3"

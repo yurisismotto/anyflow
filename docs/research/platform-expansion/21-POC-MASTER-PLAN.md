@@ -113,7 +113,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 > | **Split** — `mdns-sd` coexistence (V-12) stays P1; the `DnsServiceRegister` A/AAAA half (V-03) becomes contingent, run only if `mdns-sd` fails | POC-WIN-02 |
 > | **Requestioned** — no longer "does anything prompt?" (V-06 says yes, by default, from macOS 15.4) but *"does `changeCount` polling **alone** trigger the access alert, or only the subsequent content read?"* | POC-MAC-05 |
 > | **Narrowed** — TN3179 answers most of it; what remains is whether the listen-only path avoids the prompt, and whether the multicast entitlement is needed for a single declared service type | POC-IOS-02 |
-> | **NEW** — `cargo check --target x86_64-pc-windows-msvc` on a **Windows runner** for the portable crates (a Linux cross-compile cannot work: `ring` needs MSVC, V-10) | **POC-CORE-04** |
+> | **NEW** — `cargo check --target x86_64-pc-windows-msvc` on a **Windows runner** for the portable crates (a Linux cross-compile cannot work: `ring` needs MSVC, V-10) · **PASS 2026-09-01** | **POC-CORE-04** |
 > | **NEW** — confirm on real Debian 13 / Ubuntu 24.04 / 26.04 that `wl-copy --sensitive` fails as predicted, and that the probe detects it | **POC-LINUX-05** |
 >
 > No PoC is deleted.
@@ -127,7 +127,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 - **✓** `cargo build --target x86_64-pc-windows-gnu -p …` succeeds for all six crates; the full Linux test suite still passes with zero behavioural change.
 - **✗** A portable crate still needs a platform impl to compile → the seam is in the wrong place.
 - **🔒** No security control may be `#[cfg]`-ed away to make this pass. If a check has no Windows equivalent yet, it becomes a `todo!()` in the stub, not a deletion.
-- **⏱** 2 d · **⇢** ARCH-002/003/004/005/006 · **R** _pending_
+- **⏱** 2 d · **⇢** ARCH-002/003/004/005/006 · **R** **PASS — 2026-08-31.** All six portable crates *built* (not merely checked) for `x86_64-pc-windows-gnu` from Fedora, `ring` included, via `mingw64-gcc` and Fedora's `rust-std-static-x86_64-pc-windows-gnu` in a scratch sysroot. No security control was `#[cfg]`-ed away and no stub was written: the platform code is behind a Cargo feature. The first attempt failed usefully — Cargo feature unification switched `unix-fs` back on through a capability crate's default dependency on `anyflow-core`, which a grep-only gate would have missed. [Evidence](../../sprints/wave-0-platform-abstraction.md)
 
 ### POC-CORE-02 — `IdentitySigner` seam is behaviour-preserving
 
@@ -138,7 +138,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 - **✓** Every existing test passes unchanged, including `core/tests/identity_and_store.rs` (which asserts a 0644 key is refused) and the full `daemon/tests/e2e.rs`. Interop with the shipping Android app still works.
 - **✗** rustls's resolver path changes handshake behaviour, or the mode check cannot be expressed on the trait.
 - **🔒** `require_private_mode`'s hard failure must survive verbatim. This is the single highest-risk refactor in Wave 0 because it touches the code that decides identity.
-- **⏱** 3 d · **⇢** none · **R** _pending_
+- **⏱** 3 d · **⇢** none · **R** **PASS — 2026-08-31.** Every existing test passes unmodified, `require_private_mode`'s hard failure verbatim included. Beyond the success criterion, four complete pinned TLS 1.3 handshakes now run from a provider holding no key bytes: server-side, client-side, both-ends non-exportable, and a rejection case asserting the failure comes from `PinnedServerCertVerifier` during the handshake. **Android interop is not covered** — no device was attached (G6). [Evidence](../../sprints/wave-0-platform-abstraction.md)
 
 ### POC-CORE-03 — `ControlTransport` seam
 
@@ -149,7 +149,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 - **✓** `daemon/tests/control.rs` passes unchanged; the GUI builds without the daemon crate.
 - **✗** The protocol turns out to depend on Unix semantics (it should not — it is newline-delimited JSON).
 - **🔒** The new crate must not weaken the "local only, never reachable from the network" property stated in `control.rs`.
-- **⏱** 2 d · **⇢** none · **R** _pending_
+- **⏱** 2 d · **⇢** none · **R** **PASS — 2026-08-31.** `daemon/tests/control.rs` passes unmodified; `cargo tree -p anyflow-gui | grep -c anyflow-daemon` → 0, likewise for the CLI. The trait carries the `BindError::AlreadyOwned` contract the Windows named-pipe mitigation needs, and the Linux implementation honours it. A latent defect was fixed on the way: `bind` used to unlink a live socket. [Evidence](../../sprints/wave-0-platform-abstraction.md)
 
 ---
 
@@ -519,6 +519,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 | **VM?** | ✅ GitHub-hosted `windows-latest` has MSVC |
 | **Hardware?** | None beyond a CI runner |
 | **Blocks** | Wave 0 acceptance (G3), CI-001 |
+| **Result** | ✅ **PASS — 2026-09-01.** Green on a GitHub-hosted `windows-2025-vs2026` runner (Windows Server 2025 10.0.26100), `rustc 1.98.0` with **`host: x86_64-pc-windows-msvc`**, `cargo 1.98.0`, Visual Studio Enterprise 2026 18.9.12112.369. The specified `cargo check --no-default-features --target x86_64-pc-windows-msvc` over the six portable crates is clean; the same six also **build**, and their portable test targets link — 14 MSVC executables. `ring` was compiled by MSVC (`ring_core_0_17_14_.lib`), not substituted. The boundary was additionally asserted on the **resolved** dependency graph (87 packages, no platform crate, no `unix-fs`/`linux-backends`/`upower`), because the failure POC-CORE-01 actually hit was Cargo feature unification, which a source grep cannot see. `anyflow-runtime` excluded as specified. 12/12 steps `success`, no `continue-on-error`. **This is CI-001**, permanent on PRs to `main`/`develop`. [Run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649) · commit `cfd33f6` · [full evidence](../../sprints/wave-0-platform-abstraction.md) |
 | **Class** | **P0 — architecture blocking** |
 
 ### POC-LINUX-05 — `wl-copy --sensitive` on real Debian/Ubuntu 🆕

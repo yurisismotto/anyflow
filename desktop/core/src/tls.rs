@@ -44,7 +44,7 @@ use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 
 use crate::error::{Error, Result};
 use crate::fingerprint::Fingerprint;
-use crate::identity::LocalIdentity;
+use crate::identity::IdentityProvider;
 
 /// Only TLS 1.3. Not a runtime toggle, and not overridable by a peer.
 static TLS13_ONLY: &[&rustls::SupportedProtocolVersion] = &[&rustls::version::TLS13];
@@ -278,16 +278,24 @@ impl ClientCertVerifier for RecordingClientCertVerifier {
 // ---------------------------------------------------------------------------
 
 /// Server config: TLS 1.3 only, mandatory client certificates.
-pub fn server_config(identity: &LocalIdentity) -> Result<Arc<rustls::ServerConfig>> {
+///
+/// The certificate and its key arrive through a rustls *resolver* rather than
+/// as PKCS#8 bytes. That is the entire portability change in this file: a
+/// `CertifiedKey` holds an `Arc<dyn SigningKey>`, which a TPM, a Secure
+/// Enclave or an Android Keystore can supply and which no hardware keystore
+/// could ever export as bytes. Nothing else here moves — `TLS13_ONLY`, both
+/// pinning verifiers, `verify_tls13_signature`, ALPN and
+/// `send_tls13_tickets = 0` are untouched.
+pub fn server_config<I: IdentityProvider + ?Sized>(
+    identity: &I,
+) -> Result<Arc<rustls::ServerConfig>> {
     let mut config = rustls::ServerConfig::builder_with_provider(provider())
         .with_protocol_versions(TLS13_ONLY)
         .map_err(Error::Tls)?
         .with_client_cert_verifier(Arc::new(RecordingClientCertVerifier::new()))
-        .with_single_cert(
-            vec![identity.certificate_der().clone()],
-            identity.rustls_private_key(),
-        )
-        .map_err(Error::Tls)?;
+        .with_cert_resolver(Arc::new(rustls::sign::SingleCertAndKey::from(
+            identity.certified_key(),
+        )));
 
     // Both protocols are offered on one listener. Which one a connection is
     // carrying is decided by ALPN during the handshake and read back with
@@ -305,8 +313,8 @@ pub fn server_config(identity: &LocalIdentity) -> Result<Arc<rustls::ServerConfi
 }
 
 /// Client config that will accept exactly one server identity.
-pub fn client_config(
-    identity: &LocalIdentity,
+pub fn client_config<I: IdentityProvider + ?Sized>(
+    identity: &I,
     expected_server: Fingerprint,
 ) -> Result<Arc<rustls::ClientConfig>> {
     client_config_with_alpn(identity, expected_server, crate::ALPN_PROTOCOL)
@@ -320,15 +328,15 @@ pub fn client_config(
 /// kind of connection this is. A data stream is emphatically *not* a weaker
 /// connection than a control session; it is the same connection carrying
 /// different traffic.
-pub fn data_stream_client_config(
-    identity: &LocalIdentity,
+pub fn data_stream_client_config<I: IdentityProvider + ?Sized>(
+    identity: &I,
     expected_server: Fingerprint,
 ) -> Result<Arc<rustls::ClientConfig>> {
     client_config_with_alpn(identity, expected_server, crate::ALPN_DATA_PROTOCOL)
 }
 
-fn client_config_with_alpn(
-    identity: &LocalIdentity,
+fn client_config_with_alpn<I: IdentityProvider + ?Sized>(
+    identity: &I,
     expected_server: Fingerprint,
     alpn: &[u8],
 ) -> Result<Arc<rustls::ClientConfig>> {
@@ -337,11 +345,11 @@ fn client_config_with_alpn(
         .map_err(Error::Tls)?
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(PinnedServerCertVerifier::new(expected_server)))
-        .with_client_auth_cert(
-            vec![identity.certificate_der().clone()],
-            identity.rustls_private_key(),
-        )
-        .map_err(Error::Tls)?;
+        // Same seam as the server side: a resolver, not a private key. See
+        // `server_config`.
+        .with_client_cert_resolver(Arc::new(rustls::sign::SingleCertAndKey::from(
+            identity.certified_key(),
+        )));
 
     config.alpn_protocols = vec![alpn.to_vec()];
     Ok(Arc::new(config))

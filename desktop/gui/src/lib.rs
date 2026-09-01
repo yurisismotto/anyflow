@@ -21,7 +21,7 @@ use gtk::glib;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use anyflow_daemon::control::{Request, Response};
+use anyflow_control::{Request, Response};
 
 const APP_ID: &str = "io.github.yurisismotto.anyflow";
 
@@ -147,10 +147,10 @@ impl Page {
 /// are different situations and the UI must not conflate them.
 #[derive(Default)]
 pub struct DaemonState {
-    pub status: Option<anyflow_daemon::control::StatusReport>,
-    pub devices: Option<Vec<anyflow_daemon::control::DeviceReport>>,
-    pub transfers: Option<Vec<anyflow_daemon::control::TransferReport>>,
-    pub clipboard: Option<anyflow_daemon::control::ClipboardStatusReport>,
+    pub status: Option<anyflow_control::StatusReport>,
+    pub devices: Option<Vec<anyflow_control::DeviceReport>>,
+    pub transfers: Option<Vec<anyflow_control::TransferReport>>,
+    pub clipboard: Option<anyflow_control::ClipboardStatusReport>,
     /// Set when the daemon could not be reached at all.
     pub error: Option<String>,
 }

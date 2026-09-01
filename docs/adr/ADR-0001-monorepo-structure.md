@@ -22,7 +22,8 @@ that both builds compile directly:
 anyflow/
 ├── protocol/proto/          # single source of truth, compiled by both sides
 ├── desktop/                 # Rust workspace
-│   ├── proto/  core/  daemon/  cli/  capabilities/  gui/
+│   ├── proto/  core/  control/  runtime/  platform-linux/
+│   ├── daemon/  cli/  gui/  capabilities/
 ├── android/                 # Gradle project
 ├── browser-extension/       # placeholder
 ├── packaging/fedora/
@@ -33,6 +34,13 @@ The Rust side is a Cargo workspace rooted at `desktop/`, with crate
 directories named for their role (`daemon/`, `cli/`) rather than prefixed
 (`anyflow-daemon/`), so the tree matches the intended layout while staying
 idiomatic Cargo.
+
+Wave 0 added `control/`, `runtime/` and `platform-linux/` **alongside** what
+was already there, rather than reshuffling everything under a `crates/`
+directory. The alternative was considered and rejected as churn with no
+functional gain: `desktop/` already contains only Rust, and every path in every
+existing document points at the current layout. See
+[the Wave 0 sprint report](../sprints/wave-0-platform-abstraction.md).
 
 `android/app/build.gradle.kts` points its proto source set at
 `../../protocol/proto`, and `desktop/proto/build.rs` compiles the same files.

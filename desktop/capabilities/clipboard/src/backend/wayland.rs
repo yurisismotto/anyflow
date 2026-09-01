@@ -81,11 +81,42 @@ impl WatchSource {
     }
 }
 
+/// Whether this system's `wl-copy` understands `--sensitive`.
+///
+/// Not a version check. Fedora ships `2.2.1^git20251124`, which *has* the
+/// flag despite the version number, while Debian 13's and every current
+/// Ubuntu LTS's `2.2.1` does not — so a `>= 2.3` dependency would exclude a
+/// working system and admit a broken one. Ask the tool (PLAT-DEC-013).
+#[derive(Debug, Clone)]
+pub enum SensitiveSupport {
+    /// `wl-copy --help` lists the option.
+    Supported,
+    /// It does not, and here is what to do about it.
+    Unsupported(String),
+}
+
+impl SensitiveSupport {
+    fn as_result(&self) -> Result<(), String> {
+        match self {
+            Self::Supported => Ok(()),
+            Self::Unsupported(why) => Err(why.clone()),
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            Self::Supported => "yes",
+            Self::Unsupported(_) => "no",
+        }
+    }
+}
+
 /// Clipboard access for a Wayland session.
 pub struct WaylandBackend {
     /// `None` when the helper binaries are missing; carries why.
     tools: Result<(), String>,
     watch: WatchSource,
+    sensitive: SensitiveSupport,
 }
 
 impl WaylandBackend {
@@ -110,14 +141,25 @@ impl WaylandBackend {
             detect_watch_source()
         };
 
+        let sensitive = if tools.is_err() {
+            SensitiveSupport::Unsupported("wl-clipboard is not installed".to_string())
+        } else {
+            probe_sensitive()
+        };
+
         tracing::info!(
             backend = "wl-clipboard",
             available = tools.is_ok(),
             watch = %watch.describe(),
+            sensitive = sensitive.describe(),
             "clipboard backend"
         );
 
-        Self { tools, watch }
+        Self {
+            tools,
+            watch,
+            sensitive,
+        }
     }
 
     /// Builds a backend with an explicit watch source. Tests only.
@@ -126,11 +168,26 @@ impl WaylandBackend {
         Self {
             tools: Ok(()),
             watch,
+            sensitive: SensitiveSupport::Supported,
+        }
+    }
+
+    /// Builds a backend with an explicit `--sensitive` verdict. Tests only.
+    #[doc(hidden)]
+    pub fn with_sensitive_support(sensitive: SensitiveSupport) -> Self {
+        Self {
+            tools: Ok(()),
+            watch: WatchSource::None("not probed in this test".into()),
+            sensitive,
         }
     }
 
     pub fn watch_source(&self) -> &WatchSource {
         &self.watch
+    }
+
+    pub fn sensitive_source(&self) -> &SensitiveSupport {
+        &self.sensitive
     }
 
     /// Runs `wl-paste` once, for one MIME type.
@@ -261,6 +318,25 @@ impl ClipboardBackend for WaylandBackend {
         let mut command = Command::new(WL_COPY);
         command.arg("--type").arg(TEXT_MIME);
         if sensitive {
+            // The clip is asked to be marked, and this system may not be able
+            // to mark it. Refuse, and say why.
+            //
+            // The alternative — write it without the flag and warn — was
+            // considered and rejected. A `sensitive_hint` clip is, by
+            // construction, the one the user least wants persisted in a
+            // clipboard-history manager, so silently downgrading turns a
+            // visible failure into an invisible privacy regression. Refusing
+            // is fail-closed, which is the right direction; what was wrong
+            // before Wave 0 was only that nothing explained it
+            // (PLAT-DEC-013).
+            self.sensitive.as_result().map_err(|why| {
+                BackendError::Unavailable(format!(
+                    "this clip is marked sensitive and {why} It was NOT written \
+                     to the clipboard: writing it unmarked would leave a \
+                     password in your clipboard manager's history without \
+                     telling you."
+                ))
+            })?;
             // Asks clipboard managers not to keep this in their history. A
             // hint to the desktop, exactly as EXTRA_IS_SENSITIVE is on
             // Android — not enforcement, and nothing depends on it.
@@ -334,9 +410,18 @@ impl ClipboardBackend for WaylandBackend {
         }
     }
 
+    fn sensitive_support(&self) -> std::result::Result<(), String> {
+        self.tools.clone()?;
+        self.sensitive.as_result()
+    }
+
     fn describe(&self) -> String {
         match &self.tools {
-            Ok(()) => format!("wl-clipboard; watch: {}", self.watch.describe()),
+            Ok(()) => format!(
+                "wl-clipboard; watch: {}; sensitive marking: {}",
+                self.watch.describe(),
+                self.sensitive.describe()
+            ),
             Err(why) => format!("wl-clipboard unavailable ({why})"),
         }
     }
@@ -381,6 +466,53 @@ fn detect_watch_source() -> WatchSource {
              protocol, and the Xwayland fallback is not usable either ({why}). \
              Clipboard auto-send cannot run; manual send still works."
         )),
+    }
+}
+
+/// Asks `wl-copy` whether it understands `--sensitive`.
+///
+/// `wl-copy --help` prints its option list and needs no compositor, so this
+/// is cheap, side-effect-free and safe behind a lock screen — unlike actually
+/// running `wl-copy --sensitive`, which would set the clipboard.
+///
+/// The alternative, parsing `--version`, is refuted by the evidence: Fedora's
+/// `2.2.1^git20251124` has the flag and Debian's `2.2.1` does not.
+fn probe_sensitive() -> SensitiveSupport {
+    use std::process::Command as SyncCommand;
+
+    let output = SyncCommand::new(WL_COPY)
+        .arg("--help")
+        .stdin(Stdio::null())
+        .output();
+
+    let text = output.ok().map(|out| {
+        // Merged, because some builds print usage on stderr and some on
+        // stdout, and which one is not the question being asked.
+        let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&out.stderr));
+        text
+    });
+    probe_sensitive_from_output(text)
+}
+
+/// The verdict, given whatever `wl-copy --help` printed.
+///
+/// Split out so the decision is testable without a `wl-copy` of either
+/// vintage on the machine running the tests — which matters, because the
+/// development machine is precisely the one where this cannot be reproduced.
+fn probe_sensitive_from_output(help: Option<String>) -> SensitiveSupport {
+    const REMEDY: &str = "this system\'s wl-copy does not support marking a \
+         clip sensitive. `--sensitive` was added in wl-clipboard 2.3.0; \
+         upgrade the wl-clipboard package to honour sensitive clips.";
+
+    match help {
+        Some(text) if text.contains("--sensitive") => SensitiveSupport::Supported,
+        Some(_) => SensitiveSupport::Unsupported(REMEDY.to_string()),
+        // Could not run it at all. Being unable to prove support is not the
+        // same as proving it, so the safe answer is "no".
+        None => {
+            SensitiveSupport::Unsupported(format!("{REMEDY} (wl-copy could not be run to check)"))
+        }
     }
 }
 
@@ -509,6 +641,7 @@ mod tests {
         let backend = WaylandBackend {
             tools: Err("wl-clipboard is not installed".into()),
             watch: WatchSource::None("no tools".into()),
+            sensitive: SensitiveSupport::Unsupported("no tools".into()),
         };
         assert!(matches!(
             backend.read_text().await,
@@ -524,6 +657,121 @@ mod tests {
             Err(BackendError::Unavailable(_))
         ));
         assert!(backend.describe().contains("unavailable"));
+    }
+
+    // -----------------------------------------------------------------
+    // PLAT-DEC-013 — `wl-copy --sensitive` compatibility
+    // -----------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_backend_that_can_mark_sensitive_writes_the_flag_and_says_so() {
+        let backend = WaylandBackend::with_sensitive_support(SensitiveSupport::Supported);
+        assert_eq!(backend.sensitive_support(), Ok(()));
+        assert!(backend.describe().contains("sensitive marking: yes"));
+    }
+
+    #[tokio::test]
+    async fn an_old_wl_copy_refuses_a_sensitive_clip_and_names_the_remedy() {
+        // wl-clipboard 2.2.1 — Debian 13 and every current Ubuntu LTS. Its
+        // unknown-option path is `print_usage(stderr); exit(1)`, so before
+        // Wave 0 this produced an opaque "wl-copy exited with 1" for exactly
+        // the class of clip that carries passwords.
+        let backend = WaylandBackend::with_sensitive_support(SensitiveSupport::Unsupported(
+            "this system\'s wl-copy does not support marking a clip sensitive. \
+             `--sensitive` was added in wl-clipboard 2.3.0; upgrade the \
+             wl-clipboard package to honour sensitive clips."
+                .into(),
+        ));
+
+        let text = ClipboardText::validate("hunter2").expect("valid");
+        let err = backend
+            .write_text(&text, true)
+            .await
+            .expect_err("a sensitive clip must not be written unmarked");
+
+        // Fail-closed, and explained: cause and remedy, no clipboard content.
+        let message = err.to_string();
+        assert!(matches!(err, BackendError::Unavailable(_)), "{err:?}");
+        assert!(message.contains("wl-clipboard 2.3.0"), "{message}");
+        assert!(message.contains("NOT written"), "{message}");
+        assert!(!message.contains("hunter2"), "no content in an error");
+    }
+
+    #[test]
+    fn an_old_wl_copy_does_not_claim_it_can_mark_a_clip() {
+        // The capability must not lie about what it supports: `anyflow
+        // clipboard status` has to be able to tell the user before they turn
+        // anything on.
+        let backend = WaylandBackend::with_sensitive_support(SensitiveSupport::Unsupported(
+            "wl-clipboard 2.3.0 needed".into(),
+        ));
+        assert!(backend.sensitive_support().is_err());
+        assert!(backend.describe().contains("sensitive marking: no"));
+    }
+
+    #[test]
+    fn an_unrunnable_wl_copy_is_reported_as_unsupported_not_as_supported() {
+        // "Could not prove support" is not "supported". The probe fails
+        // closed, in the same direction as the write path.
+        match probe_sensitive_from_output(None) {
+            SensitiveSupport::Unsupported(why) => assert!(why.contains("2.3.0"), "{why}"),
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_probe_reads_the_option_list_rather_than_a_version_number() {
+        // wl-clipboard 2.2.1\u2019s real option list, from its `long_options`
+        // table. No `sensitive` entry.
+        let old = "Usage: wl-copy [options] text to copy\n\
+                   \t-o, --paste-once\tOnly serve one paste request.\n\
+                   \t-f, --foreground\tStay in the foreground.\n\
+                   \t-c, --clear\tInstead of copying, clear the clipboard.\n\
+                   \t-p, --primary\tUse the primary selection.\n\
+                   \t-n, --trim-newline\tDo not copy the trailing newline.\n\
+                   \t-t, --type mime/type\tSet the MIME type.\n\
+                   \t-s, --seat seat-name\tPick the seat.\n";
+        assert!(matches!(
+            probe_sensitive_from_output(Some(old.to_string())),
+            SensitiveSupport::Unsupported(_)
+        ));
+
+        // 2.3.0 gained the option. Fedora\u2019s `2.2.1^git20251124` snapshot
+        // also has it, which is precisely why the version string is the wrong
+        // thing to look at.
+        let new = format!("{old}\t--sensitive\tMark the clipboard content as sensitive.\n");
+        assert!(matches!(
+            probe_sensitive_from_output(Some(new)),
+            SensitiveSupport::Supported
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_clip_is_unaffected_by_the_sensitive_verdict() {
+        // The regression that matters most: nothing about a normal write may
+        // change because this system\u2019s wl-copy is old. Proved without a
+        // compositor by checking that the refusal is reached only for
+        // `sensitive = true`; the write path beyond it is identical.
+        let backend = WaylandBackend::with_sensitive_support(SensitiveSupport::Unsupported(
+            "old wl-copy".into(),
+        ));
+        let text = ClipboardText::validate("ordinary").expect("valid");
+
+        assert!(
+            backend.write_text(&text, true).await.is_err(),
+            "a sensitive clip must be refused"
+        );
+
+        // A non-sensitive write does not consult the verdict at all. It still
+        // needs a real compositor to succeed, so what is asserted is that the
+        // failure is *not* the sensitive refusal.
+        if let Err(e) = backend.write_text(&text, false).await {
+            assert!(
+                !e.to_string().contains("sensitive"),
+                "an ordinary write must not be refused for the sensitive \
+                 reason, got: {e}"
+            );
+        }
     }
 
     #[test]

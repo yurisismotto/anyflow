@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | **Title** | Wave 0 — Core platform abstraction: an implementable specification |
-| **Status** | Research / Draft — **specification, not implementation.** No code was written |
+| **Status** | **IMPLEMENTED AND CERTIFIED** — `feature/core-platform-abstraction-v1`, commit `cfd33f6`. **WAVE 0 CERTIFIED 2026-09-01**: all 12 acceptance gates and all four P0 PoCs pass. See [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
 | **Last reviewed** | 2026-08-31 |
 | **Sprint** | `research/platform-expansion-verification-v1` |
 | **Scope** | The refactor that makes AnyFlow's Rust workspace portable, without adding a platform |
@@ -538,6 +538,14 @@ cargo check -p anyflow-proto -p anyflow-core -p anyflow-control \
 Windows behaviour is V-12/POC-WIN-02 — unresolved and not Wave 0's problem. Adding it later is a
 one-line CI change.
 
+> **Executed 2026-09-01 — PASS.** This gate is now
+> `.github/workflows/portable-windows-msvc.yml` (CI-001), green on a GitHub-hosted
+> `windows-2025-vs2026` runner with `host: x86_64-pc-windows-msvc`:
+> [run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649),
+> commit `cfd33f6`. Evidence — runner, toolchain, exact commands, dependency graph and `ring`'s
+> MSVC objects — is recorded once, in
+> [the sprint report §17](../../sprints/wave-0-platform-abstraction.md).
+
 **Distinguish clearly**, because conflating them is how a project convinces itself a platform works:
 
 | | Proves |
@@ -684,7 +692,7 @@ content and should not wait for the refactor to land.
 
 | Job | When | Proves |
 | --- | --- | --- |
-| **CI-001** — Windows compile gate (§10.3) | **After** Wave 0 lands green | A `std::os::unix` call in a portable crate fails the PR |
+| **CI-001** — Windows compile gate (§10.3) · ✅ **landed and green**, `.github/workflows/portable-windows-msvc.yml` | **After** Wave 0 lands green | A `std::os::unix` call in a portable crate fails the PR |
 | **CI-002** — portable-crate purity grep | With CI-001 | Cheap backstop for CI-001 |
 | **CI-003** — GUI against Ubuntu 24.04 libadwaita 1.5 | Wave 2 | The floor is a contract, not a coincidence (R-11) |
 | macOS compile gate | Wave 7 | Deferred — needs a macOS runner |
@@ -738,9 +746,62 @@ have blocked Wave 0 on POC-WIN-04 — a PoC needing Windows hardware and a TPM. 
 seam against its own documentation removes that dependency: the architecture question is answered,
 and POC-WIN-04 now proves *Windows integration* in Wave 5, where it belongs.
 
+### Implementation outcome — 2026-08-31
+
+Wave 0 was implemented against this specification on
+`feature/core-platform-abstraction-v1`. Full evidence:
+**[docs/sprints/wave-0-platform-abstraction.md](../../sprints/wave-0-platform-abstraction.md)**.
+
+| | |
+| --- | --- |
+| Rust tests | 375 passed, 0 failed (366 + 9 `real_backend` on an unlocked seat; baseline 303) |
+| Android tests | 232 JVM + 21 instrumented (SM-X620), 0 failed; `android/**` unchanged |
+| Official gates | **12 of 12 PASS** (§12) |
+| P0 PoCs | POC-CORE-01 **PASS** · -02 **PASS** · -03 **PASS** · -04 **PASS** ([run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649)) |
+| Status | **WAVE 0 CERTIFIED — 2026-09-01** |
+
+**What the spec got right.** The identity refactor was two call sites, exactly
+as §6.2 predicted; `rustls::sign::SingleCertAndKey` implements both resolver
+traits, so no custom resolver was needed. Nine steps, nine landings, no
+protocol change, no `.proto` edit, no Android edit.
+
+**Three amendments the implementation forced**, recorded so the next wave
+inherits the corrected version rather than this one:
+
+1. **The Unix filesystem adapter stayed in `anyflow-core`**, behind the
+   default-on `unix-fs` feature, rather than moving to `anyflow-linux`. §5
+   places it in the adapter, but `Store::open(dir)` is called from
+   `core/tests/identity_and_store.rs`, and **CC-5** forbids editing a test to
+   make the refactor pass. This specification's own compile gate is written
+   `--no-default-features`, which is exactly the shape the feature provides,
+   so the boundary the gate checks is unchanged.
+2. **`ControlTransport` lives in `anyflow-control`, not `anyflow-runtime`.**
+   §6.4 places it in the runtime, but `anyflow-gui` and `anyflow-cli` need the
+   client half of the endpoint, and reaching it through the runtime would have
+   re-created audit finding **C1** — the GUI inheriting mDNS, UPower and every
+   capability crate for some struct definitions. The trait needs only tokio's
+   `AsyncRead`/`AsyncWrite`, so `anyflow-control` stays dependency-light.
+3. **A seventh trait, `IdentityBackend`, was added.** Not a seventh concern:
+   it is the *creation* half of `IdentityProvider`, split out because
+   `create()` is where hardware differs most. Folding it in would have forced
+   an `export_secret()` method, reintroducing exportability into the one trait
+   that exists to remove it.
+
+**One defect this specification did not know about**, found while moving the
+control socket: `server::bind` removed an existing socket file
+unconditionally, reasoning that *"a second live daemon would have failed its
+own port bind first"* — but the port bind happens **after** it in `main`. Fixed
+with a live-owner probe and `BindError::AlreadyOwned`, which §6.4 already
+required for the Windows named-pipe mitigation.
+
+**Two existing tests were modified**, against CC-5, both because §7 items 4–5
+*mandate* adding `key_backing` and bumping `SCHEMA_VERSION`, and those two
+tests are the ones that notice a schema change. Neither assertion changed. Both
+are itemised in the sprint report §8.
+
 ### Declaration
 
-**WAVE 0 READY.**
+**WAVE 0 READY.** *(Implemented; see above.)*
 
 With one condition that is a sequencing note rather than a blocker:
 

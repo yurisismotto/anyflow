@@ -1,7 +1,20 @@
-//! The daemon's local control interface.
+//! The local control interface: what the CLI and the GUI say to the agent.
 //!
-//! A newline-delimited JSON protocol over a Unix domain socket in
-//! `$XDG_RUNTIME_DIR/anyflow/control.sock`.
+//! A newline-delimited JSON protocol. **This crate is the contract and
+//! nothing else**: request and response types, their `serde` derives, and the
+//! shape of the transport that carries them. It performs no I/O, opens no
+//! socket, and knows nothing about the daemon.
+//!
+//! # Why it is its own crate
+//!
+//! Before Wave 0, `anyflow-cli` and `anyflow-gui` both depended on
+//! `anyflow-daemon` (with `default-features = false`) purely to reuse these
+//! `serde` structs. Sharing them is right — the GUI must not be able to drift
+//! from the socket contract — but the cost was that a GTK application
+//! inherited every Linux dependency of the daemon, including the capability
+//! crates, mDNS and UPower, to obtain some struct definitions. Splitting the
+//! contract out keeps the sharing and drops the inheritance (audit finding
+//! C1).
 //!
 //! # Why a Unix socket and not D-Bus
 //!
@@ -12,11 +25,14 @@
 //! the directory's 0700 mode, needs no bus, and is trivial to drive from a
 //! test. See ADR-0003.
 //!
+//! Where the socket *is* — and, on another platform, what it even is — lives
+//! behind [`transport::ControlTransport`] and is the adapter's business.
+//!
 //! # Why this is not "remote execution"
 //!
-//! This socket is local-only and is never reachable from the network. No
+//! This endpoint is local-only and is never reachable from the network. No
 //! protocol message from a peer can reach it. Peers cannot invoke any command
-//! here — this Sprint has no remote command execution of any kind.
+//! here — there is no remote command execution of any kind.
 
 use serde::{Deserialize, Serialize};
 
@@ -191,12 +207,41 @@ pub struct ClipboardStatusReport {
     /// True when this session can report clipboard changes, which is what
     /// `auto_send` needs. False is a normal, documented state (GNOME).
     pub watch_available: bool,
+    /// True when this session can mark a clip *sensitive*.
+    ///
+    /// False is not a normal state, it is a degraded one: a clip arriving
+    /// with `sensitive_hint` set will be refused rather than written
+    /// unmarked, because writing a password into a clipboard-history manager
+    /// without saying so is the worse outcome (PLAT-DEC-013). Reported so the
+    /// capability does not have to lie about what it supports — `wl-copy`
+    /// gained `--sensitive` only in wl-clipboard 2.3.0.
+    ///
+    /// `#[serde(default)]` because an older `anyflow` binary talking to a
+    /// newer agent, or the reverse, must not fail to parse a status report
+    /// over a display field.
+    #[serde(default = "default_true")]
+    pub sensitive_available: bool,
+    /// Why sensitive marking is unavailable, when it is. Empty otherwise.
+    #[serde(default)]
+    pub sensitive_detail: String,
     /// How many events and suppression entries the caches hold. Present so
     /// the bounded-growth property is observable rather than merely claimed.
     pub event_cache_entries: usize,
     pub suppression_cache_entries: usize,
     pub peers: Vec<ClipboardPeerReport>,
     pub pending: Vec<PendingClipReport>,
+}
+
+/// Backwards-compatible default for [`StatusReport::key_backing`]: every
+/// identity written before Wave 0 is a software key, because no other backing
+/// has ever been implemented.
+fn default_key_backing() -> String {
+    "software".to_string()
+}
+
+/// Backwards-compatible default for [`ClipboardStatusReport::sensitive_available`].
+fn default_true() -> bool {
+    true
 }
 
 /// One device's clipboard grant and policy.
@@ -277,6 +322,16 @@ pub struct StatusReport {
     pub device_id: String,
     pub fingerprint: String,
     pub fingerprint_short: String,
+    /// How this device's private key is protected: `software`, `tpm`,
+    /// `secure-enclave`, `keystore`.
+    ///
+    /// Shown here and **only** here. It is never advertised to a peer: a
+    /// device's claim about its own key storage is unverifiable by the other
+    /// end, and an unverifiable self-report is not a security property
+    /// (PLAT-DEC-012). Displaying it locally is the honest use — it tells the
+    /// owner of *this* machine what protects *their* key.
+    #[serde(default = "default_key_backing")]
+    pub key_backing: String,
     pub listen_port: u16,
     /// Which address families the listener actually accepts on, e.g.
     /// `IPv4+IPv6`. Reported because the mDNS record is derived from it.
@@ -351,29 +406,4 @@ pub struct DeviceReport {
 /// the wire.
 pub const BATTERY_STALE_AFTER_SECS: u64 = 120;
 
-/// Path of the control socket.
-///
-/// `XDG_RUNTIME_DIR` is per-user and mode 0700, so the socket is not
-/// reachable by other local users. If it is unset (an unusual login), we fall
-/// back to a per-uid path under `/tmp` and create it 0700 ourselves.
-pub fn control_socket_path() -> std::path::PathBuf {
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(format!("/tmp/anyflow-{}", nix_uid())));
-    base.join("anyflow").join("control.sock")
-}
-
-fn nix_uid() -> u32 {
-    // Avoids a `libc`/`nix` dependency for one number. `/proc/self/status`
-    // is always present on Linux, which is the only platform this daemon
-    // targets.
-    std::fs::read_to_string("/proc/self/status")
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find_map(|l| l.strip_prefix("Uid:"))
-                .and_then(|l| l.split_whitespace().next().map(str::to_string))
-        })
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0)
-}
+pub mod transport;

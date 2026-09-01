@@ -243,9 +243,9 @@ fn store_refuses_to_load_a_world_readable_private_key() {
     std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o644))
         .expect("loosen permissions");
 
-    let err = Store::open(dir.path())
-        .err()
-        .expect("must refuse a readable key");
+    // `expect_err`, not `.err().expect()`: clippy::err_expect flags the
+    // latter, and it was already doing so before Wave 0.
+    let err = Store::open(dir.path()).expect_err("must refuse a readable key");
     assert!(
         format!("{err}").contains("must not be group- or world-accessible"),
         "unexpected error: {err}"
@@ -341,13 +341,20 @@ fn a_newer_schema_version_is_refused_rather_than_misread() {
 
     let path = dir.path().join("state.json");
     let raw = std::fs::read_to_string(&path).expect("read");
-    let bumped = raw.replace("\"schema_version\": 1", "\"schema_version\": 99");
+    // Written against whatever the current schema is, rather than against the
+    // literal `1`, so that a future schema bump does not silently turn this
+    // test into a no-op that passes because the replacement never happened.
+    let bumped = raw.replace(
+        &format!(
+            "\"schema_version\": {}",
+            anyflow_core::store::SCHEMA_VERSION
+        ),
+        "\"schema_version\": 99",
+    );
     assert_ne!(raw, bumped, "schema_version must be present in state.json");
     std::fs::write(&path, bumped).expect("write");
 
-    let err = Store::open(dir.path())
-        .err()
-        .expect("must refuse a future schema");
+    let err = Store::open(dir.path()).expect_err("must refuse a future schema");
     assert!(format!("{err}").contains("newer than supported"), "{err}");
 }
 
@@ -376,6 +383,13 @@ fn store_never_persists_message_or_clipboard_content() {
         vec![
             "certificate_der_b64",
             "device_id",
+            // Added by Wave 0. Confirmed against this test's own instruction:
+            // it holds `"software"` — an enum naming how the private key is
+            // protected — and no user content. It exists so that "this device
+            // never had hardware backing" can be told apart from "the
+            // hardware backing has gone away", which is the difference
+            // between a legitimate software key and a refusal to start.
+            "key_backing",
             "peers",
             "schema_version",
             "settings"

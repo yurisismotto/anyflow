@@ -1,0 +1,24 @@
+[package]
+name = "anyflow-control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints.rust]
+# Portable, and part of the security boundary between the desktop UI and the
+# agent: `unsafe` is forbidden outright. See the workspace manifest.
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+async-trait = "0.1"
+# The `AsyncRead`/`AsyncWrite` traits only — no runtime, no `net`, no `fs`.
+# They are here rather than in `anyflow-runtime` so that `anyflow-gui` and
+# `anyflow-cli` can reach a platform transport without depending on the
+# runtime, which is the whole point of splitting this crate out (C1).
+tokio = { version = "1", default-features = false, features = ["io-util"] }

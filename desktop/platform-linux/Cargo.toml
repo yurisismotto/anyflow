@@ -1,0 +1,31 @@
+[package]
+name = "anyflow-linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints.rust]
+# An adapter crate, so `unsafe` is `deny` rather than `forbid`: a future
+# platform binding may genuinely need FFI, and `forbid` cannot be relaxed by a
+# local `#[allow]`. `deny` means any `unsafe` here needs a deliberate,
+# reviewable `#[allow(unsafe_code)]` with a justification comment.
+#
+# There is none today. This crate contains no `unsafe`.
+unsafe_code = "deny"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+anyflow-core = { version = "0.1.0", path = "../core", features = ["unix-fs"] }
+anyflow-control = { version = "0.1.0", path = "../control" }
+anyflow-proto = { version = "0.1.0", path = "../proto" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["net", "io-util", "rt"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }

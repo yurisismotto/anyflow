@@ -177,7 +177,7 @@ P3 opportunistic
 
 | ID | Title | Pri | Wave | Type | Description | Acceptance idea | Source |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| CI-001 | Cross-target compile matrix for the portable crates | **P0** | 0 | ci | Turns "someone added a Unix-only call to `anyflow-core`" from a discovery made months later into a failed PR | A PR adding `std::os::unix` to a portable crate fails CI | [22 §8](22-IMPLEMENTATION-ROADMAP.md) |
+| CI-001 | Cross-target compile matrix for the portable crates · ✅ **DONE 2026-09-01** — `.github/workflows/portable-windows-msvc.yml`, green on `windows-2025-vs2026` ([run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649)) | **P0** | 0 | ci | Turns "someone added a Unix-only call to `anyflow-core`" from a discovery made months later into a failed PR | A PR adding `std::os::unix` to a portable crate fails CI | [22 §8](22-IMPLEMENTATION-ROADMAP.md) |
 | CI-002 | Windows and macOS runners | P1 | 5 / 7 | ci | Required for platform tests, packaging and — on macOS — signing and notarization | Per-platform jobs run on every PR | [22 §8](22-IMPLEMENTATION-ROADMAP.md) |
 | CI-003 | Ubuntu 24.04 libadwaita-floor job | P1 | 2 | ci | Noble ships libadwaita **1.5.0** and AnyFlow requires 1.5 — zero margin. A drift would otherwise be invisible until a user reports it | Using a 1.6+ API fails this job | [05 §5.1](05-DEBIAN-UBUNTU-COMPATIBILITY.md) |
 | CI-004 | `cargo audit` in CI | P2 | X | ci | The dependency surface roughly triples with `rustls-cng`, Apple bindings, `windows-sys` and UniFFI | A known-vulnerable dependency fails the build | [19 §7](19-PACKAGING-AND-DISTRIBUTION.md) |

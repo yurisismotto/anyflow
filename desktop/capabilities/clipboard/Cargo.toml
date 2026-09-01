@@ -5,11 +5,37 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[lints]
-workspace = true
+[features]
+# The Linux clipboard backends: the `wl-clipboard` helpers and the Xwayland
+# XFIXES watch. On by default so every existing caller keeps working; with it
+# off this crate is the `clipboard.v1` protocol half and the `ClipboardBackend`
+# trait, with no platform surface — which is what the Wave 0 compile gate
+# checks. `x11rb` is optional for the same reason: an X11 dependency has no
+# business being mandatory in a crate a Windows or macOS adapter will use.
+default = ["linux-backends"]
+linux-backends = ["dep:x11rb"]
+
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Portable, security-critical: `unsafe` is forbidden outright.
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
 
 [dependencies]
-anyflow-core = { version = "0.1.0", path = "../../core" }
+# `default-features = false`: a capability crate needs the protocol half of
+# `anyflow-core`, never its Unix filesystem adapter. Leaving the default on
+# would drag `unix-fs` into every build through feature unification, and the
+# portability gate would then pass for the wrong reason.
+anyflow-core = { version = "0.1.0", path = "../../core", default-features = false }
 anyflow-proto = { version = "0.1.0", path = "../../proto" }
 async-trait = "0.1"
 prost = "0.14"
@@ -28,7 +54,7 @@ tracing = "0.1"
 # that GNOME exposes to an ordinary client — Mutter implements neither
 # `zwlr_data_control_manager_v1` nor `ext_data_control_manager_v1`, so
 # `wl-paste --watch` cannot run there. See ADR-0014.
-x11rb = { version = "0.14", default-features = false, features = ["xfixes"] }
+x11rb = { version = "0.14", default-features = false, features = ["xfixes"], optional = true }
 
 [dev-dependencies]
 serde_json = "1"

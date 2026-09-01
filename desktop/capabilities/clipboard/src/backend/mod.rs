@@ -20,7 +20,12 @@
 //!   yields the clipboard's *current* state rather than a queue of stale
 //!   ones.
 
+/// The Linux backends. Feature-gated: with `linux-backends` off, this module
+/// is the trait and the in-memory implementation, and nothing here names a
+/// display server.
+#[cfg(feature = "linux-backends")]
 pub mod wayland;
+#[cfg(feature = "linux-backends")]
 pub mod x11;
 
 use std::sync::Arc;
@@ -138,7 +143,34 @@ pub trait ClipboardBackend: Send + Sync {
     /// use to skip storing an entry in history. It is a hint to the desktop,
     /// exactly as `EXTRA_IS_SENSITIVE` is a hint on Android: it is not
     /// enforcement and nothing may depend on it.
+    ///
+    /// When `sensitive` is set and [`sensitive_support`] says this backend
+    /// cannot mark a clip, the write **must fail** with an
+    /// [`BackendError::Unavailable`] naming the cause and the remedy. It must
+    /// not quietly write the clip unmarked: a `sensitive_hint` clip is by
+    /// construction the one the user least wants left in a clipboard-history
+    /// manager, so downgrading a visible failure into an invisible privacy
+    /// regression is exactly the wrong trade (PLAT-DEC-013).
+    ///
+    /// [`sensitive_support`]: Self::sensitive_support
     async fn write_text(&self, text: &ClipboardText, sensitive: bool) -> BackendResult<()>;
+
+    /// Whether this backend can mark a clip sensitive on this system.
+    ///
+    /// A pure predicate answered from what was probed at startup: it must not
+    /// perform I/O. `Err` carries a human-readable cause and remedy.
+    ///
+    /// It exists because the answer is **not** a property of the platform.
+    /// `wl-copy` gained `--sensitive` in wl-clipboard 2.3.0, and Debian 13
+    /// and every current Ubuntu LTS ship 2.2.1 — whose unknown-option path is
+    /// `print_usage(stderr); exit(1)`, so passing the flag there does not
+    /// degrade, it fails. Fedora's `2.2.1^git…` snapshot *does* have the flag,
+    /// which is why the version number is the wrong instrument and this probe
+    /// is the right one. The capability must report what is true here rather
+    /// than assume.
+    fn sensitive_support(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
 
     /// Starts watching for changes.
     ///
@@ -173,6 +205,19 @@ pub trait ClipboardBackend: Send + Sync {
 /// also present, because the Wayland clipboard is the real one there and the
 /// X11 view of it is a bridge.
 pub fn detect() -> Arc<dyn ClipboardBackend> {
+    #[cfg(not(feature = "linux-backends"))]
+    return Arc::new(Unsupported {
+        why: "this build has no clipboard backend compiled in".to_string(),
+    });
+
+    #[cfg(feature = "linux-backends")]
+    {
+        detect_linux()
+    }
+}
+
+#[cfg(feature = "linux-backends")]
+fn detect_linux() -> Arc<dyn ClipboardBackend> {
     let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     if wayland {
         return Arc::new(wayland::WaylandBackend::detect());
@@ -224,6 +269,10 @@ impl ClipboardBackend for Unsupported {
         Err(BackendError::Unavailable(self.why.clone()))
     }
 
+    fn sensitive_support(&self) -> std::result::Result<(), String> {
+        Err(self.why.clone())
+    }
+
     fn watch_changes(&self) -> BackendResult<ClipboardWatch> {
         Err(BackendError::Unavailable(self.why.clone()))
     }
@@ -261,6 +310,9 @@ struct MemoryState {
     /// "backend went away" path without a real compositor.
     failure: Option<BackendError>,
     watch_supported: bool,
+    /// Whether this backend can mark a clip sensitive. Settable so a test can
+    /// drive the old-`wl-copy` path without an old `wl-copy`.
+    sensitive_supported: bool,
 }
 
 impl Default for MemoryBackend {
@@ -274,6 +326,7 @@ impl MemoryBackend {
         Self {
             inner: std::sync::Mutex::new(MemoryState {
                 watch_supported: true,
+                sensitive_supported: true,
                 ..MemoryState::default()
             }),
         }
@@ -312,6 +365,12 @@ impl MemoryBackend {
         self.lock().watch_supported = supported;
     }
 
+    /// Makes the backend report that it cannot mark a clip sensitive — the
+    /// wl-clipboard 2.2.1 situation, without a wl-clipboard.
+    pub fn set_sensitive_supported(&self, supported: bool) {
+        self.lock().sensitive_supported = supported;
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, MemoryState> {
         // A poisoned mutex here means a test panicked while holding it; the
         // useful failure is that panic, not a second one from this line.
@@ -338,6 +397,11 @@ impl ClipboardBackend for MemoryBackend {
             let mut state = self.lock();
             if let Some(f) = &state.failure {
                 return Err(f.clone());
+            }
+            if sensitive && !state.sensitive_supported {
+                return Err(BackendError::Unavailable(
+                    "this backend cannot mark a clip sensitive".into(),
+                ));
             }
             state.text = Some(text.clone());
             state.writes.push((text.as_str().to_string(), sensitive));
@@ -370,6 +434,14 @@ impl ClipboardBackend for MemoryBackend {
             Ok(())
         } else {
             Err("watching is disabled".into())
+        }
+    }
+
+    fn sensitive_support(&self) -> std::result::Result<(), String> {
+        if self.lock().sensitive_supported {
+            Ok(())
+        } else {
+            Err("this backend cannot mark a clip sensitive".into())
         }
     }
 }

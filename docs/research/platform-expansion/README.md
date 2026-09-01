@@ -5,12 +5,12 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | Research / Draft — planning only, no implementation |
+| **Status** | Research / Draft — planning. **Wave 0 has since been implemented** from [28](28-WAVE-0-IMPLEMENTATION-SPEC.md); see the note below |
 | **Last reviewed** | 2026-08-31 |
 | **Branch** | `research/platform-expansion-v1`, then `research/platform-expansion-verification-v1` (docs 26–28) |
 | **Scope** | Linux (generic, Fedora, Debian, Ubuntu, GNOME, KDE Plasma, Wayland, X11), Windows 10/11, macOS, Android, iOS/iPadOS |
 | **Decision status** | **Nothing here is Approved.** The strongest status assigned is **READY FOR RFC** — see [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) |
-| **Wave 0** | **READY** — specification in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md) |
+| **Wave 0** | **IMPLEMENTED AND CERTIFIED — 2026-09-01**, commit `cfd33f6` — spec in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md); outcome in [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
 
 ---
 
@@ -25,6 +25,14 @@ The answer to one question:
 It is research, an architecture audit, a feasibility study and a plan. **No source file outside
 this directory was modified.** No protocol, TLS, pairing or capability behaviour was changed. No
 PoC was implemented.
+
+> **Superseded in part, 2026-08-31.** Wave 0 has since been implemented from
+> [28](28-WAVE-0-IMPLEMENTATION-SPEC.md) on `feature/core-platform-abstraction-v1`, and **certified
+> on 2026-09-01** (commit `cfd33f6`). All four P0 PoCs ran and passed. Where this research and the
+> implementation disagree, the
+> **[sprint report](../../sprints/wave-0-platform-abstraction.md)** is the record of what was
+> actually built; [28's implementation outcome](28-WAVE-0-IMPLEMENTATION-SPEC.md) lists the three
+> amendments the code forced on the specification.
 
 Documents **00–25** are Research v1. Documents **26–28** are the external-verification sprint that
 closed it out: every claim Research v1 could not confirm was taken to a primary source, the
@@ -50,8 +58,8 @@ repository was re-audited against the report, and the result is a Wave 0 specifi
 | **Files** | **READY FOR RFC** | Windows rules mostly already present — Research v1's claim refuted. Real gaps: `:` (ADS) and `U+202E` (bidi, **all platforms**) |
 | **Packaging** | **RESEARCHED** | System packages first, Flatpak experimental. **Do not gate on `wl-clipboard >= 2.3`** — Fedora's `2.2.1^git` has the features |
 | **Security** | **VERIFIED** | The model survives intact. **Three defects, one of them present-tense on Linux today** (silent trust-store destruction) |
-| **PoCs** | **POC REQUIRED** | 37 specified. **Four are P0, all Wave 0 acceptance gates — none blocks Wave 0 from starting** |
-| **Wave 0** | **READY** | ≈17 engineer-days, nine PRs, no new hardware needed ([28](28-WAVE-0-IMPLEMENTATION-SPEC.md)) |
+| **PoCs** | **POC REQUIRED** | 37 specified. Four are P0, and **all four now PASS**: POC-CORE-01/02/03, and POC-CORE-04 on a GitHub-hosted Windows MSVC runner ([run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649)) |
+| **Wave 0** | **CERTIFIED** | Commit `cfd33f6` on `feature/core-platform-abstraction-v1`. 375 Rust + 232 Android JVM + 21 instrumented tests green; 12/12 official gates; the six portable crates compile for `x86_64-pc-windows-msvc` on a Windows runner. **Certified means the boundary holds and behaviour is unchanged — not that AnyFlow runs on Windows** ([report](../../sprints/wave-0-platform-abstraction.md)) |
 
 Status vocabulary: **VERIFIED** (closed against a primary source in [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)) ·
 **READY FOR RFC** (evidence sufficient to write the ADR) · **RESEARCHED** (analysis complete, some
@@ -92,7 +100,7 @@ verification outstanding) · **POC REQUIRED** (a decision cannot be made from do
 | 25 | [Implementation backlog](25-IMPLEMENTATION-BACKLOG.md) | Backlog, with P0s tied to wave/decision/risk | Research / Draft | Per item | 01–23 | all |
 | **26** | **[External verification closeout](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)** | **Every `V-nn` closed against a primary source; claims refuted; new defects** | **VERIFIED** | **Primary sources** | 01–25 | — |
 | **27** | **[Architecture decision closeout](27-ARCHITECTURE-DECISION-CLOSEOUT.md)** | **All `PLAT-DEC` revisited; risks and PoCs reprioritised** | **READY FOR RFC ×10** | 26 | 23, 26 | — |
-| **28** | **[Wave 0 implementation spec](28-WAVE-0-IMPLEMENTATION-SPEC.md)** | **Implementable specification for Core Platform Abstraction** | **WAVE 0 READY** | 26, 27 + repo | 01, 02, 26, 27 | **0** |
+| **28** | **[Wave 0 implementation spec](28-WAVE-0-IMPLEMENTATION-SPEC.md)** | **Implementable specification for Core Platform Abstraction** | **WAVE 0 CERTIFIED** | 26, 27 + repo | 01, 02, 26, 27 | **0** |
 
 ---
 

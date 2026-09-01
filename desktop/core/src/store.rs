@@ -26,16 +26,27 @@
 //! See ADR-0006 for the full trade-off and the TPM2 follow-up.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::clipboard_policy::ClipboardPolicy;
 use crate::error::{Error, Result};
 use crate::fingerprint::Fingerprint;
-use crate::identity::LocalIdentity;
+#[cfg(feature = "unix-fs")]
+use crate::identity::SoftwareBacking;
+use crate::identity::{Identity, IdentityBackend, IdentityState, KeyBacking};
+use crate::secret_store::{SecretStore, StoreAccessError};
 
-pub const SCHEMA_VERSION: u32 = 1;
+/// Bumped from 1 to 2 by Wave 0, which added `key_backing`.
+///
+/// Reading is one-way compatible by existing design: [`Store::open_with`]
+/// refuses a `schema_version` *newer* than this one, and a version 1 file has
+/// no `key_backing`, which defaults to [`KeyBacking::Software`] — correct for
+/// every identity that exists today, because no other backing has ever been
+/// implemented. A pre-Wave-0 install therefore upgrades in place: same
+/// identity, same `device_id`, same fingerprint, same peers, no re-pairing.
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// A device this one has paired with.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,21 +106,19 @@ pub struct Settings {
 }
 
 impl Default for Settings {
+    /// The device name here is a placeholder.
+    ///
+    /// Asking the machine what it is called is a platform question —
+    /// `/etc/hostname`, `GetComputerNameEx`, `SCDynamicStoreCopyComputerName`
+    /// — so the real answer arrives through [`StoreConfig::default_device_name`]
+    /// and this value is only ever seen if a caller builds `Settings` by hand.
     fn default() -> Self {
         Self {
-            device_name: default_device_name(),
+            device_name: "AnyFlow Device".to_string(),
             listen_port: crate::DEFAULT_PORT,
             auto_grant: vec!["battery.v1".to_string()],
         }
     }
-}
-
-fn default_device_name() -> String {
-    std::fs::read_to_string("/etc/hostname")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "Fedora".to_string())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -119,76 +128,214 @@ struct StateFile {
     /// DER certificate, base64. The matching private key is in a separate,
     /// stricter file.
     certificate_der_b64: String,
+    /// How the private key is protected, **as recorded when the identity was
+    /// created**.
+    ///
+    /// This is the load-bearing field of the whole fail-safe story: without a
+    /// recorded expectation there is no way to tell "this device never had
+    /// hardware backing" from "the hardware backing has gone away", and the
+    /// correct response to those two situations is opposite (PLAT-DEC-015).
+    ///
+    /// `#[serde(default)]` so a schema-1 file — every install in the field —
+    /// reads back as `Software`, which is what it is.
+    #[serde(default)]
+    key_backing: KeyBacking,
     settings: Settings,
     peers: Vec<TrustedPeer>,
 }
 
+/// Everything [`Store::open_with`] needs that is not portable.
+///
+/// One struct rather than four arguments so that adding a platform concern
+/// later is an added field, not a changed signature at every call site.
+pub struct StoreConfig {
+    /// Where bytes live, and how the platform keeps them private.
+    pub secrets: Arc<dyn SecretStore>,
+    /// How identities are created and reloaded. Wave 0 ships exactly one:
+    /// [`SoftwareBacking`].
+    pub backend: Arc<dyn IdentityBackend>,
+    /// What kind of machine this is.
+    ///
+    /// Supplied by the adapter, not decided by the storage layer. Before
+    /// Wave 0 `Platform::Linux` was hardcoded in this file, which meant
+    /// persistence decided the platform (audit finding C2).
+    pub platform: anyflow_proto::v1::Platform,
+    /// This machine's name, for a first run.
+    pub default_device_name: String,
+}
+
+impl std::fmt::Debug for StoreConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreConfig")
+            .field("secrets", &self.secrets.describe())
+            .field("backend", &self.backend.backing())
+            .field("platform", &self.platform)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Owns the on-disk state and the in-memory view of it.
 pub struct Store {
-    dir: PathBuf,
-    identity: LocalIdentity,
+    secrets: Arc<dyn SecretStore>,
+    backend: Arc<dyn IdentityBackend>,
+    identity: Identity,
     settings: Settings,
     peers: BTreeMap<Fingerprint, TrustedPeer>,
 }
 
+impl std::fmt::Debug for Store {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Store")
+            .field("secrets", &self.secrets.describe())
+            .field("identity", &self.identity)
+            .field("peers", &self.peers.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a look at the stored identity found, plus the material to load it.
+enum Resolution {
+    /// Genuine first run. The **only** outcome that may create a key.
+    Create,
+    Load {
+        state_bytes: Vec<u8>,
+        secret: Vec<u8>,
+    },
+    /// Refuse to start. `message` is what the operator sees.
+    Refuse {
+        state: IdentityState,
+        message: String,
+    },
+}
+
 impl Store {
-    /// Opens the store, generating a fresh identity on first run.
-    pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
-        let dir = dir.as_ref().to_path_buf();
-        std::fs::create_dir_all(&dir).map_err(Error::Io)?;
-        harden_dir(&dir)?;
+    /// Opens the store on this machine's default platform storage.
+    ///
+    /// Available only with the `unix-fs` feature, which is on by default.
+    /// With it off, `anyflow-core` has no filesystem or environment
+    /// assumption at all and [`Store::open_with`] is the only door.
+    #[cfg(feature = "unix-fs")]
+    pub fn open(dir: impl AsRef<std::path::Path>) -> Result<Self> {
+        use crate::platform::unix_fs::{default_device_name, FileSecretStore};
+        Self::open_with(StoreConfig {
+            secrets: Arc::new(FileSecretStore::new(dir.as_ref())),
+            backend: Arc::new(SoftwareBacking),
+            platform: anyflow_proto::v1::Platform::Linux,
+            default_device_name: default_device_name(),
+        })
+    }
 
-        let state_path = dir.join("state.json");
-        let key_path = dir.join("identity.key");
+    /// Opens the store against any [`SecretStore`] and any
+    /// [`IdentityBackend`].
+    ///
+    /// # The one rule
+    ///
+    /// A new identity is generated **only** from
+    /// [`IdentityState::NotCreated`], which means "no state document *and* no
+    /// key material, both established positively". Every other outcome is a
+    /// refusal to start, and nothing is written on the way out. An identity
+    /// that exists but cannot be read right now is never replaced.
+    pub fn open_with(config: StoreConfig) -> Result<Self> {
+        let StoreConfig {
+            secrets,
+            backend,
+            platform,
+            default_device_name,
+        } = config;
 
-        if state_path.exists() && key_path.exists() {
-            Self::load(dir, &state_path, &key_path)
-        } else {
-            Self::initialize(dir, &state_path, &key_path)
+        secrets.harden()?;
+
+        match classify(secrets.as_ref(), backend.as_ref()) {
+            Resolution::Refuse { state, message } => {
+                tracing::error!(
+                    identity_state = state.code(),
+                    "refusing to start: the stored identity is not usable, and \
+                     replacing it would destroy every pairing"
+                );
+                Err(Error::Store(message))
+            }
+            Resolution::Create => Self::initialize(secrets, backend, platform, default_device_name),
+            Resolution::Load {
+                state_bytes,
+                secret,
+            } => Self::load(secrets, backend, platform, &state_bytes, secret),
         }
     }
 
-    fn initialize(dir: PathBuf, state_path: &Path, key_path: &Path) -> Result<Self> {
-        let settings = Settings::default();
-        let identity =
-            LocalIdentity::generate(&settings.device_name, anyflow_proto::v1::Platform::Linux)?;
+    /// Reports what the stored identity looks like, without touching it.
+    ///
+    /// A pure observation, for `anyflow status` and for tests that need to
+    /// prove nothing was regenerated.
+    pub fn probe_identity(
+        secrets: &dyn SecretStore,
+        backend: &dyn IdentityBackend,
+    ) -> IdentityState {
+        match classify(secrets, backend) {
+            Resolution::Create => IdentityState::NotCreated,
+            Resolution::Load { .. } => IdentityState::Available,
+            Resolution::Refuse { state, .. } => state,
+        }
+    }
+
+    /// Reports what the identity in `dir` looks like, without touching it.
+    #[cfg(feature = "unix-fs")]
+    pub fn probe_identity_at(dir: impl AsRef<std::path::Path>) -> IdentityState {
+        use crate::platform::unix_fs::FileSecretStore;
+        Self::probe_identity(&FileSecretStore::new(dir.as_ref()), &SoftwareBacking)
+    }
+
+    fn initialize(
+        secrets: Arc<dyn SecretStore>,
+        backend: Arc<dyn IdentityBackend>,
+        platform: anyflow_proto::v1::Platform,
+        device_name: String,
+    ) -> Result<Self> {
+        let settings = Settings {
+            device_name,
+            ..Settings::default()
+        };
+        let (provider, secret) = backend.create(&settings.device_name, platform)?;
+
+        // Key material first, state second. If the process dies between the
+        // two, the next start sees key-without-state, which is a refusal —
+        // not a silent regeneration over a key that may already have been
+        // used to pair.
+        secrets.write_secret(backend.secret_name(), &secret)?;
 
         let store = Self {
-            dir,
-            identity,
+            secrets,
+            backend,
+            identity: Identity::new(provider),
             settings,
             peers: BTreeMap::new(),
         };
-        store.write_key(key_path)?;
-        store.write_state(state_path)?;
+        store.persist()?;
         Ok(store)
     }
 
-    fn load(dir: PathBuf, state_path: &Path, key_path: &Path) -> Result<Self> {
-        let raw = std::fs::read_to_string(state_path).map_err(Error::Io)?;
-        let state: StateFile =
-            serde_json::from_str(&raw).map_err(|e| Error::Store(format!("state.json: {e}")))?;
+    fn load(
+        secrets: Arc<dyn SecretStore>,
+        backend: Arc<dyn IdentityBackend>,
+        platform: anyflow_proto::v1::Platform,
+        state_bytes: &[u8],
+        secret: Vec<u8>,
+    ) -> Result<Self> {
+        // Already parsed once during classification; parsing again here keeps
+        // `classify` free of ownership games and costs nothing measurable on
+        // a file of tens of records.
+        let state: StateFile = serde_json::from_slice(state_bytes)
+            .map_err(|e| Error::Store(format!("state.json: {e}")))?;
 
-        if state.schema_version > SCHEMA_VERSION {
-            return Err(Error::Store(format!(
-                "state.json schema v{} is newer than supported v{}; refusing to \
-                 downgrade and risk losing trust records",
-                state.schema_version, SCHEMA_VERSION
-            )));
-        }
-
-        require_private_mode(key_path)?;
-        let key_der = std::fs::read(key_path).map_err(Error::Io)?;
         let cert_der = data_encoding::BASE64
             .decode(state.certificate_der_b64.as_bytes())
             .map_err(|_| Error::Store("certificate is not valid base64".into()))?;
 
-        let identity = LocalIdentity::from_parts(
+        let provider = backend.load(
             state.device_id,
             state.settings.device_name.clone(),
-            anyflow_proto::v1::Platform::Linux,
+            platform,
             cert_der,
-            key_der,
+            secret,
         )?;
 
         let peers = state
@@ -198,36 +345,54 @@ impl Store {
             .collect();
 
         Ok(Self {
-            dir,
-            identity,
+            secrets,
+            backend,
+            identity: Identity::new(provider),
             settings: state.settings,
             peers,
         })
     }
 
-    fn write_key(&self, path: &Path) -> Result<()> {
-        write_atomic(path, self.identity.private_key_pkcs8_der(), 0o600)
-    }
-
-    fn write_state(&self, path: &Path) -> Result<()> {
+    fn state_document(&self) -> Result<Vec<u8>> {
         let state = StateFile {
             schema_version: SCHEMA_VERSION,
             device_id: self.identity.device_id().to_string(),
             certificate_der_b64: data_encoding::BASE64.encode(self.identity.certificate_der()),
+            key_backing: self.identity.backing(),
             settings: self.settings.clone(),
             peers: self.peers.values().cloned().collect(),
         };
-        let json = serde_json::to_vec_pretty(&state)
-            .map_err(|e| Error::Store(format!("serializing state: {e}")))?;
-        write_atomic(path, &json, 0o600)
+        serde_json::to_vec_pretty(&state)
+            .map_err(|e| Error::Store(format!("serializing state: {e}")))
     }
 
     pub fn persist(&self) -> Result<()> {
-        self.write_state(&self.dir.join("state.json"))
+        let bytes = self.state_document()?;
+        self.secrets.write_state(&bytes)?;
+        Ok(())
     }
 
-    pub fn identity(&self) -> &LocalIdentity {
+    pub fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// How this device's private key is protected.
+    ///
+    /// Shown by `anyflow status`. Never advertised to a peer: a device's
+    /// claim about its own key storage is unverifiable, and an unverifiable
+    /// self-report is not a security property (PLAT-DEC-012).
+    pub fn key_backing(&self) -> KeyBacking {
+        self.identity.backing()
+    }
+
+    /// The storage this store is using, for diagnostics.
+    pub fn secrets(&self) -> &Arc<dyn SecretStore> {
+        &self.secrets
+    }
+
+    /// The identity backend in use.
+    pub fn identity_backend(&self) -> &Arc<dyn IdentityBackend> {
+        &self.backend
     }
 
     pub fn settings(&self) -> &Settings {
@@ -314,67 +479,165 @@ impl Store {
     }
 }
 
-/// Default location: `$XDG_DATA_HOME/anyflow`, else `~/.local/share/...`.
-pub fn default_data_dir() -> PathBuf {
-    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(xdg).join("anyflow")
-    } else {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."));
-        home.join(".local/share/anyflow")
-    }
-}
-
-/// Writes via a temp file + rename so a crash mid-write cannot leave a
-/// truncated trust store. The temp file is created with the final mode, so
-/// there is no window in which the key is world-readable.
-fn write_atomic(path: &Path, data: &[u8], mode: u32) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let tmp = path.with_extension("tmp");
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(mode)
-        .open(&tmp)
-        .map_err(Error::Io)?;
-    f.write_all(data).map_err(Error::Io)?;
-    f.sync_all().map_err(Error::Io)?;
-    drop(f);
-    std::fs::rename(&tmp, path).map_err(Error::Io)?;
-    Ok(())
-}
-
-fn harden_dir(dir: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let meta = std::fs::metadata(dir).map_err(Error::Io)?;
-    let mut perms = meta.permissions();
-    if perms.mode() & 0o077 != 0 {
-        perms.set_mode(0o700);
-        std::fs::set_permissions(dir, perms).map_err(Error::Io)?;
-    }
-    Ok(())
-}
-
-/// Refuses to load a private key that is readable by anyone else.
+/// Default location: `$XDG_DATA_HOME/anyflow`, else `~/.local/share/…`.
 ///
-/// This is a hard error, not a warning. Continuing would mean running with a
-/// compromised-by-construction identity.
-fn require_private_mode(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let meta = std::fs::metadata(path).map_err(Error::Io)?;
-    let mode = meta.permissions().mode() & 0o777;
-    if mode & 0o077 != 0 {
-        return Err(Error::Store(format!(
-            "{} has mode {:o}; the private key must not be group- or \
-             world-accessible. Fix with: chmod 600 {}",
-            path.display(),
-            mode,
-            path.display()
-        )));
+/// Re-exported from the Unix adapter so existing callers keep their import
+/// path. It is feature-gated for the same reason the adapter is.
+#[cfg(feature = "unix-fs")]
+pub use crate::platform::unix_fs::default_data_dir;
+
+// ---------------------------------------------------------------------------
+// Identity classification — the safety property
+// ---------------------------------------------------------------------------
+
+/// Decides which of the six identity states this store is in.
+///
+/// Reads both items, and reads them *positively*: the only path to
+/// [`Resolution::Create`] is `Ok(None)` from both, which means the platform
+/// told us, without error, that neither exists. Any error — permission,
+/// I/O, a loose mode, a corrupt file — is a refusal.
+///
+/// | Situation | State |
+/// | --- | --- |
+/// | no state document, no key material | `IDENTITY_NOT_CREATED` |
+/// | both present, parse, and correspond | `IDENTITY_AVAILABLE` |
+/// | key unparseable, key ≠ certificate, or state unparseable | `IDENTITY_CORRUPTED` |
+/// | key protection not met (0644 key, traversable data dir) | `IDENTITY_CORRUPTED` |
+/// | state present, key absent or unreadable | `IDENTITY_LOST` |
+/// | key present, state absent | `IDENTITY_LOST` |
+/// | recorded backing is not the one this build can open | `IDENTITY_HARDWARE_UNAVAILABLE` |
+/// | transient I/O failure on either | `IDENTITY_TEMPORARILY_UNAVAILABLE` |
+fn classify(secrets: &dyn SecretStore, backend: &dyn IdentityBackend) -> Resolution {
+    let state_read = secrets.read_state();
+    let secret_read = secrets.read_secret(backend.secret_name());
+
+    // Storage errors first, and in the order that produces the most useful
+    // message. None of them can reach `Create`.
+    for (what, result) in [
+        ("state.json", state_read.as_ref().err()),
+        ("the identity key", secret_read.as_ref().err()),
+    ] {
+        if let Some(e) = result {
+            return refuse_access(what, e);
+        }
     }
-    Ok(())
+
+    let state_bytes = match state_read {
+        Ok(v) => v,
+        // Unreachable: handled above. Refusing is still the safe arm.
+        Err(e) => return refuse_access("state.json", &e),
+    };
+    let secret = match secret_read {
+        Ok(v) => v,
+        Err(e) => return refuse_access("the identity key", &e),
+    };
+
+    match (state_bytes, secret) {
+        // The one and only path to a new identity.
+        (None, None) => Resolution::Create,
+
+        (Some(_), None) => refuse(IdentityState::Lost(
+            "state.json describes an identity whose key material is gone. \
+             Restore the key from a backup, or delete the data directory to \
+             start over — which will require re-pairing every device."
+                .into(),
+        )),
+
+        (None, Some(_)) => refuse(IdentityState::Lost(
+            "identity key material is present but state.json, which records \
+             the certificate and the trusted peers, is gone. Restore it from \
+             a backup, or delete the data directory to start over — which \
+             will require re-pairing every device."
+                .into(),
+        )),
+
+        (Some(state_bytes), Some(secret)) => {
+            let state: StateFile = match serde_json::from_slice(&state_bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    return refuse(IdentityState::Corrupted(format!(
+                        "state.json does not parse: {e}"
+                    )))
+                }
+            };
+
+            if state.schema_version > SCHEMA_VERSION {
+                return Resolution::Refuse {
+                    state: IdentityState::Corrupted(format!(
+                        "state.json schema v{} is newer than supported v{}",
+                        state.schema_version, SCHEMA_VERSION
+                    )),
+                    // Verbatim: this wording predates Wave 0 and says exactly
+                    // the right thing.
+                    message: format!(
+                        "state.json schema v{} is newer than supported v{}; refusing to \
+                         downgrade and risk losing trust records",
+                        state.schema_version, SCHEMA_VERSION
+                    ),
+                };
+            }
+
+            if state.key_backing != backend.backing() {
+                return refuse(IdentityState::HardwareUnavailable(format!(
+                    "this identity was created with `{}` key backing and this \
+                     build can only open `{}`. The identity has not been \
+                     touched. Migrating between backings creates a new \
+                     identity and re-pairs every device, so it is never done \
+                     automatically",
+                    state.key_backing,
+                    backend.backing()
+                )));
+            }
+
+            if data_encoding::BASE64
+                .decode(state.certificate_der_b64.as_bytes())
+                .is_err()
+            {
+                return refuse(IdentityState::Corrupted(
+                    "the certificate in state.json is not valid base64".into(),
+                ));
+            }
+
+            Resolution::Load {
+                state_bytes,
+                secret,
+            }
+        }
+    }
+}
+
+fn refuse(state: IdentityState) -> Resolution {
+    let message = Error::from(state.clone()).to_string();
+    // `Error::Store`'s Display prefixes "identity store error: "; the caller
+    // wraps it again, so strip the prefix rather than say it twice.
+    let message = message
+        .strip_prefix("identity store error: ")
+        .unwrap_or(&message)
+        .to_string();
+    Resolution::Refuse { state, message }
+}
+
+/// Turns a storage-access failure into a refusal, preserving the distinction
+/// the [`SecretStore`] contract exists to keep.
+fn refuse_access(what: &str, e: &StoreAccessError) -> Resolution {
+    match e {
+        // A loose mode is reported verbatim: the message names the file, the
+        // mode and the exact `chmod` that fixes it, and has done since long
+        // before Wave 0.
+        StoreAccessError::NotPrivate { detail, .. } => Resolution::Refuse {
+            state: IdentityState::Corrupted(detail.clone()),
+            message: detail.clone(),
+        },
+        StoreAccessError::PermissionDenied { .. } => refuse(IdentityState::Lost(format!(
+            "{what} exists but cannot be read ({e}). AnyFlow will not generate \
+             a replacement identity over one it cannot read"
+        ))),
+        StoreAccessError::Io { .. } => refuse(IdentityState::TemporarilyUnavailable(format!(
+            "{what} could not be read ({e}). This may be transient; retry \
+             before assuming anything is lost"
+        ))),
+        StoreAccessError::Corrupted { .. } => {
+            refuse(IdentityState::Corrupted(format!("{what}: {e}")))
+        }
+    }
 }

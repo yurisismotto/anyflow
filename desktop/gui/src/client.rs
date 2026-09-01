@@ -22,7 +22,8 @@
 //! through an `async_channel`. No GTK object is ever touched off the main
 //! thread.
 
-use anyflow_daemon::control::{control_socket_path, Event, Request, Response};
+use anyflow_control::{Event, Request, Response};
+use anyflow_linux::control_socket_path;
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;

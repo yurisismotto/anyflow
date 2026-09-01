@@ -11,9 +11,9 @@ use anyflow_capability_clipboard::{ClipboardCapability, ClipboardManager};
 use anyflow_capability_files::{
     Destination, FilesCapability, FilesConfig, StreamRole, TransferApproval, TransferManager,
 };
+use anyflow_control::transport::ControlTransport;
 use anyflow_core::capability::CapabilityRegistry;
-use anyflow_core::store::Store;
-use anyflow_daemon::{control, listener, mdns, server, state::DaemonState};
+use anyflow_daemon::{listener, mdns, server, state::DaemonState};
 use clap::Parser;
 use tokio_rustls::TlsAcceptor;
 
@@ -82,8 +82,11 @@ async fn main() -> anyhow::Result<()> {
 
     let data_dir = args
         .data_dir
-        .unwrap_or_else(anyflow_core::store::default_data_dir);
-    let store = Store::open(&data_dir)?;
+        .unwrap_or_else(anyflow_linux::default_data_dir);
+    // The Linux adapter composes the store: XDG paths, 0600/0700 modes,
+    // `Platform::Linux`, `/etc/hostname`. `anyflow-core` decides the policy,
+    // this decides where and how.
+    let store = anyflow_linux::open_store(&data_dir)?;
 
     // A `--port` override applies to this run only. Silently rewriting the
     // user's stored configuration from a command-line flag is a surprise
@@ -101,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
         device = %device_id,
         name = %device_name,
         fingerprint = %identity_fp.to_display_short(),
+        key_backing = %store.key_backing(),
         "local identity"
     );
 
@@ -222,9 +226,19 @@ async fn main() -> anyhow::Result<()> {
         "listening"
     );
 
-    let socket_path = control::control_socket_path();
-    let control_listener = server::bind(&socket_path)?;
-    tracing::info!(socket = %socket_path.display(), "control socket ready");
+    // The control endpoint comes from the adapter, through the
+    // `ControlTransport` seam. A failure to bind because another agent
+    // already owns the endpoint is fatal and is *not* worked around by
+    // choosing a different name — see `anyflow_control::transport`.
+    let transport = anyflow_linux::UnixControlTransport::default_endpoint();
+    let control_listener = match ControlTransport::bind(&transport) {
+        Ok(l) => l,
+        Err(e @ anyflow_control::transport::BindError::AlreadyOwned { .. }) => {
+            anyhow::bail!("{e}");
+        }
+        Err(e) => return Err(e.into()),
+    };
+    tracing::info!(endpoint = %transport.endpoint(), "control endpoint ready");
 
     // Held for the process lifetime; dropping it withdraws the mDNS record.
     let _advertisement = if args.no_mdns {
@@ -256,7 +270,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let _ = std::fs::remove_file(&socket_path);
+    // Through the adapter, not `remove_file`: unbinding is what the concept
+    // is, and a named pipe has no file to unlink.
+    transport.release();
     Ok(())
 }
 
