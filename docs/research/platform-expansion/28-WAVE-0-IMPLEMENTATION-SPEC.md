@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | **Title** | Wave 0 — Core platform abstraction: an implementable specification |
-| **Status** | Research / Draft — **specification, not implementation.** No code was written |
+| **Status** | **IMPLEMENTED** on `feature/core-platform-abstraction-v1`, 2026-08-31. Wave 0 is **NOT CERTIFIED**: two acceptance items could not be executed. See [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
 | **Last reviewed** | 2026-08-31 |
 | **Sprint** | `research/platform-expansion-verification-v1` |
 | **Scope** | The refactor that makes AnyFlow's Rust workspace portable, without adding a platform |
@@ -738,9 +738,62 @@ have blocked Wave 0 on POC-WIN-04 — a PoC needing Windows hardware and a TPM. 
 seam against its own documentation removes that dependency: the architecture question is answered,
 and POC-WIN-04 now proves *Windows integration* in Wave 5, where it belongs.
 
+### Implementation outcome — 2026-08-31
+
+Wave 0 was implemented against this specification on
+`feature/core-platform-abstraction-v1`. Full evidence:
+**[docs/sprints/wave-0-platform-abstraction.md](../../sprints/wave-0-platform-abstraction.md)**.
+
+| | |
+| --- | --- |
+| Rust tests | 366 passed, 0 failed (baseline 303) |
+| Android tests | 232 passed, 0 failed; `android/**` unchanged |
+| Official gates | 12 of 13; **G6 NOT EXECUTED** |
+| P0 PoCs | POC-CORE-01 **PASS** · -02 **PASS** · -03 **PASS** · -04 **NOT EXECUTED** |
+| Status | **WAVE 0 NOT CERTIFIED** |
+
+**What the spec got right.** The identity refactor was two call sites, exactly
+as §6.2 predicted; `rustls::sign::SingleCertAndKey` implements both resolver
+traits, so no custom resolver was needed. Nine steps, nine landings, no
+protocol change, no `.proto` edit, no Android edit.
+
+**Three amendments the implementation forced**, recorded so the next wave
+inherits the corrected version rather than this one:
+
+1. **The Unix filesystem adapter stayed in `anyflow-core`**, behind the
+   default-on `unix-fs` feature, rather than moving to `anyflow-linux`. §5
+   places it in the adapter, but `Store::open(dir)` is called from
+   `core/tests/identity_and_store.rs`, and **CC-5** forbids editing a test to
+   make the refactor pass. This specification's own compile gate is written
+   `--no-default-features`, which is exactly the shape the feature provides,
+   so the boundary the gate checks is unchanged.
+2. **`ControlTransport` lives in `anyflow-control`, not `anyflow-runtime`.**
+   §6.4 places it in the runtime, but `anyflow-gui` and `anyflow-cli` need the
+   client half of the endpoint, and reaching it through the runtime would have
+   re-created audit finding **C1** — the GUI inheriting mDNS, UPower and every
+   capability crate for some struct definitions. The trait needs only tokio's
+   `AsyncRead`/`AsyncWrite`, so `anyflow-control` stays dependency-light.
+3. **A seventh trait, `IdentityBackend`, was added.** Not a seventh concern:
+   it is the *creation* half of `IdentityProvider`, split out because
+   `create()` is where hardware differs most. Folding it in would have forced
+   an `export_secret()` method, reintroducing exportability into the one trait
+   that exists to remove it.
+
+**One defect this specification did not know about**, found while moving the
+control socket: `server::bind` removed an existing socket file
+unconditionally, reasoning that *"a second live daemon would have failed its
+own port bind first"* — but the port bind happens **after** it in `main`. Fixed
+with a live-owner probe and `BindError::AlreadyOwned`, which §6.4 already
+required for the Windows named-pipe mitigation.
+
+**Two existing tests were modified**, against CC-5, both because §7 items 4–5
+*mandate* adding `key_backing` and bumping `SCHEMA_VERSION`, and those two
+tests are the ones that notice a schema change. Neither assertion changed. Both
+are itemised in the sprint report §8.
+
 ### Declaration
 
-**WAVE 0 READY.**
+**WAVE 0 READY.** *(Implemented; see above.)*
 
 With one condition that is a sequencing note rather than a blocker:
 

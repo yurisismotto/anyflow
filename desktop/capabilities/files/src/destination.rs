@@ -1,4 +1,9 @@
-//! Where a received file goes, and how it gets there safely.
+//! The Unix filesystem implementation of [`crate::sink::FileSink`].
+//!
+//! The invariants this satisfies live in [`crate::sink`]; this file answers
+//! only the two platform questions: where "downloads" is, and what private
+//! means. On another platform those are `FOLDERID_Downloads` and a DACL, and
+//! this file is replaced rather than `#[cfg]`-ed.
 //!
 //! # The directory
 //!
@@ -35,25 +40,23 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::limits::MAX_DUPLICATE_SUFFIX;
+use crate::sink::FileSink;
 use crate::transfer::TransferId;
 
-/// The directory received files are stored in.
+/// The directory received files are stored in, on a Unix filesystem.
 #[derive(Debug, Clone)]
-pub struct Destination {
+pub struct UnixDownloadSink {
     dir: PathBuf,
 }
 
-impl Destination {
+impl UnixDownloadSink {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
     }
+}
 
-    /// The XDG-derived default: `<downloads>/AnyFlow`.
-    pub fn default_location() -> Self {
-        Self::new(default_download_dir().join("AnyFlow"))
-    }
-
-    pub fn dir(&self) -> &Path {
+impl FileSink for UnixDownloadSink {
+    fn directory(&self) -> &Path {
         &self.dir
     }
 
@@ -61,7 +64,7 @@ impl Destination {
     ///
     /// Mode 0700: a received file may be anything, and there is no reason for
     /// other local users to enumerate what this machine has been sent.
-    pub fn prepare(&self) -> io::Result<()> {
+    fn prepare(&self) -> io::Result<()> {
         std::fs::create_dir_all(&self.dir)?;
         use std::os::unix::fs::PermissionsExt;
         let meta = std::fs::metadata(&self.dir)?;
@@ -78,7 +81,7 @@ impl Destination {
     /// Named after the transfer, hidden, and suffixed `.part` so that a file
     /// left behind by a crash is recognisable and obviously incomplete. It
     /// lives beside its destination so the final rename is atomic.
-    pub fn open_temp(&self, id: TransferId) -> io::Result<(std::fs::File, PathBuf)> {
+    fn open_temp(&self, id: TransferId) -> io::Result<(std::fs::File, PathBuf)> {
         self.prepare()?;
         let path = self.dir.join(format!(".anyflow-{}.part", id.to_hex()));
         let file = OpenOptions::new()
@@ -101,7 +104,7 @@ impl Destination {
     /// has a window in which two concurrent transfers both see the name free
     /// and the second silently destroys the first — precisely the "never
     /// overwrite" property this function exists to provide.
-    pub fn reserve(&self, name: &str) -> io::Result<PathBuf> {
+    fn reserve(&self, name: &str) -> io::Result<PathBuf> {
         self.prepare()?;
 
         let (stem, extension) = split_extension(name);
@@ -152,7 +155,7 @@ impl Destination {
     /// or unverified data.
     ///
     /// [`reserve`]: Self::reserve
-    pub fn promote(&self, temp: &Path, name: &str) -> io::Result<PathBuf> {
+    fn promote(&self, temp: &Path, name: &str) -> io::Result<PathBuf> {
         let final_path = self.reserve(name)?;
         // Make the file readable by its owner in the normal way now that it
         // is a real, complete file; it was 0600 while it was a fragment.
@@ -251,7 +254,8 @@ fn download_dir_from_user_dirs() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    fn temp_destination() -> (tempfile::TempDir, Destination) {
+    fn temp_destination() -> (tempfile::TempDir, crate::sink::Destination) {
+        use crate::sink::Destination;
         let dir = tempfile::tempdir().expect("tempdir");
         let dest = Destination::new(dir.path().join("AnyFlow"));
         dest.prepare().expect("prepare");
@@ -431,7 +435,7 @@ mod tests {
 
     #[test]
     fn the_anyflow_subdirectory_is_used() {
-        let dest = Destination::default_location();
+        let dest = crate::sink::Destination::default_location();
         assert_eq!(
             dest.dir().file_name().and_then(|s| s.to_str()),
             Some("AnyFlow")

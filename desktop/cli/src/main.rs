@@ -6,10 +6,11 @@
 
 use std::time::Duration;
 
-use anyflow_daemon::control::{
-    control_socket_path, BatteryReport, ClipboardFlag, ClipboardStatusReport, DeviceReport, Event,
-    Request, Response, TransferReport,
+use anyflow_control::{
+    BatteryReport, ClipboardFlag, ClipboardStatusReport, DeviceReport, Event, Request, Response,
+    TransferReport,
 };
+use anyflow_linux::control_socket_path;
 use clap::{Parser, Subcommand, ValueEnum};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -253,6 +254,10 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
             println!("AnyFlow");
             println!("  device      {} ({})", s.device_name, s.device_id);
             println!("  fingerprint {}", s.fingerprint_short);
+            // Local truth, never a wire claim: a peer's assertion about its
+            // own key storage is unverifiable, so it is shown here and never
+            // advertised (PLAT-DEC-012).
+            println!("  key         {}-backed", s.key_backing);
             println!(
                 "  listening   port {} ({})",
                 s.listen_port, s.listen_families
@@ -364,6 +369,17 @@ fn print_clipboard_status(report: &ClipboardStatusReport) {
             "NOT supported here — this session cannot detect clipboard changes"
         }
     );
+    // Kept separate from `auto-send`, because they fail for different
+    // reasons: auto-send needs a *compositor* that reports changes, and
+    // sensitive marking needs a `wl-copy` new enough to have the flag. A
+    // session can have one and not the other.
+    if report.sensitive_available {
+        println!("  sensitive   clips can be marked sensitive");
+    } else {
+        println!("  sensitive   NOT supported here — a clip arriving with sensitive_hint");
+        println!("              set will be REFUSED rather than written unmarked.");
+        println!("              {}", report.sensitive_detail);
+    }
     // Printed so the bounded-growth property is observable rather than merely
     // documented. Neither cache holds content.
     println!(

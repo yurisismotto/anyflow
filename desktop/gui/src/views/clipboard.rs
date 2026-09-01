@@ -13,7 +13,7 @@
 //! product refuses to store. So the panel is gone, and what replaces it says
 //! plainly that nothing is kept.
 
-use anyflow_daemon::control::{ClipboardFlag, ClipboardPeerReport, Request, Response};
+use anyflow_control::{ClipboardFlag, ClipboardPeerReport, Request, Response};
 use gtk::prelude::*;
 
 use super::Pages;

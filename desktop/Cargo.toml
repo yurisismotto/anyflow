@@ -3,6 +3,9 @@ resolver = "2"
 members = [
     "proto",
     "core",
+    "control",
+    "runtime",
+    "platform-linux",
     "daemon",
     "cli",
     "gui",
@@ -18,9 +21,21 @@ rust-version = "1.82"
 license = "Apache-2.0"
 repository = "https://github.com/yurisismotto/anyflow"
 
-[workspace.lints.rust]
-unsafe_code = "forbid"
-
-[workspace.lints.clippy]
-todo = "warn"
-unwrap_used = "warn"
+# NOTE (Wave 0, ARCH-010): there is deliberately no `[workspace.lints]` table.
+#
+# `unsafe_code` used to live here as `forbid`, workspace-wide. `forbid` cannot
+# be relaxed by an inner `#[allow]`, which made it impossible for a future
+# platform adapter (Win32, CNG, Security.framework, IOKit all need FFI) to
+# exist without first weakening the guarantee for `anyflow-core` too.
+#
+# The lint is now declared per crate, in each crate's own `[lints]` table:
+#
+#   forbid  anyflow-proto, anyflow-core, anyflow-control, anyflow-runtime,
+#           anyflow-capability-{battery,clipboard,files}
+#   deny    anyflow-linux, anyflow-daemon, anyflow-cli, anyflow-gui
+#
+# Relaxing the *workspace default* to `deny` was considered and rejected: it
+# would silently drop the guarantee from the crates where it matters most.
+# A new crate that declares no `[lints]` table gets rustc's `allow`, which is
+# visible in review as a missing block rather than invisible as an inherited
+# weakening. See docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.

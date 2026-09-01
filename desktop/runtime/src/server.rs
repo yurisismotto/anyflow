@@ -1,12 +1,17 @@
-//! Serves the local control socket.
+//! Serves the local control endpoint.
+//!
+//! Nothing in this file names a socket. It is handed something that satisfies
+//! [`ControlListener`] and speaks newline-delimited JSON over whatever byte
+//! stream that yields — which is what makes a Windows named pipe a drop-in
+//! rather than a rewrite. The Unix-domain implementation lives in
+//! `anyflow-linux`.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyflow_control::transport::ControlListener;
 use anyflow_core::qr::QrPayload;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::control::{
     BatteryReport, ClipboardFlag, ClipboardPeerReport, ClipboardStatusReport, ConnectionReport,
@@ -15,31 +20,9 @@ use crate::control::{
 };
 use crate::state::DaemonState;
 
-/// Binds the control socket, replacing a stale one left by a crash.
-pub fn bind(path: &Path) -> anyhow::Result<UnixListener> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-        harden(parent, 0o700)?;
-    }
-    // A leftover socket file from an unclean shutdown would make bind fail.
-    // Removing it is safe: only this user can reach the directory, and a
-    // second live daemon would have failed its own port bind first.
-    if path.exists() {
-        std::fs::remove_file(path)?;
-    }
-    let listener = UnixListener::bind(path)?;
-    harden(path, 0o600)?;
-    Ok(listener)
-}
-
-fn harden(path: &Path, mode: u32) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-}
-
-pub async fn run(listener: UnixListener, state: Arc<DaemonState>) -> anyhow::Result<()> {
+pub async fn run<L: ControlListener>(listener: L, state: Arc<DaemonState>) -> anyhow::Result<()> {
     loop {
-        let (stream, _) = listener.accept().await?;
+        let stream = listener.accept().await?;
         let state = Arc::clone(&state);
         tokio::spawn(async move {
             if let Err(e) = serve_client(stream, state).await {
@@ -49,8 +32,11 @@ pub async fn run(listener: UnixListener, state: Arc<DaemonState>) -> anyhow::Res
     }
 }
 
-async fn serve_client(stream: UnixStream, state: Arc<DaemonState>) -> anyhow::Result<()> {
-    let (read, mut write) = stream.into_split();
+async fn serve_client<S: anyflow_control::transport::ControlStream>(
+    stream: S,
+    state: Arc<DaemonState>,
+) -> anyhow::Result<()> {
+    let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
 
     let Some(line) = lines.next_line().await? else {
@@ -219,6 +205,7 @@ async fn build_status(state: &Arc<DaemonState>) -> StatusReport {
         fingerprint_short: fingerprint
             .map(|f| f.to_display_short())
             .unwrap_or_default(),
+        key_backing: store.key_backing().to_string(),
         listen_port,
         listen_families,
         protocol_version_min: anyflow_core::session::PROTOCOL_VERSION_MIN,
@@ -548,6 +535,8 @@ async fn build_clipboard_status(state: &Arc<DaemonState>) -> ClipboardStatusRepo
             backend: "none".into(),
             backend_detail: "clipboard.v1 is not enabled in this daemon".into(),
             watch_available: false,
+            sensitive_available: false,
+            sensitive_detail: "clipboard.v1 is not enabled in this daemon".into(),
             event_cache_entries: 0,
             suppression_cache_entries: 0,
             peers: Vec::new(),
@@ -557,6 +546,7 @@ async fn build_clipboard_status(state: &Arc<DaemonState>) -> ClipboardStatusRepo
 
     let backend = clipboard.backend();
     let watch_available = backend.watch_availability().is_ok();
+    let sensitive = backend.sensitive_support();
     let (event_cache_entries, suppression_cache_entries) = clipboard.cache_sizes().await;
     let last_results = clipboard.last_results().await;
 
@@ -611,6 +601,8 @@ async fn build_clipboard_status(state: &Arc<DaemonState>) -> ClipboardStatusRepo
         backend: backend.id().to_string(),
         backend_detail: backend.describe(),
         watch_available,
+        sensitive_available: sensitive.is_ok(),
+        sensitive_detail: sensitive.err().unwrap_or_default(),
         event_cache_entries,
         suppression_cache_entries,
         peers,
@@ -741,7 +733,7 @@ async fn do_clipboard_policy(
 /// Offers a file and streams the transfer's progress until it settles.
 async fn run_send_session(
     state: Arc<DaemonState>,
-    mut write: tokio::net::unix::OwnedWriteHalf,
+    mut write: impl AsyncWrite + Unpin,
     device: &str,
     path: &str,
 ) -> anyhow::Result<()> {
@@ -853,8 +845,8 @@ async fn run_send_session(
 /// is intentional: pairing is only open while a human is watching for it.
 async fn run_pair_session(
     state: Arc<DaemonState>,
-    mut lines: tokio::io::Lines<BufReader<tokio::net::unix::OwnedReadHalf>>,
-    mut write: tokio::net::unix::OwnedWriteHalf,
+    mut lines: tokio::io::Lines<BufReader<impl tokio::io::AsyncRead + Unpin>>,
+    mut write: impl AsyncWrite + Unpin,
     ttl_secs: Option<u64>,
 ) -> anyhow::Result<()> {
     let ttl = ttl_secs

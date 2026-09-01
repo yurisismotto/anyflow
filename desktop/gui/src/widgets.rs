@@ -108,8 +108,8 @@ impl Status {
     /// a session that has gone quiet is exactly the case where anything the
     /// device last told us is history, and showing it as live is the bug
     /// `DeviceState` was introduced to prevent.
-    pub fn from_device_state(state: anyflow_daemon::control::DeviceState) -> Self {
-        use anyflow_daemon::control::DeviceState as D;
+    pub fn from_device_state(state: anyflow_control::DeviceState) -> Self {
+        use anyflow_control::DeviceState as D;
         match state {
             D::Connected => Status::Connected,
             D::Stale => Status::Stale,

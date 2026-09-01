@@ -5,12 +5,12 @@
 
 | Field | Value |
 | --- | --- |
-| **Status** | Research / Draft — planning only, no implementation |
+| **Status** | Research / Draft — planning. **Wave 0 has since been implemented** from [28](28-WAVE-0-IMPLEMENTATION-SPEC.md); see the note below |
 | **Last reviewed** | 2026-08-31 |
 | **Branch** | `research/platform-expansion-v1`, then `research/platform-expansion-verification-v1` (docs 26–28) |
 | **Scope** | Linux (generic, Fedora, Debian, Ubuntu, GNOME, KDE Plasma, Wayland, X11), Windows 10/11, macOS, Android, iOS/iPadOS |
 | **Decision status** | **Nothing here is Approved.** The strongest status assigned is **READY FOR RFC** — see [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) |
-| **Wave 0** | **READY** — specification in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md) |
+| **Wave 0** | **IMPLEMENTED, NOT CERTIFIED** — spec in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md); outcome in [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
 
 ---
 
@@ -25,6 +25,13 @@ The answer to one question:
 It is research, an architecture audit, a feasibility study and a plan. **No source file outside
 this directory was modified.** No protocol, TLS, pairing or capability behaviour was changed. No
 PoC was implemented.
+
+> **Superseded in part, 2026-08-31.** Wave 0 has since been implemented from
+> [28](28-WAVE-0-IMPLEMENTATION-SPEC.md) on `feature/core-platform-abstraction-v1`. Three of the
+> four P0 PoCs ran and passed. Where this research and the implementation disagree, the
+> **[sprint report](../../sprints/wave-0-platform-abstraction.md)** is the record of what was
+> actually built; [28's implementation outcome](28-WAVE-0-IMPLEMENTATION-SPEC.md) lists the three
+> amendments the code forced on the specification.
 
 Documents **00–25** are Research v1. Documents **26–28** are the external-verification sprint that
 closed it out: every claim Research v1 could not confirm was taken to a primary source, the
@@ -50,8 +57,8 @@ repository was re-audited against the report, and the result is a Wave 0 specifi
 | **Files** | **READY FOR RFC** | Windows rules mostly already present — Research v1's claim refuted. Real gaps: `:` (ADS) and `U+202E` (bidi, **all platforms**) |
 | **Packaging** | **RESEARCHED** | System packages first, Flatpak experimental. **Do not gate on `wl-clipboard >= 2.3`** — Fedora's `2.2.1^git` has the features |
 | **Security** | **VERIFIED** | The model survives intact. **Three defects, one of them present-tense on Linux today** (silent trust-store destruction) |
-| **PoCs** | **POC REQUIRED** | 37 specified. **Four are P0, all Wave 0 acceptance gates — none blocks Wave 0 from starting** |
-| **Wave 0** | **READY** | ≈17 engineer-days, nine PRs, no new hardware needed ([28](28-WAVE-0-IMPLEMENTATION-SPEC.md)) |
+| **PoCs** | **POC REQUIRED** | 37 specified. Four are P0: **POC-CORE-01/02/03 PASS**, POC-CORE-04 needs a Windows runner |
+| **Wave 0** | **IMPLEMENTED** | Landed on `feature/core-platform-abstraction-v1`. 366 Rust tests green, six portable crates cross-compile for Windows. **NOT CERTIFIED**: the Android interop gate (G6) had no device ([report](../../sprints/wave-0-platform-abstraction.md)) |
 
 Status vocabulary: **VERIFIED** (closed against a primary source in [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)) ·
 **READY FOR RFC** (evidence sufficient to write the ADR) · **RESEARCHED** (analysis complete, some

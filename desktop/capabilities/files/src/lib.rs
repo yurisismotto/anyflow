@@ -29,9 +29,13 @@
 //! | nothing unbounded | [`limits`] |
 
 pub mod auth;
+/// The Unix filesystem destination. Feature-gated: with `unix-fs` off, this
+/// crate has no `std::os` anything and `FileSink` is the only door.
+#[cfg(feature = "unix-fs")]
 pub mod destination;
 pub mod filename;
 pub mod limits;
+pub mod sink;
 pub mod stream;
 pub mod transfer;
 
@@ -51,8 +55,8 @@ use anyflow_proto::v1::capabilities as pb;
 use anyflow_proto::Message;
 
 use auth::StreamChallenge;
-pub use destination::Destination;
 use limits::*;
+pub use sink::{Destination, FileSink};
 use transfer::{Direction, FailureReason, TransferId, TransferState};
 
 pub const CAPABILITY_ID: &str = "files.v1";
@@ -146,10 +150,23 @@ pub struct FilesConfig {
     pub stream_open_timeout: Duration,
 }
 
+/// The default configuration, with this machine's default destination.
+///
+/// Only available with a compiled-in [`FileSink`]. A build without one has no
+/// answer to "where do downloads go", and inventing a path would be worse
+/// than making the caller say. Use [`FilesConfig::with_destination`] there.
+#[cfg(feature = "unix-fs")]
 impl Default for FilesConfig {
     fn default() -> Self {
+        Self::with_destination(Destination::default_location())
+    }
+}
+
+impl FilesConfig {
+    /// The default limits and timeouts, against an explicit destination.
+    pub fn with_destination(destination: Destination) -> Self {
         Self {
-            destination: Destination::default_location(),
+            destination,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             accept_timeout: ACCEPT_TIMEOUT,
             stream_open_timeout: STREAM_OPEN_TIMEOUT,

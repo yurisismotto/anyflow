@@ -114,11 +114,20 @@ dependencies = [
 name = "anyflow-cli"
 version = "0.1.0"
 dependencies = [
- "anyflow-core",
- "anyflow-daemon",
+ "anyflow-control",
+ "anyflow-linux",
  "anyhow",
  "clap",
  "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "anyflow-control"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
  "tokio",
 ]
 
@@ -156,12 +165,14 @@ dependencies = [
  "anyflow-capability-battery",
  "anyflow-capability-clipboard",
  "anyflow-capability-files",
+ "anyflow-control",
  "anyflow-core",
+ "anyflow-linux",
  "anyflow-proto",
+ "anyflow-runtime",
  "anyhow",
  "async-trait",
  "clap",
- "mdns-sd",
  "prost",
  "qrcode",
  "rustls",
@@ -180,7 +191,8 @@ dependencies = [
 name = "anyflow-gui"
 version = "0.1.0"
 dependencies = [
- "anyflow-daemon",
+ "anyflow-control",
+ "anyflow-linux",
  "anyhow",
  "async-channel",
  "glib-build-tools",
@@ -192,12 +204,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyflow-linux"
+version = "0.1.0"
+dependencies = [
+ "anyflow-control",
+ "anyflow-core",
+ "anyflow-proto",
+ "async-trait",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "anyflow-proto"
 version = "0.1.0"
 dependencies = [
  "prost",
  "prost-build",
  "protox",
+]
+
+[[package]]
+name = "anyflow-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyflow-capability-battery",
+ "anyflow-capability-clipboard",
+ "anyflow-capability-files",
+ "anyflow-control",
+ "anyflow-core",
+ "anyflow-proto",
+ "anyhow",
+ "async-trait",
+ "mdns-sd",
+ "qrcode",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
 ]
 
 [[package]]

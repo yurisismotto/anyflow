@@ -1,7 +1,7 @@
 //! The trust store: who is trusted, with what, and how to stop.
 
 use adw::prelude::*;
-use anyflow_daemon::control::{Request, Response};
+use anyflow_control::{Request, Response};
 
 use super::Pages;
 use crate::widgets::{self, SPACING_SM};

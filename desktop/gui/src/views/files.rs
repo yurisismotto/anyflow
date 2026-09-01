@@ -1,6 +1,6 @@
 //! Transfers: what is moving, and what finished during this daemon run.
 
-use anyflow_daemon::control::{Request, Response, TransferReport};
+use anyflow_control::{Request, Response, TransferReport};
 use gtk::prelude::*;
 
 use crate::widgets::{self, Status, SPACING_SM, SPACING_XS};

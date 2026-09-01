@@ -1,7 +1,7 @@
 //! The dashboard: what is here, and what can be done with it now.
 
 use adw::prelude::*;
-use anyflow_daemon::control::{DeviceReport, Request, Response};
+use anyflow_control::{DeviceReport, Request, Response};
 
 use super::Pages;
 use crate::widgets::{self, Status, SPACING_MD, SPACING_SM, SPACING_XS};

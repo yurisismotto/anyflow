@@ -5,11 +5,27 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-[lints]
-workspace = true
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Portable, security-critical: `unsafe` is forbidden outright.
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
 
 [dependencies]
-anyflow-core = { version = "0.1.0", path = "../../core" }
+# `default-features = false`: a capability crate needs the protocol half of
+# `anyflow-core`, never its Unix filesystem adapter. Leaving the default on
+# would drag `unix-fs` into every build through feature unification, and the
+# portability gate would then pass for the wrong reason.
+anyflow-core = { version = "0.1.0", path = "../../core", default-features = false }
 anyflow-proto = { version = "0.1.0", path = "../../proto" }
 prost = "0.14"
 tokio = { version = "1", features = ["sync", "time"] }
