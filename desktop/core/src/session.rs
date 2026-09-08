@@ -1411,6 +1411,120 @@ mod dispatch_tests {
         }
     }
 
+    /// A capability that records the first payload byte of every inbound
+    /// message, in the order `on_message` saw them.
+    struct RecordingCapability {
+        seen: Arc<std::sync::Mutex<Vec<u8>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::capability::Capability for RecordingCapability {
+        fn id(&self) -> &str {
+            "record.v1"
+        }
+
+        async fn on_message(&self, _ctx: &CapabilityContext, payload: &[u8]) -> Result<()> {
+            if let Some(byte) = payload.first() {
+                if let Ok(mut seen) = self.seen.lock() {
+                    seen.push(*byte);
+                }
+            }
+            // Yield on every message. A dispatch loop that handled messages
+            // concurrently would interleave here and the recorded order would
+            // stop matching the wire order; one that awaits them serially
+            // cannot.
+            tokio::task::yield_now().await;
+            Ok(())
+        }
+    }
+
+    fn spawn_recording_session(
+        seen: Arc<std::sync::Mutex<Vec<u8>>>,
+    ) -> (DuplexStream, tokio::task::JoinHandle<Result<()>>) {
+        let registry = CapabilityRegistry::builder()
+            .register(Arc::new(RecordingCapability { seen }))
+            .build();
+        let host: Arc<dyn SessionHost> = Arc::new(TestHost { registry });
+        let established = Established {
+            peer: fp(0xbb),
+            device: v1::DeviceInfo {
+                device_id: "peer".into(),
+                device_name: "peer".into(),
+                platform: v1::Platform::Android as i32,
+                identity_fingerprint: fp(0xbb).to_hex(),
+            },
+            negotiated_capabilities: vec!["record.v1".into()],
+            protocol_version: PROTOCOL_VERSION_MAX,
+        };
+        let state = EnvelopeState {
+            factory: EnvelopeFactory::new(PROTOCOL_VERSION_MAX),
+            guard: ReplayGuard::new(),
+        };
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let task = tokio::spawn(run_session(theirs, host, established, state));
+        (ours, task)
+    }
+
+    /// **Inbound capability messages reach a handler in wire order.**
+    ///
+    /// This is an explicit protocol guarantee, not an accident of the current
+    /// implementation, and capabilities are entitled to rely on it. It holds
+    /// by construction at three points: TLS 1.3 over TCP is an ordered byte
+    /// stream; one reader task parses frames sequentially into a FIFO channel;
+    /// and the dispatch loop **awaits** `on_message` before reading the next
+    /// message, so two messages are never in flight at once.
+    ///
+    /// A capability whose semantics depend on ordering — one where a later
+    /// message retracts an earlier one, or where a bracketing marker must
+    /// arrive after the items it brackets — needs this to be true, and would
+    /// otherwise have to carry its own sequence numbers. It does not.
+    #[tokio::test]
+    async fn inbound_capability_messages_reach_the_handler_in_wire_order() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (mut peer, task) = spawn_recording_session(Arc::clone(&seen));
+
+        const COUNT: u8 = 64;
+        for i in 0..COUNT {
+            let env = v1::Envelope {
+                protocol_version: PROTOCOL_VERSION_MAX,
+                message_id: vec![i; 16],
+                sequence: u64::from(i) + 1,
+                timestamp_unix_ms: now_unix_ms(),
+                correlation_id: Vec::new(),
+                body: Some(v1::envelope::Body::CapabilityMessage(
+                    v1::CapabilityMessage {
+                        capability_id: "record.v1".into(),
+                        payload: vec![i],
+                    },
+                )),
+            };
+            framing::write_envelope(&mut peer, &env)
+                .await
+                .expect("the peer end should accept a frame");
+        }
+
+        // Wait for the handler to have seen them all.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let got = seen.lock().map(|s| s.len()).unwrap_or(0);
+            if got == COUNT as usize || Instant::now() > deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let recorded = seen.lock().expect("not poisoned").clone();
+        let expected: Vec<u8> = (0..COUNT).collect();
+        assert_eq!(
+            recorded, expected,
+            "capability messages must reach the handler in the order they \
+             arrived on the wire"
+        );
+
+        drop(peer);
+        let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
+    }
+
     /// Counts `flood.v1` replies arriving on the peer's end until `budget`
     /// elapses with nothing new.
     async fn drain_replies(peer: &mut DuplexStream, budget: Duration) -> usize {

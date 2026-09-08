@@ -20,3 +20,5 @@ alternatives that were actually considered, and what the decision costs.
 | [0013](ADR-0013-file-transfer-data-stream.md) | The `files.v1` authenticated data stream | Accepted |
 | [0014](ADR-0014-clipboard-change-notification.md) | Detecting clipboard changes on the Linux desktop | Accepted |
 | [0015](ADR-0015-notification-access.md) | Android notification access and the `notifications.v1` security boundary | Accepted |
+| [0016](ADR-0016-notification-identity.md) | `notifications.v1` opaque notification identity | Accepted |
+| [0017](ADR-0017-capability-roles.md) | Runtime-narrowable capability roles | Accepted |

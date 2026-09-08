@@ -102,3 +102,17 @@ Adding a capability touches four things and none of them are the transport:
 Adding a protocol message means a new `oneof` variant and a new arm in each
 session loop. An old peer that receives one closes the connection with a
 protocol violation, which is why the version range in `HELLO` exists.
+
+A capability that only reaches step 1 is *defined but not implemented*: its
+schema compiles on both sides and no `Capability` claims the id, so it never
+appears in a `HELLO` and no peer can tell it exists. `notifications.v1` is in
+exactly that state today — see [NOTIFICATIONS.md](NOTIFICATIONS.md).
+
+## The capability documents
+
+| Capability | State | Document |
+| --- | --- | --- |
+| `battery.v1` | Implemented | [PROTOCOL.md](PROTOCOL.md) |
+| `files.v1` | Implemented | [FILES.md](FILES.md) |
+| `clipboard.v1` | Implemented | [CLIPBOARD.md](CLIPBOARD.md) |
+| `notifications.v1` | **Protocol only — nothing mirrors a notification yet** | [NOTIFICATIONS.md](NOTIFICATIONS.md) |
