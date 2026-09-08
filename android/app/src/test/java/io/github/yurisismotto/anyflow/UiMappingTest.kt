@@ -232,4 +232,184 @@ class UiMappingTest {
     fun `destructive actions are declared in one place`() {
         assertTrue(UiMapping.DESTRUCTIVE_ACTIONS.contains("forget_device"))
     }
+
+    // -----------------------------------------------------------------------
+    // The Sharesheet send outcome (issue #12)
+    //
+    // The defect these guard: `SendActivity.startSend` discarded the `Result`
+    // of `files.offer`, so an offer that was refused before a transfer row
+    // existed left the button on "Sending…" with nothing on the way. These
+    // pin the property that makes that impossible — every `Result` maps to a
+    // state that is not `Sending`.
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `a successful offer leaves the sending state`() {
+        val outcome = UiMapping.sendOutcome(Result.success("0123abcd"))
+        assertEquals(UiMapping.SendAttempt.Sent, outcome)
+        assertNotEquals(UiMapping.SendAttempt.Sending, outcome)
+    }
+
+    @Test
+    fun `a failed offer leaves the sending state and says why`() {
+        val outcome = UiMapping.sendOutcome(
+            Result.failure(IllegalStateException("not connected")),
+        )
+        assertEquals(UiMapping.SendAttempt.Failed("not connected"), outcome)
+        assertNotEquals(UiMapping.SendAttempt.Sending, outcome)
+    }
+
+    @Test
+    fun `a failure can be retried from`() {
+        val outcome = UiMapping.sendOutcome(
+            Result.failure(IllegalStateException("too many transfers at once")),
+        )
+        assertTrue(
+            "a failed attempt must re-enable the Send button, or the screen " +
+                "is the dead end issue #12 described",
+            outcome.canSend,
+        )
+    }
+
+    @Test
+    fun `an attempt in flight cannot be started a second time`() {
+        // Double-tap and re-entry: only Sending and Sent hold the button.
+        assertFalse(UiMapping.SendAttempt.Sending.canSend)
+        assertFalse(UiMapping.SendAttempt.Sent.canSend)
+        assertTrue(UiMapping.SendAttempt.Idle.canSend)
+    }
+
+    @Test
+    fun `no offer result can leave the screen sending`() {
+        // The exhaustive statement of the bug: whatever `offer` returns, the
+        // state it produces is one a person can act on.
+        val results = listOf(
+            Result.success("id"),
+            Result.failure(IllegalStateException("this computer is not allowed to receive files")),
+            Result.failure(IllegalStateException("not connected")),
+            Result.failure(IllegalStateException("too many transfers at once")),
+            Result.failure(IllegalStateException("that file has no name AnyFlow can send safely")),
+            Result.failure(IllegalStateException("that file could not be read")),
+            Result.failure(java.io.IOException("the app that shared this file would not open it")),
+            Result.failure(SecurityException("Permission Denial")),
+        )
+        for (result in results) {
+            val outcome = UiMapping.sendOutcome(result)
+            assertNotEquals(
+                "a $result must not leave the screen on Sending",
+                UiMapping.SendAttempt.Sending,
+                outcome,
+            )
+            assertTrue(
+                "a $result must reach a state the user can see",
+                outcome is UiMapping.SendAttempt.Sent || outcome is UiMapping.SendAttempt.Failed,
+            )
+        }
+    }
+
+    @Test
+    fun `the capability's own refusals are shown as written`() {
+        // These are authored for a person and carry no file data, so they are
+        // not replaced by a vaguer message.
+        for (stated in listOf(
+            "this computer is not allowed to receive files",
+            "not connected",
+            "too many transfers at once",
+            "that file has no name AnyFlow can send safely",
+            "that file could not be read",
+        )) {
+            assertEquals(stated, UiMapping.sendFailureMessage(IllegalStateException(stated)))
+        }
+    }
+
+    @Test
+    fun `a platform error never puts the shared file on screen`() {
+        // The real shapes: a content provider names the URI in its message,
+        // and a permission denial names the provider and often the document
+        // id with it. Neither may be shown or logged.
+        val leaky = listOf(
+            java.io.FileNotFoundException(
+                "No content provider: content://media/external/images/media/1234",
+            ),
+            SecurityException(
+                "Permission Denial: opening provider com.example.vault from " +
+                    "ProcessRecord{anyflow} requires the provider be exported",
+            ),
+            RuntimeException("/storage/emulated/0/Documents/tax-return-2025.pdf"),
+        )
+        for (error in leaky) {
+            val shown = UiMapping.sendFailureMessage(error)
+            assertEquals("AnyFlow could not send that file.", shown)
+            assertFalse("a URI must not reach the screen", shown.contains("content://"))
+            assertFalse("a path must not reach the screen", shown.contains("/storage/"))
+            assertFalse(
+                "a filename must not reach the screen",
+                shown.contains("tax-return-2025"),
+            )
+        }
+    }
+
+    @Test
+    fun `an error with no message still says something`() {
+        assertEquals(
+            "AnyFlow could not send that file.",
+            UiMapping.sendFailureMessage(IllegalStateException()),
+        )
+        assertEquals(
+            "AnyFlow could not send that file.",
+            UiMapping.sendFailureMessage(IllegalStateException("   ")),
+        )
+        assertEquals("AnyFlow could not send that file.", UiMapping.sendFailureMessage(null))
+    }
+
+    @Test
+    fun `the failure message carries nothing but the message`() {
+        // A `Failed` holds a string, not a throwable — so there is no field a
+        // stack trace or a URI could travel in to a log or a crash reporter.
+        val outcome = UiMapping.sendOutcome(
+            Result.failure(
+                IllegalStateException(
+                    "that file could not be read",
+                    java.io.FileNotFoundException("content://media/external/1234"),
+                ),
+            ),
+        ) as UiMapping.SendAttempt.Failed
+
+        assertEquals("that file could not be read", outcome.message)
+        assertFalse(outcome.toString().contains("content://"))
+    }
+
+    @Test
+    fun `the button never reads Sending once the attempt has finished`() {
+        // The literal symptom of issue #12, as an assertion.
+        for (finished in listOf(
+            UiMapping.SendAttempt.Idle,
+            UiMapping.SendAttempt.Failed("not connected"),
+        )) {
+            assertNotEquals(
+                "a finished attempt must not still read as Sending",
+                "Sending…",
+                UiMapping.sendButtonLabel(finished),
+            )
+        }
+        assertEquals("Send", UiMapping.sendButtonLabel(UiMapping.SendAttempt.Idle))
+        assertEquals("Try again", UiMapping.sendButtonLabel(UiMapping.SendAttempt.Failed("x")))
+        assertEquals("Sending…", UiMapping.sendButtonLabel(UiMapping.SendAttempt.Sending))
+    }
+
+    @Test
+    fun `every offer result produces a button a person can read`() {
+        // Label and enablement agree: nothing is both disabled and inviting.
+        for (result in listOf(
+            Result.success("id"),
+            Result.failure(IllegalStateException("not connected")),
+            Result.failure(java.io.IOException("opaque")),
+        )) {
+            val outcome = UiMapping.sendOutcome(result)
+            val label = UiMapping.sendButtonLabel(outcome)
+            if (outcome.canSend) {
+                assertNotEquals("an enabled button must not read as Sending", "Sending…", label)
+            }
+        }
+    }
 }

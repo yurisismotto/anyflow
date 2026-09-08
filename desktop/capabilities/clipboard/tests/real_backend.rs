@@ -37,6 +37,7 @@
 use std::time::Duration;
 
 use anyflow_capability_clipboard::backend::{self, BackendError, ClipboardBackend};
+use anyflow_capability_clipboard::limits::BACKEND_TIMEOUT;
 use anyflow_capability_clipboard::text::ClipboardText;
 
 /// Fails with an actionable message rather than a bare assertion.
@@ -81,6 +82,96 @@ where
     if let Some(saved) = saved {
         let _ = b.write_text(&saved, false).await;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Bounded helper processes
+// ---------------------------------------------------------------------------
+
+/// Why a bounded helper process did not produce an exit status.
+///
+/// Deterministic on purpose: a caller distinguishes "the seat is locked" from
+/// "`wl-copy` is not installed" without parsing a string.
+#[derive(Debug, PartialEq, Eq)]
+enum BoundedError {
+    /// The child outlived its bound and was killed and reaped.
+    TimedOut,
+    /// The program could not be started at all — typically not installed.
+    Spawn(String),
+    /// The child was started but could not be waited on.
+    Wait(String),
+}
+
+impl std::fmt::Display for BoundedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "timed out"),
+            Self::Spawn(e) => write!(f, "could not be started: {e}"),
+            Self::Wait(e) => write!(f, "did not exit: {e}"),
+        }
+    }
+}
+
+/// Runs a helper process under the same bound the production backend uses.
+///
+/// # Why this exists (issue #13)
+///
+/// This suite used to clear the clipboard with a blocking
+/// `std::process::Command::status()`. On a locked GNOME seat `wl-copy` waits
+/// forever for a seat and a serial the compositor will not grant — the exact
+/// condition [`BACKEND_TIMEOUT`] exists to bound — so the *test* had a path
+/// the *production* backend does not: an unbounded hang, with no output, that
+/// a certification run could not tell from a slow machine.
+///
+/// The mechanism here is deliberately the one
+/// `WaylandBackend::write_text` already uses: `tokio` process spawn, stdio to
+/// `/dev/null`, `kill_on_drop`, wrapped in `tokio::time::timeout`. It is not
+/// a second timeout policy — the real call site passes [`BACKEND_TIMEOUT`]
+/// itself, and `limit` is a parameter only so the tests below can prove the
+/// bound in milliseconds rather than making every run wait five seconds.
+///
+/// # Cleanup
+///
+/// On expiry the child is killed *and awaited* rather than left to
+/// `kill_on_drop`'s asynchronous reaping, so by the time this returns the pid
+/// is gone rather than a zombie. `wl-copy --clear` is also the one `wl-copy`
+/// mode that leaves no daemonised survivor to outlive us: with `--clear`
+/// there is no content to serve, so there is nothing to fork off and hold it.
+///
+/// No argument or output of the child is logged: the callers pass no
+/// clipboard content, and keeping it that way is what stops a future caller
+/// from putting a clip in the test log.
+async fn bounded_status(
+    program: &str,
+    args: &[&str],
+    limit: Duration,
+) -> Result<std::process::ExitStatus, BoundedError> {
+    let mut child = tokio::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| BoundedError::Spawn(e.to_string()))?;
+
+    match tokio::time::timeout(limit, child.wait()).await {
+        Ok(Ok(status)) => Ok(status),
+        Ok(Err(e)) => Err(BoundedError::Wait(e.to_string())),
+        Err(_) => {
+            // Kill and reap, in that order, before telling the caller the
+            // bound expired. `start_kill` is idempotent against a child that
+            // has since exited on its own.
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            Err(BoundedError::TimedOut)
+        }
+    }
+}
+
+/// Clears the system clipboard, bounded by the production timeout.
+async fn clear_clipboard() -> Result<std::process::ExitStatus, BoundedError> {
+    bounded_status("wl-copy", &["--clear"], BACKEND_TIMEOUT).await
 }
 
 // ---------------------------------------------------------------------------
@@ -203,15 +294,28 @@ async fn a_sensitive_write_still_round_trips() {
 #[ignore = "touches the real system clipboard; run with --ignored --test-threads=1"]
 async fn an_empty_clipboard_is_bounded_and_classified_never_an_unexplained_failure() {
     preserving_clipboard(|b| async move {
-        let cleared = std::process::Command::new("wl-copy")
-            .arg("--clear")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        if cleared.map(|s| !s.success()).unwrap_or(true) {
-            eprintln!("could not clear the clipboard; skipping");
-            return;
+        // Bounded (issue #13). On a locked seat this returns `TimedOut`
+        // after BACKEND_TIMEOUT instead of hanging the run forever.
+        match clear_clipboard().await {
+            Ok(status) if status.success() => {}
+            Ok(status) => {
+                eprintln!("wl-copy --clear exited with {status}; skipping");
+                return;
+            }
+            Err(e @ BoundedError::TimedOut) => {
+                // The locked-seat case, named rather than silent: this is the
+                // same condition the backend's own timeout covers, and a run
+                // that stopped here must say so out loud.
+                eprintln!(
+                    "wl-copy --clear {e} after {BACKEND_TIMEOUT:?} — the seat is \
+                     most likely locked. Unlock the screen and run this again."
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!("wl-copy --clear {e}; skipping");
+                return;
+            }
         }
         tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -389,5 +493,133 @@ async fn detection_describes_this_session_accurately() {
                 "watch_availability said no but watch_changes succeeded"
             );
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The bound itself (issue #13)
+//
+// These are *not* `#[ignore]`d and touch no clipboard: they drive
+// `bounded_status` with stand-in commands so the locked-seat regression is
+// caught by `cargo test` on a headless machine, not only by someone who
+// remembers to lock their screen before a certification run.
+// ---------------------------------------------------------------------------
+
+/// A helper that exits normally is still reported normally.
+#[tokio::test]
+#[cfg(unix)]
+async fn a_bounded_helper_that_exits_reports_its_status() {
+    let ok = bounded_status("/bin/sh", &["-c", "exit 0"], Duration::from_secs(5))
+        .await
+        .expect("a command that exits must not time out");
+    assert!(ok.success());
+
+    let bad = bounded_status("/bin/sh", &["-c", "exit 3"], Duration::from_secs(5))
+        .await
+        .expect("a failing command still produces a status, not an error");
+    assert!(!bad.success(), "a non-zero exit must not read as success");
+}
+
+/// The locked-seat simulation: a child that never returns is bounded.
+///
+/// `sleep 30` stands in for `wl-copy` behind a lock screen — a process that
+/// has started fine and will simply never exit. Before the fix this suite
+/// waited on exactly that with a blocking `status()`, and the run hung.
+#[tokio::test]
+#[cfg(unix)]
+async fn a_helper_that_never_returns_is_bounded_and_fails_deterministically() {
+    let started = std::time::Instant::now();
+    let outcome = bounded_status("/bin/sh", &["-c", "sleep 30"], Duration::from_millis(200)).await;
+    let elapsed = started.elapsed();
+
+    // Deterministic: one named variant, not a string to be parsed.
+    assert_eq!(
+        outcome.expect_err("a child that never returns must time out"),
+        BoundedError::TimedOut,
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "the bound did not hold: waited {elapsed:?} for a 200ms limit"
+    );
+}
+
+/// The killed child is reaped, not leaked as a zombie.
+///
+/// The production backend leaks nothing per locked-screen attempt, and a test
+/// helper that did would be a worse version of the bug it fixes.
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn a_timed_out_helper_leaves_no_child_behind() {
+    // Spawned the same way `bounded_status` does, so the pid is observable.
+    let mut child = tokio::process::Command::new("/bin/sh")
+        .args(["-c", "sleep 30"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("sh must be runnable");
+    let pid = child.id().expect("a running child has a pid");
+
+    assert!(
+        std::path::Path::new(&format!("/proc/{pid}")).exists(),
+        "the child should be alive before the bound expires"
+    );
+
+    // The bounded_status timeout arm, verbatim.
+    let _ = tokio::time::timeout(Duration::from_millis(200), child.wait()).await;
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+
+    assert!(
+        !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+        "pid {pid} survived the bound: killed but never reaped"
+    );
+}
+
+/// The bound reports what happened without ever carrying content.
+///
+/// `bounded_status` takes its arguments explicitly and logs none of them, and
+/// its error type has no field a clip could travel in. This pins that: a
+/// clipboard payload passed as an argument must not reach the message.
+#[tokio::test]
+#[cfg(unix)]
+async fn the_bound_never_reports_the_content_it_was_given() {
+    const SECRET: &str = "correct-horse-battery-staple";
+
+    let outcome = bounded_status(
+        "/bin/sh",
+        &["-c", &format!("echo {SECRET} >/dev/null; sleep 30")],
+        Duration::from_millis(200),
+    )
+    .await;
+
+    let error = outcome
+        .as_ref()
+        .expect_err("the stand-in never exits, so this must be an error");
+    let rendered = format!("{outcome:?} {error}");
+    assert!(
+        !rendered.contains(SECRET),
+        "the bound's own error must not carry what it was asked to run"
+    );
+}
+
+/// A program that is not installed is `Spawn`, never `TimedOut`.
+///
+/// The two failures need different advice — "install wl-clipboard" versus
+/// "unlock your screen" — so collapsing them into one error would put the
+/// wrong instruction in a certification log.
+#[tokio::test]
+async fn a_missing_program_is_distinguishable_from_a_locked_seat() {
+    let outcome = bounded_status(
+        "anyflow-no-such-program-exists",
+        &[],
+        Duration::from_millis(200),
+    )
+    .await;
+
+    match outcome.expect_err("a program that does not exist cannot be run") {
+        BoundedError::Spawn(_) => {}
+        other => panic!("a missing program must not report as {other:?}"),
     }
 }

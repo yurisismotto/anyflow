@@ -78,7 +78,9 @@ class MainActivity : ComponentActivity() {
             if (uri == null || peer == null) return@registerForActivityResult
             lifecycleScope.launch {
                 app.files.offer(peer, uri)
-                    .onFailure { showError(it.message ?: "Could not send that file.") }
+                    // Same mapping as the Sharesheet: a platform exception
+                    // from a content provider must not put the URI on screen.
+                    .onFailure { showError(UiMapping.sendFailureMessage(it)) }
             }
         }
 
