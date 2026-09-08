@@ -104,6 +104,83 @@ object UiMapping {
     fun transferKey(transferId: String): String = "transfer:$transferId"
 
     /**
+     * How far a Sharesheet send has got.
+     *
+     * The Sharesheet screen has no second chance to explain itself: it is a
+     * modal over someone else's app, and when it is wrong the person's only
+     * recourse is to close it and guess. So a send has exactly three
+     * observable outcomes and no fourth, silent one — which is what issue #12
+     * was. [Sending] must always be replaced, never merely entered.
+     */
+    sealed interface SendAttempt {
+        /** Nothing started, or a failure the user may retry from. */
+        data object Idle : SendAttempt
+
+        /** The offer is out and no answer has come back. */
+        data object Sending : SendAttempt
+
+        /** The offer was accepted for transfer; progress takes over. */
+        data object Sent : SendAttempt
+
+        /** Terminal for this attempt, and retryable. */
+        data class Failed(val message: String) : SendAttempt
+
+        /** Whether the Send button may be pressed. */
+        val canSend: Boolean get() = this !is Sending && this !is Sent
+    }
+
+    /**
+     * What the Send button says, given where the attempt has got to.
+     *
+     * Shared by both Sharesheet screens so the two cannot drift, and stated
+     * here rather than inline so the property issue #12 violated — that
+     * "Sending…" is never what a finished attempt reads as — is a test rather
+     * than a reading of a nested conditional.
+     */
+    fun sendButtonLabel(attempt: SendAttempt): String = when (attempt) {
+        is SendAttempt.Idle -> "Send"
+        is SendAttempt.Sending, is SendAttempt.Sent -> "Sending…"
+        is SendAttempt.Failed -> "Try again"
+    }
+
+    /**
+     * The outcome of one `files.offer`, as the screen should show it.
+     *
+     * The whole of issue #12 lives in this function being called at all.
+     * `Result` has no failure branch you are forced to take, so the failure
+     * branch was simply absent and the screen kept a state the transfer layer
+     * had already abandoned. Stated as a total function over `Result`, there
+     * is no path that returns [SendAttempt.Sending] and none that returns
+     * nothing.
+     */
+    fun sendOutcome(result: Result<String>): SendAttempt = result.fold(
+        onSuccess = { SendAttempt.Sent },
+        onFailure = { SendAttempt.Failed(sendFailureMessage(it)) },
+    )
+
+    /**
+     * Turns a failed `files.offer` into something safe to put on a screen.
+     *
+     * The capability states its own refusals — not connected, not authorized,
+     * too many at once, unusable name, unreadable file — as
+     * `IllegalStateException` with a message written for a person and
+     * containing no file data. Those are shown as written.
+     *
+     * Anything else is replaced. This is the load-bearing half: a platform
+     * exception raised while opening a `content://` URI carries the whole URI
+     * in its message, and on many providers that URI and the display name are
+     * enough to identify the file. `FileNotFoundException: No content
+     * provider: content://…` on a Sharesheet screen is a small leak of what
+     * someone was trying to send, to whoever is looking at the phone. The
+     * capability already restates that one — this is the backstop that keeps
+     * a future path from reintroducing it.
+     */
+    fun sendFailureMessage(error: Throwable?): String {
+        val stated = (error as? IllegalStateException)?.message?.takeIf { it.isNotBlank() }
+        return stated ?: "AnyFlow could not send that file."
+    }
+
+    /**
      * Actions that destroy something and must be presented apart.
      *
      * A list rather than a flag on each button, so that "is this destructive"

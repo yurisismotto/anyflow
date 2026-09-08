@@ -224,7 +224,15 @@ class FileTransferManager(
         val (size, digest) = try {
             shared.measure()
         } catch (e: Exception) {
-            return@withContext Result.failure(e)
+            // Re-stated, not re-thrown. A platform exception from a content
+            // provider routinely embeds the whole `content://` URI — and on
+            // some providers the display name with it — so handing it to a
+            // caller that will show or log it is how a shared file's name
+            // reaches a place it was never meant to be. The cause is kept for
+            // a debugger and is deliberately not part of the message.
+            return@withContext Result.failure(
+                IllegalStateException("that file could not be read", e),
+            )
         }
 
         val idBytes = ByteArray(StreamAuth.TRANSFER_ID_LENGTH).also { random.nextBytes(it) }

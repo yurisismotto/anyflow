@@ -87,7 +87,7 @@ class SendActivity : ComponentActivity() {
                         SendTextScreen(
                             text = sharedText,
                             peer = peer,
-                            onSend = { target, text -> startTextSend(target, text) },
+                            onSend = { target, text, onOutcome -> startTextSend(target, text, onOutcome) },
                             onClose = { finish() },
                         )
                     } else {
@@ -95,7 +95,7 @@ class SendActivity : ComponentActivity() {
                             app = app,
                             uri = uri,
                             peer = peer,
-                            onSend = { target, file -> startSend(target, file) },
+                            onSend = { target, file, onOutcome -> startSend(target, file, onOutcome) },
                             onClose = { finish() },
                         )
                     }
@@ -111,7 +111,11 @@ class SendActivity : ComponentActivity() {
      * hint, and inferring one from the text would be a heuristic dressed up
      * as a security control.
      */
-    private fun startTextSend(peer: TrustStore.TrustedPeer, text: ClipboardText) {
+    private fun startTextSend(
+        peer: TrustStore.TrustedPeer,
+        text: ClipboardText,
+        onOutcome: (UiMapping.SendAttempt) -> Unit,
+    ) {
         ConnectionService.start(this)
         lifecycleScope.launch {
             app.clipboard.sendText(peer.fingerprint, text, sensitive = false)
@@ -121,14 +125,22 @@ class SendActivity : ComponentActivity() {
                         "Sent ${'$'}{it} bytes to ${'$'}{peer.deviceName}.",
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
+                    onOutcome(UiMapping.SendAttempt.Sent)
                     finish()
                 }
                 .onFailure { failure ->
+                    // The toast says what happened; the button has to come
+                    // back, or this screen has the same dead end issue #12
+                    // described, one function along.
+                    val outcome = UiMapping.SendAttempt.Failed(
+                        failure.message ?: "Could not send that text.",
+                    )
                     android.widget.Toast.makeText(
                         this@SendActivity,
-                        failure.message ?: "Could not send that text.",
+                        outcome.message,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
+                    onOutcome(outcome)
                 }
         }
     }
@@ -145,11 +157,37 @@ class SendActivity : ComponentActivity() {
         return ClipboardText.validate(raw).getOrNull()
     }
 
-    private fun startSend(peer: TrustStore.TrustedPeer, uri: Uri) {
+    /**
+     * Offers the shared file, and reports the outcome back to the screen.
+     *
+     * The `Result` used to be discarded (issue #12). Every early refusal
+     * inside `offer` — not connected, not granted, too many at once, a name
+     * the sanitizer will not pass, a file that cannot be read — returns
+     * before a transfer row exists, so nothing appeared in `files.visible`
+     * and the button sat on "Sending…" until the person killed the screen.
+     * The offer had not been made and never would be; only the UI thought
+     * otherwise.
+     *
+     * [onOutcome] therefore runs on every path, and the states it can carry
+     * are terminal in both directions.
+     *
+     * It is safe against the Activity going away underneath it: this runs in
+     * `lifecycleScope`, which is cancelled at `onDestroy`, so the
+     * continuation after `offer` does not resume into a dead composition. No
+     * cancellation is invented here either — a cancelled scope means the
+     * screen is gone, and there is nothing left to tell.
+     */
+    private fun startSend(
+        peer: TrustStore.TrustedPeer,
+        uri: Uri,
+        onOutcome: (UiMapping.SendAttempt) -> Unit,
+    ) {
         // The connection is what carries the offer, so make sure there is one.
         ConnectionService.start(this)
         lifecycleScope.launch {
-            app.files.offer(peer.fingerprint, uri)
+            // Nothing about the file is logged here: the message is the
+            // capability's own words, and the throwable is never printed.
+            onOutcome(UiMapping.sendOutcome(app.files.offer(peer.fingerprint, uri)))
         }
     }
 
@@ -188,11 +226,11 @@ private fun SendScreen(
     app: AnyFlowApp,
     uri: Uri?,
     peer: TrustStore.TrustedPeer?,
-    onSend: (TrustStore.TrustedPeer, Uri) -> Unit,
+    onSend: (TrustStore.TrustedPeer, Uri, (UiMapping.SendAttempt) -> Unit) -> Unit,
     onClose: () -> Unit,
 ) {
     val transfers by app.files.visible.collectAsState()
-    var started by remember { mutableStateOf(false) }
+    var attempt by remember { mutableStateOf<UiMapping.SendAttempt>(UiMapping.SendAttempt.Idle) }
 
     // Read once, off the composition's hot path: a display name query is
     // cheap, but it still touches another app's provider.
@@ -232,13 +270,20 @@ private fun SendScreen(
 
                 val mine = transfers.filter { it.sending && it.filename == name }
                 if (mine.isEmpty()) {
+                    // The failure is stated above the button rather than in a
+                    // toast: a toast on a Sharesheet is gone before the person
+                    // has finished reading it, and the button beneath it is
+                    // the retry.
+                    (attempt as? UiMapping.SendAttempt.Failed)?.let {
+                        Text(it.message, color = MaterialTheme.colorScheme.error)
+                    }
                     Button(
-                        enabled = !started,
+                        enabled = attempt.canSend,
                         onClick = {
-                            started = true
-                            onSend(peer, uri)
+                            attempt = UiMapping.SendAttempt.Sending
+                            onSend(peer, uri) { outcome -> attempt = outcome }
                         },
-                    ) { Text(if (started) "Sending…" else "Send") }
+                    ) { Text(UiMapping.sendButtonLabel(attempt)) }
                 } else {
                     for (transfer in mine) {
                         TransferRow(transfer)
@@ -264,10 +309,10 @@ private fun SendScreen(
 private fun SendTextScreen(
     text: ClipboardText,
     peer: TrustStore.TrustedPeer?,
-    onSend: (TrustStore.TrustedPeer, ClipboardText) -> Unit,
+    onSend: (TrustStore.TrustedPeer, ClipboardText, (UiMapping.SendAttempt) -> Unit) -> Unit,
     onClose: () -> Unit,
 ) {
-    var started by remember { mutableStateOf(false) }
+    var attempt by remember { mutableStateOf<UiMapping.SendAttempt>(UiMapping.SendAttempt.Idle) }
 
     Column(
         modifier = Modifier.padding(16.dp).fillMaxWidth(),
@@ -302,13 +347,16 @@ private fun SendTextScreen(
                         )
                     }
                 }
+                (attempt as? UiMapping.SendAttempt.Failed)?.let {
+                    Text(it.message, color = MaterialTheme.colorScheme.error)
+                }
                 Button(
-                    enabled = !started,
+                    enabled = attempt.canSend,
                     onClick = {
-                        started = true
-                        onSend(peer, text)
+                        attempt = UiMapping.SendAttempt.Sending
+                        onSend(peer, text) { outcome -> attempt = outcome }
                     },
-                ) { Text(if (started) "Sending…" else "Send") }
+                ) { Text(UiMapping.sendButtonLabel(attempt)) }
             }
         }
 
