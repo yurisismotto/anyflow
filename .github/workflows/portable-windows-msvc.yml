@@ -158,6 +158,7 @@ jobs:
             'identity_and_store.rs',
             'identity_seam.rs',
             'identity_states.rs',
+            'notifications_protocol.rs',
             'pairing.rs',
             'portable_boundary.rs',
             'protocol.rs'
@@ -186,6 +187,7 @@ jobs:
             -p anyflow-core `
             --lib `
             --test identity_seam `
+            --test notifications_protocol `
             --test pairing `
             --test portable_boundary `
             --test protocol

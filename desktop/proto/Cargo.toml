@@ -26,3 +26,11 @@ prost = "0.14.3"
 [build-dependencies]
 prost-build = "0.14.3"
 protox = "0.9.1"
+
+[dev-dependencies]
+# The field-set regression test compiles the same `.proto` files the build
+# script does and asserts against the resulting descriptors. Structural, not a
+# grep over the schema text: a prohibited field cannot hide behind a rename,
+# a comment or a line break.
+prost-types = "0.14.3"
+protox = "0.9.1"

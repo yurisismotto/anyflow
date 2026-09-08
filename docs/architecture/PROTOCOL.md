@@ -274,6 +274,72 @@ protocol message can write any of them.**
 
 Full specification: [CLIPBOARD.md](CLIPBOARD.md).
 
+### `notifications.v1`
+
+**Defined, implemented by nobody.** After wave N0 the schema exists and both
+toolchains compile it, but no `Capability` claims the id, so it never appears in
+a `HELLO` and is never negotiated. Full design:
+[NOTIFICATIONS.md](NOTIFICATIONS.md).
+
+Capability id `notifications.v1`, payload a `NotificationControl` message, on
+the ordinary control session. Control-plane text only, and never a second
+socket: a notification is a few hundred bytes, so the `files.v1` split would buy
+nothing.
+
+```protobuf
+NotificationControl {
+  oneof body {
+    NotificationRoles  roles   = 1;   // what this peer can do, right now
+    NotificationUpsert upsert  = 2;   // posted AND updated — one idempotent message
+    NotificationRemove remove  = 3;   // it is gone; no reason code
+    DismissRequest     dismiss = 4;   // sink -> source, the only such message
+    NotificationResult result  = 5;
+    SyncMarker         sync    = 6;   // BEGIN / END around an active-state snapshot
+  }
+}
+```
+
+`notification_id` is **exactly 16 bytes**, derived at the source as
+`HMAC-SHA256(device_notification_secret, "anyflow/notifications.v1/id/v1" ||
+len32(key) || key)[0..16]`. The raw Android `key` is never transmitted: it
+carries a profile id and an install-specific uid that have no destination-side
+purpose. An id of any other width is refused and *not answered* — there is
+nothing to correlate a reply with. The sink keys its mirror table on
+`(peer_fingerprint, notification_id)`, never on the claimed `origin_device_id`.
+See [ADR-0016](../adr/ADR-0016-notification-identity.md).
+
+**Roles live inside the capability, not in `HELLO`**, because Android
+notification access can be revoked mid-session and the phone must narrow
+immediately without a reconnect. `NotificationRoles` carries the complete set
+plus a strictly monotonic `epoch`, so a replayed announcement cannot re-widen a
+narrowed set. Absent roles mean **no** roles. A role is a peer's claim about
+itself and is **never** an authorization input. See
+[ADR-0017](../adr/ADR-0017-capability-roles.md).
+
+Limits: `notification_id` and `sync_id` exactly 16 bytes; `content_hash` 32 or
+absent; `group_id` 8 or absent; `app_id` ≤ 255 B; `app_label` ≤ 128 B; `title`
+≤ 512 B; `body` ≤ 4096 B; whole message ≤ 8 KiB encoded. The **source**
+truncates display text on a UTF-8 boundary; the **receiver** refuses with
+`TOO_LARGE` and never repairs. Identifiers are never truncated — that is how
+collisions are manufactured. NUL is refused in every string field.
+
+Outcomes: `DISPLAYED`, `REMOVED`, `DUPLICATE`, `NOT_AUTHORIZED`,
+`REJECTED_POLICY`, `REJECTED_ROLE`, `REJECTED_FILTER`, `NOT_DISMISSIBLE`,
+`UNKNOWN_NOTIFICATION`, `TOO_LARGE`, `INVALID`, `RATE_LIMITED`, `UNAVAILABLE`,
+`FAILED`. Every value is safe to send to a peer.
+
+There is **no** field for an action, a reply, a `PendingIntent`, a
+`RemoteViews`, a serialized platform notification, an image or an arbitrary
+blob — and the only `bytes` fields in the schema are the four fixed-width
+identifiers. That is asserted against the compiled descriptors by
+`anyflow-proto`'s `notifications_schema` test, so a field cannot be added
+without someone arguing for it.
+
+Additive: it adds one file, imports nothing, and changes no other schema. An old
+peer that never advertises the id is never sent anything; one that receives a
+`notifications.v1` `CapabilityMessage` anyway gets the existing **non-fatal**
+`ERROR{UNSUPPORTED_CAPABILITY}` and the session survives.
+
 ### `battery.v1`
 
 ```protobuf
