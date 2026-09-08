@@ -15,6 +15,14 @@ keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 > Notifications, media control and browser integration are **not**
 > implemented; the architecture is built to receive them, and that is all.
 >
+> **`notifications.v1` is approved in design only.** This release contains
+> **no notification listener and no notification code**. The design — an
+> optional, off-by-default Android notification mirror, requiring both the
+> Android OS notification-access grant *and* a separate per-peer grant, with no
+> history, no cloud and no telemetry — is recorded in
+> [ADR-0015](docs/adr/ADR-0015-notification-access.md) and specified in
+> [docs/research/notifications-v1/](docs/research/notifications-v1/).
+>
 > Clipboard sharing is, precisely: **automatic Fedora → Android sync**
 > (opt-in, per device) and **manual Android → Fedora send**. It is not
 > "automatic bidirectional clipboard", and saying so would be wrong: Android
@@ -31,7 +39,11 @@ keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 5. Discovery is not trust. Reachability grants nothing.
 6. Explicit pairing, confirmed by a human, with key pinning afterwards.
 7. Every feature is a separately granted capability.
-8. No root, no accessibility service, no ADB, no hidden permissions.
+8. No root, no accessibility service, no ADB, no hidden permissions. A
+   privileged Android capability is acquired only for a named, user-visible
+   feature, through the platform's own API for it, with separately revocable
+   consent — and never to defeat a restriction that protects the user
+   ([ADR-0015](docs/adr/ADR-0015-notification-access.md)).
 9. Logs never contain user content.
 
 ## Layout
@@ -54,7 +66,8 @@ anyflow/
 └── docs/
     ├── architecture/          OVERVIEW.md, PROTOCOL.md, FILES.md
     ├── security/              THREAT_MODEL.md
-    └── adr/                   ADR-0001 … ADR-0013
+    ├── research/              cross-platform expansion, notifications.v1
+    └── adr/                   ADR-0001 … ADR-0015
 ```
 
 ## Running on Fedora
