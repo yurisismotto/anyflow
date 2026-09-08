@@ -5,6 +5,17 @@ transport, `battery.v1`). Clipboard, file transfer, notifications and browser
 integration are **not** implemented and are out of scope; where a decision
 here exists to make those safe later, it is called out.
 
+> **`notifications.v1` — approved, not implemented (2026-09-08).**
+> **The current release contains no `NotificationListenerService` and no
+> notification code of any kind.** A *design* for one has been approved in
+> [ADR-0015](../adr/ADR-0015-notification-access.md), which changes the
+> permanent position stated in **T26** below. T26 is amended rather than
+> replaced: its clipboard reasoning is unaffected and still correct. See **T27**
+> for the notification-access position, and
+> [docs/research/notifications-v1/03](../research/notifications-v1/03-PRIVACY-SECURITY-THREAT-MODEL.md)
+> for the feature's own threat model (T-N01 … T-N16), which becomes part of this
+> document when the feature is implemented and not before.
+
 ## 1. What we are protecting
 
 | Asset | Why it matters |
@@ -480,8 +491,16 @@ Android 10+ refuses `getPrimaryClip` to an app without input focus. Every
 technique that defeats it (`AccessibilityService`, default IME, an invisible
 focus-stealing activity, `READ_LOGS`, root, hidden APIs, reflection) is either
 forbidden or user-hostile, and **AnyFlow uses none of them**. The manifest
-declares no accessibility service, no notification listener, no
-`QUERY_ALL_PACKAGES`, no location and no `SYSTEM_ALERT_WINDOW`.
+declares no accessibility service, no `QUERY_ALL_PACKAGES`, no location and no
+`SYSTEM_ALERT_WINDOW`.
+
+> **Amended 2026-09-08.** This paragraph originally also read *"no notification
+> listener"*, as a permanent statement. It is now qualified by **T27**: the
+> approved `notifications.v1` design adds an optional, default-disabled
+> `NotificationListenerService`. **Nothing else in this paragraph changes**, and
+> the clipboard conclusion below is untouched — notably, a notification listener
+> is still never used to work around the clipboard restriction, which is what
+> this threat is about.
 
 The consequence is stated rather than hidden: Android → Fedora is a manual
 action, `ClipboardCapabilities.AUTO_SEND_SUPPORTED` is `false`, and the UI
@@ -493,6 +512,70 @@ ACL, and neither is ever an authorization input — a sensitive clip from an
 ungranted peer is still refused, and a sensitive clip from a granted one is
 still delivered. What the sensitive hint earns is one more deliberate
 confirmation, naming the destination, before a clip leaves the device.
+
+### T27 — Android notification access
+
+**Approved for `notifications.v1`; not implemented.** *Not an attack — a
+responsibility, and a change to a published position.*
+
+| | |
+| --- | --- |
+| **Current release** | Contains **no** `NotificationListenerService`, no `BIND_NOTIFICATION_LISTENER_SERVICE` in the manifest, and no notification code. Nothing described below exists yet |
+| **Approved design** | Will declare **one** `<service>`, optional and disabled by default, when `notifications.v1` is implemented |
+| **Canonical record** | [ADR-0015](../adr/ADR-0015-notification-access.md) |
+
+**What changes.** `BIND_NOTIFICATION_LISTENER_SERVICE` moves from the manifest's
+"deliberately absent" list to the list of permissions AnyFlow holds *and
+justifies*, beside `CHANGE_WIFI_MULTICAST_STATE` and
+`FOREGROUND_SERVICE_CONNECTED_DEVICE`. As with `BIND_QUICK_SETTINGS_TILE` on the
+existing clipboard tile, the permission is held **by the system, not by
+AnyFlow**: declaring it is what stops any *other* app from binding our service.
+
+**What does not change.** No accessibility service, no default-IME request, no
+`QUERY_ALL_PACKAGES`, no `SYSTEM_ALERT_WINDOW`, no `READ_LOGS`, no
+`MANAGE_EXTERNAL_STORAGE`, no location, no root, no hidden APIs, no reflection.
+`README.md` principle 8 — *"No root, no accessibility service, no ADB, no hidden
+permissions"* — remains true in full.
+
+**The rule that replaced "and it must stay that way".** AnyFlow acquires a
+privileged Android capability only when a named, user-visible feature requires
+it; only through the platform-sanctioned API for that feature; only with the
+user's explicit, separately revocable consent; and **never as a means of
+defeating a platform restriction that exists to protect the user**. The last
+clause is why T26's answer for the clipboard was to ship a manual send and say
+why, and why notification access is a different case: the platform *offers* a
+first-class API for it, whose own javadoc names *"bridging to paired devices"*
+as the use case.
+
+**Mitigations, all normative
+([ADR-0015 §1](../adr/ADR-0015-notification-access.md)).** Notification access
+is optional and off by default; requires the Android OS grant **and**,
+separately, an explicit per-peer `notifications.v1` grant, neither implying the
+other; is independently revocable from either side; fails closed; and is not
+required by `battery.v1`, `files.v1` or `clipboard.v1`. The listener is not even
+bound unless a granted peer is connected, so an installed-but-unused AnyFlow
+reads nothing. It carries **no** history, no cloud sync, no telemetry, no
+arbitrary actions, no `PendingIntent`, no reply, no persistence of content and
+no logging of content — at any level, including `TRACE`, which is the rule T11
+already enforces for the clipboard.
+
+**AnyFlow does not detect sensitive content**, and this is deliberate: no OTP
+regex, no keyword list, no banking or 2FA app heuristic. T10's reasoning applies
+unchanged — a guess dressed as a security control is worse than an honest
+boundary. The control is the deny-by-default per-app allow-list.
+
+**Residual risk. High, and it is the point of the feature.** A person who
+enables this is trusting AnyFlow with the most sensitive stream on their phone,
+and the platform will not soften that: `POC-NOTIF-01` measured Android 16 /
+One UI 8.0 delivering OTP-shaped notifications to an untrusted listener
+**entirely unredacted**, so platform OTP redaction is a bonus and never a
+control. The trust is repaid by the code being open, by nothing leaving the LAN,
+by the listener being unbound whenever no granted peer is connected, and by
+every default starting closed.
+
+**Not yet verified:** Google Play policy for notification access. AnyFlow is
+distributed from GitHub, so this blocks no release; it must be answered before
+any Play submission.
 
 ## 4. Assumptions
 

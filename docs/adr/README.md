@@ -19,3 +19,4 @@ alternatives that were actually considered, and what the decision costs.
 | [0012](ADR-0012-bulk-transfer-and-frame-limit.md) | Bulk transfer and the 64 KiB frame limit | Accepted |
 | [0013](ADR-0013-file-transfer-data-stream.md) | The `files.v1` authenticated data stream | Accepted |
 | [0014](ADR-0014-clipboard-change-notification.md) | Detecting clipboard changes on the Linux desktop | Accepted |
+| [0015](ADR-0015-notification-access.md) | Android notification access and the `notifications.v1` security boundary | Accepted |
