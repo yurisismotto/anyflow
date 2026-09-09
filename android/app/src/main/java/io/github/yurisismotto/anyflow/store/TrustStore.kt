@@ -3,6 +3,8 @@ package io.github.yurisismotto.anyflow.store
 import android.content.Context
 import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.identity.Fingerprint
+import io.github.yurisismotto.anyflow.notifications.NotificationPolicy
+import io.github.yurisismotto.anyflow.notifications.NotificationSecret
 import java.io.File
 import java.security.SecureRandom
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +40,7 @@ import org.json.JSONObject
  * read again. Every mutator below publishes, so a screen that collects the
  * flow cannot show stale trust state.
  */
-class TrustStore(context: Context) {
+class TrustStore(context: Context) : NotificationSecret.Metadata {
 
     private val file = File(context.filesDir, FILE_NAME)
     private var state: JSONObject = load()
@@ -79,6 +81,18 @@ class TrustStore(context: Context) {
          * clipboard content.
          */
         val clipboardPolicy: ClipboardPolicy = ClipboardPolicy(),
+        /**
+         * Per-peer `notifications.v1` mirroring settings.
+         *
+         * Beside the grant and deliberately separate from it, exactly as
+         * [clipboardPolicy] is: the grant says whether this computer may
+         * receive notifications at all, this says which ones and how much of
+         * each. Both are decided locally — **no protocol message writes
+         * either** — and neither holds a notification's content. The app list
+         * is empty by default, so a freshly granted computer receives nothing
+         * until a person names an application.
+         */
+        val notificationPolicy: NotificationPolicy = NotificationPolicy(),
     ) {
         fun allows(capabilityId: String): Boolean = capabilityId in grantedCapabilities
     }
@@ -108,6 +122,9 @@ class TrustStore(context: Context) {
                 // rather than turning everything off — or, worse, on.
                 clipboardPolicy = ClipboardPolicy.fromJson(
                     entry.optJSONObject(KEY_CLIPBOARD_POLICY),
+                ),
+                notificationPolicy = NotificationPolicy.fromJson(
+                    entry.optJSONObject(KEY_NOTIFICATION_POLICY),
                 ),
             )
         }
@@ -160,6 +177,43 @@ class TrustStore(context: Context) {
         return peer.clipboardPolicy
     }
 
+    /** Replaces one computer's notification policy. */
+    fun setNotificationPolicy(fingerprint: Fingerprint, policy: NotificationPolicy) {
+        val peer = peer(fingerprint) ?: return
+        addPeer(peer.copy(notificationPolicy = policy))
+    }
+
+    /**
+     * The effective notification policy for a computer, right now.
+     *
+     * One call answers the grant *and* the policy, for the reason
+     * [clipboardPolicyFor] does: a caller that had to ask both separately
+     * could do the second and forget the first, and the failure would be
+     * silent — a forgotten computer whose stored policy still named twenty
+     * applications.
+     */
+    fun notificationPolicyFor(fingerprint: Fingerprint): NotificationPolicy {
+        val peer = peer(fingerprint) ?: return NotificationPolicy.DENIED
+        if (!peer.allows(NOTIFICATIONS_CAPABILITY_ID)) return NotificationPolicy.DENIED
+        return peer.notificationPolicy
+    }
+
+    /**
+     * How many times a `device_notification_secret` has been created here.
+     *
+     * A counter, and nothing else. It is not the secret, it is not derived
+     * from it, and it reveals nothing: its only job is to let
+     * [NotificationSecret.loadOrCreate] tell "this install has never had a
+     * secret" apart from "this install had one and it is gone", so that a
+     * regeneration is reported rather than silent. See ADR-0016 §5.
+     */
+    override var notificationSecretGeneration: Int
+        get() = state.optInt(KEY_NOTIFICATION_SECRET_GENERATION, 0)
+        set(value) {
+            state.put(KEY_NOTIFICATION_SECRET_GENERATION, value)
+            persist()
+        }
+
     /** Remembers where a peer was last reachable, to skip discovery next time. */
     fun rememberAddresses(fingerprint: Fingerprint, addresses: List<String>) {
         val peer = peer(fingerprint) ?: return
@@ -180,6 +234,11 @@ class TrustStore(context: Context) {
                     // Settings, never content: the policy flags are stored,
                     // and no clipboard text ever reaches this file.
                     put(KEY_CLIPBOARD_POLICY, peer.clipboardPolicy.toJson())
+                    // Settings, never content: the flags and the list of
+                    // package names the person chose. No notification title,
+                    // body, subtext or platform key reaches this file, and
+                    // there is no field here that could hold one.
+                    put(KEY_NOTIFICATION_POLICY, peer.notificationPolicy.toJson())
                 },
             )
         }
@@ -230,9 +289,14 @@ class TrustStore(context: Context) {
         private const val KEY_GRANTS = "grantedCapabilities"
         private const val KEY_ADDRESSES = "addresses"
         private const val KEY_CLIPBOARD_POLICY = "clipboardPolicy"
+        private const val KEY_NOTIFICATION_POLICY = "notificationPolicy"
+        private const val KEY_NOTIFICATION_SECRET_GENERATION = "notificationSecretGeneration"
 
         /** Duplicated from `ClipboardCapability.ID` to avoid a cycle. */
         const val CLIPBOARD_CAPABILITY_ID = "clipboard.v1"
+
+        /** Duplicated from `NotificationsCapability.ID`, for the same reason. */
+        const val NOTIFICATIONS_CAPABILITY_ID = "notifications.v1"
 
         /** 128 random bits, hex. Not derived from any hardware identifier. */
         fun randomDeviceId(): String {

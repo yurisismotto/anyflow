@@ -944,3 +944,145 @@ fn the_shared_vector_decodes_and_validates() {
     assert_eq!(decoded, canonical_upsert());
     assert!(notif::validate_control(&decoded, bytes.len()).is_ok());
 }
+
+// ---------------------------------------------------------------------------
+// The identity derivation, verified against the Android source adapter
+// ---------------------------------------------------------------------------
+//
+// ADR-0016 §12 puts the derivation in the **source platform adapter**, because
+// it needs that device's secret, and N1 implements it in Kotlin. Nothing here
+// implements Android source behaviour in portable code: `anyflow_core::
+// notifications` still defines only the type, the width and the validation,
+// and `NotificationId` is deliberately opaque.
+//
+// What these tests are is a *verification vector*. They compute ADR-0016's
+// construction independently, with a different HMAC implementation, in a
+// different language, and assert the same bytes `NotificationIdentityTest`
+// pins on the Android side. A typo in a domain string, a length prefix that
+// stopped being big-endian, or a truncation that moved off 16 bytes fails here
+// or there rather than producing two devices that quietly disagree about which
+// mirror is which — the same discipline `PairingProofTest` and `StreamAuthTest`
+// already apply to their own constructions.
+//
+// A future Windows or macOS source inherits the vector unchanged: the
+// derivation takes "the platform's own stable notification key" as its input,
+// and neither needs a schema change.
+
+use hmac::{Hmac, Mac};
+use sha2::{Digest, Sha256};
+
+/// ADR-0016 §1. Pinned as a constant so a change to it is a visible diff.
+const ID_DOMAIN: &str = "anyflow/notifications.v1/id/v1";
+/// [02 §6.5].
+const GROUP_DOMAIN: &str = "anyflow/notifications.v1/group/v1";
+
+/// The same 32 bytes `NotificationSecretTest` uses. Obviously not from a
+/// CSPRNG, and therefore obviously a test.
+fn fixture_secret() -> [u8; 32] {
+    let mut secret = [0u8; 32];
+    for (index, byte) in secret.iter_mut().enumerate() {
+        *byte = index as u8;
+    }
+    secret
+}
+
+/// `HMAC-SHA256(secret, domain || len32(key) || key)[0..16]`.
+///
+/// `len32` is a big-endian `u32`, the same length-prefixing convention the
+/// pairing proof and the `files.v1` data-stream MAC use, for the same reason:
+/// concatenation must be unambiguous, or two different inputs could hash to
+/// one value.
+fn derive_notification_id(secret: &[u8], platform_key: &str) -> Vec<u8> {
+    let mut mac = <Hmac<Sha256>>::new_from_slice(secret).expect("hmac accepts any key length");
+    mac.update(ID_DOMAIN.as_bytes());
+    mac.update(&(platform_key.len() as u32).to_be_bytes());
+    mac.update(platform_key.as_bytes());
+    mac.finalize().into_bytes()[..notif::NOTIFICATION_ID_LEN].to_vec()
+}
+
+fn derive_group_id(group_key: &str) -> Vec<u8> {
+    let mut digest = Sha256::new();
+    digest.update(GROUP_DOMAIN.as_bytes());
+    digest.update((group_key.len() as u32).to_be_bytes());
+    digest.update(group_key.as_bytes());
+    digest.finalize()[..notif::GROUP_ID_LEN].to_vec()
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The shape of a real `StatusBarNotification.key`: `userId|pkg|id|tag|uid`.
+/// Used as an opaque string — nothing parses it, and nothing transmits it.
+const FIXTURE_PLATFORM_KEY: &str = "0|example.fixture.app|1|null|10123";
+
+#[test]
+fn the_notification_id_derivation_matches_the_android_vector() {
+    assert_eq!(
+        to_hex(&derive_notification_id(
+            &fixture_secret(),
+            FIXTURE_PLATFORM_KEY
+        )),
+        "3de5b61a1978912deb452f36b9a61c7a",
+    );
+}
+
+#[test]
+fn the_group_id_derivation_matches_the_android_vector() {
+    assert_eq!(
+        to_hex(&derive_group_id("0|example.fixture.app|g:chat")),
+        "ff4aae015474d140",
+    );
+}
+
+/// A different key is a different notification, and a different secret is a
+/// different id space — which is what makes an identity reset a mirror reset
+/// rather than something a peer could correlate across.
+#[test]
+fn a_different_key_or_secret_derives_a_different_id() {
+    let secret = fixture_secret();
+    let other_key = "0|example.other.app|1|null|10124";
+    let mut other_secret = [0u8; 32];
+    for (index, byte) in other_secret.iter_mut().enumerate() {
+        *byte = ((index + 1) % 256) as u8;
+    }
+
+    assert_eq!(
+        to_hex(&derive_notification_id(&secret, other_key)),
+        "86726a05ec81785ead37dcb41907d8e1",
+    );
+    assert_eq!(
+        to_hex(&derive_notification_id(&other_secret, FIXTURE_PLATFORM_KEY)),
+        "b1904b490581ba28fb9e736d351fc776",
+    );
+}
+
+/// The length prefix is why two keys cannot be concatenated into a third.
+/// Without it `"ab" + "c"` and `"a" + "bc"` would hash identically, and two
+/// unrelated notifications would share a name.
+#[test]
+fn the_length_prefix_makes_concatenation_unambiguous() {
+    let secret = fixture_secret();
+    assert_ne!(
+        derive_notification_id(&secret, "ab|c"),
+        derive_notification_id(&secret, "a|bc"),
+    );
+}
+
+/// A derived id is a valid `NotificationId`: the width the source produces is
+/// the width the portable contract accepts, checked rather than assumed.
+#[test]
+fn a_derived_id_satisfies_the_portable_contract() {
+    let derived = derive_notification_id(&fixture_secret(), FIXTURE_PLATFORM_KEY);
+    assert_eq!(derived.len(), notif::NOTIFICATION_ID_LEN);
+    let parsed = notif::NotificationId::from_bytes(&derived).expect("a derived id is 16 bytes");
+    assert_eq!(parsed.as_bytes().as_slice(), derived.as_slice());
+
+    let derived_group = derive_group_id("0|example.fixture.app|g:chat");
+    assert_eq!(derived_group.len(), notif::GROUP_ID_LEN);
+
+    let mut message = upsert(0x11);
+    message.notification_id = derived;
+    message.group_id = derived_group;
+    assert!(notif::validate_upsert(&message).is_ok());
+}

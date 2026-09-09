@@ -2,6 +2,10 @@ package io.github.yurisismotto.anyflow
 
 import com.google.protobuf.ByteString
 import io.github.yurisismotto.anyflow.capability.CapabilityRegistry
+import io.github.yurisismotto.anyflow.capability.NotificationsCapability
+import io.github.yurisismotto.anyflow.notifications.LockState
+import io.github.yurisismotto.anyflow.notifications.NotificationPolicy
+import io.github.yurisismotto.anyflow.notifications.NotificationSource
 import io.github.yurisismotto.anyflow.proto.capabilities.DismissRequest
 import io.github.yurisismotto.anyflow.proto.capabilities.NotificationCategory
 import io.github.yurisismotto.anyflow.proto.capabilities.NotificationControl
@@ -25,11 +29,10 @@ import org.junit.Test
 /**
  * The `notifications.v1` schema, on the JVM.
  *
- * **Nothing in this file exercises a notification listener.** After N0 the app
- * declares no `NotificationListenerService` and contains no notification code:
- * these bindings are generated from the same `.proto` the Rust daemon compiles
- * and are not yet wired to anything. What is tested here is that the Android
- * bindings exist, round-trip, and agree byte-for-byte with the desktop's.
+ * **Nothing in this file exercises a notification listener.** What is tested
+ * here is that the Android bindings exist, round-trip, and agree byte-for-byte
+ * with the desktop's; the source adapter that uses them is exercised by
+ * `NotificationSourceTest` and the suites beside it.
  *
  * Every fixture is obviously synthetic. On the certification hardware the
  * platform's own OTP redaction did not fire at all (POC-NOTIF-01), so
@@ -376,17 +379,69 @@ class NotificationsProtocolTest {
     // -- capability id -------------------------------------------------------
 
     /**
-     * N0 defines the id and registers nothing: no capability claims it, so it
-     * never reaches a HELLO. The Android source adapter (N1) adds the
-     * implementation.
+     * N0 defined the id and registered nobody; N1 registers the Android source
+     * adapter, so `notifications.v1` now appears in `HELLO` and can be
+     * negotiated.
+     *
+     * That is deliberately not conditional on the current Android permission
+     * state: roles exist precisely so a capability can be supported while
+     * being unable to do anything right now, and making the handshake depend
+     * on a permission the user can toggle at 14:32 would mean a reconnect were
+     * needed to pick up a grant made in Settings (ADR-0017).
+     *
+     * **Support is not permission.** Negotiating the capability sends nothing:
+     * the peer grant, the OS notification access and the announced roles are
+     * three further, independent gates.
      */
     @Test
-    fun `notifications v1 is not advertised after N0`() {
+    fun `notifications v1 is advertised once the source adapter is registered`() {
+        val registry = CapabilityRegistry(listOf(NotificationsCapability(source())))
+
+        assertTrue(registry.supports("notifications.v1"))
+        assertTrue(registry.advertised().contains("notifications.v1"))
+        assertEquals(
+            listOf("notifications.v1"),
+            registry.negotiate(listOf("battery.v1", "notifications.v1")),
+        )
+    }
+
+    /**
+     * And a peer that does not implement it never negotiates it, so a desktop
+     * without the sink — every desktop until N2 — is untouched.
+     */
+    @Test
+    fun `a peer that does not implement it never negotiates it`() {
+        val registry = CapabilityRegistry(listOf(NotificationsCapability(source())))
+        assertTrue(
+            registry.negotiate(listOf("battery.v1", "clipboard.v1", "files.v1")).isEmpty(),
+        )
+    }
+
+    /** A registry without the adapter still claims nothing. */
+    @Test
+    fun `an empty registry advertises nothing`() {
         val registry = CapabilityRegistry(emptyList())
         assertFalse(registry.supports("notifications.v1"))
         assertFalse(registry.advertised().contains("notifications.v1"))
         assertTrue(registry.negotiate(listOf("notifications.v1")).isEmpty())
     }
+
+    /**
+     * A source with every platform seam stubbed out. Enough to register: this
+     * file is about the schema and the capability id, not about behaviour.
+     */
+    private fun source() = NotificationSource(
+        ownPackage = "io.github.yurisismotto.anyflow",
+        localDeviceId = syntheticDevice,
+        authorizer = { NotificationPolicy.DENIED },
+        appLabels = { it },
+        secretProvider = { null },
+        lockState = LockState.ALWAYS_LOCKED,
+        access = object : NotificationSource.AccessControl {
+            override fun isAccessGranted() = false
+            override fun requestBind() = Unit
+        },
+    )
 
     /** Existing capability negotiation is untouched by the new id. */
     @Test
