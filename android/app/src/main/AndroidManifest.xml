@@ -28,13 +28,41 @@
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!--
-      Deliberately absent, and it must stay that way:
+      Deliberately absent, and the rule that keeps them so:
+
+        AnyFlow acquires a privileged Android capability only when a named,
+        user-visible feature requires it; only through the platform-sanctioned
+        API for that feature; only with the user's explicit, separately
+        revocable consent; and never as a means of defeating a platform
+        restriction that exists to protect the user.
+
+      By that rule these stay out, and no feature is a reason to revisit them,
+      because each is either a workaround for a protection or a grant far wider
+      than any AnyFlow feature needs:
+
         * no BIND_ACCESSIBILITY_SERVICE
-        * no BIND_NOTIFICATION_LISTENER_SERVICE
         * no QUERY_ALL_PACKAGES
+        * no SYSTEM_ALERT_WINDOW
+        * no READ_LOGS
         * no location permission (this app never needs the user's location)
         * no MANAGE_EXTERNAL_STORAGE
-      See docs/security/THREAT_MODEL.md.
+        * no default-IME status, no hidden APIs, no reflection, no root
+        * no CompanionDeviceManager association (ADR-0015 §10: a live CDM
+          association makes this app a *trusted* listener, which switches OFF
+          Android's sensitive-content redaction. Adopting it is a notification-
+          privacy decision and needs its own ADR, whatever the reason you
+          reached for it.)
+
+      BIND_NOTIFICATION_LISTENER_SERVICE used to be on this list, and it moved.
+      It is the only entry that has ever moved, and moving it took an ADR
+      (ADR-0015). It is declared below on the notification listener service —
+      held by the *system*, not by us, exactly as BIND_QUICK_SETTINGS_TILE is
+      for the clipboard tile — and it is what stops any other app from binding
+      that service. Nothing is read until the user grants notification access
+      in Settings AND separately grants notifications.v1 to one paired
+      computer; either can be withdrawn without the other.
+
+      See docs/security/THREAT_MODEL.md and docs/adr/ADR-0015-notification-access.md.
     -->
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -127,6 +155,47 @@
           BIND_QUICK_SETTINGS_TILE is held by the *system*, not by us: it is
           what stops any other app from binding this service.
         -->
+        <!--
+          notifications.v1 — mirroring this phone's notifications to a paired
+          computer. Optional, off by default, and inert on a fresh install.
+
+          `android:permission` names the permission the *system* must hold to
+          bind this service. We do not hold it; declaring it is what stops any
+          other application from binding us.
+
+          `default_autobind=false` is the load-bearing one. Without it the
+          system binds this listener whenever the app is installed and access
+          is granted, and AnyFlow would be reading notifications with nobody
+          listening. With it, the binding is requested only while a paired
+          computer that holds the notifications.v1 grant is connected, and
+          released when the last one goes away — which is what makes "AnyFlow
+          reads your notifications only while a granted computer is connected"
+          structurally true rather than a promise. See ADR-0015 §3.
+
+          `default_filter_types` is a real, free, OS-enforced narrowing that
+          sits underneath AnyFlow's own per-app filter: the system delivers
+          only conversations and alerting notifications unless the user says
+          otherwise. `disabled_filter_types` is deliberately NOT declared —
+          it would grey those types out permanently in the system UI, and a
+          person who genuinely wants their media notification mirrored should
+          be able to have it.
+        -->
+        <service
+            android:name=".notifications.AnyFlowNotificationListener"
+            android:exported="false"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.notification.default_autobind"
+                android:value="false" />
+            <meta-data
+                android:name="android.service.notification.default_filter_types"
+                android:value="conversations|alerting" />
+        </service>
+
         <service
             android:name=".ui.ClipboardTileService"
             android:exported="true"

@@ -22,4 +22,12 @@
     <string name="clip_marked_sensitive">Marked sensitive.</string>
     <string name="clip_action_copy">Copy</string>
     <string name="clipboard_tile_label">Send clipboard</string>
+
+    <!--
+      How this app's notification listener is named in Android's own
+      notification-access screen. It is what a person reads when deciding
+      whether to grant the permission, so it says what the listener is for
+      rather than repeating the app name.
+    -->
+    <string name="notification_listener_label">Mirror notifications to a paired computer</string>
 </resources>

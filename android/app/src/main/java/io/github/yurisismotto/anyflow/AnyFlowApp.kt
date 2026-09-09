@@ -6,6 +6,7 @@ import io.github.yurisismotto.anyflow.capability.BatteryCapability
 import io.github.yurisismotto.anyflow.capability.CapabilityRegistry
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
 import io.github.yurisismotto.anyflow.capability.FilesCapability
+import io.github.yurisismotto.anyflow.capability.NotificationsCapability
 import io.github.yurisismotto.anyflow.clipboard.ClipboardNotifications
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
 import io.github.yurisismotto.anyflow.clipboard.SystemClipboard
@@ -15,6 +16,11 @@ import io.github.yurisismotto.anyflow.net.ConnectResult
 import io.github.yurisismotto.anyflow.net.Discovery
 import io.github.yurisismotto.anyflow.net.Endpoints
 import io.github.yurisismotto.anyflow.net.PeerConnection
+import io.github.yurisismotto.anyflow.notifications.KeyguardLockState
+import io.github.yurisismotto.anyflow.notifications.NotificationAccess
+import io.github.yurisismotto.anyflow.notifications.NotificationPolicy
+import io.github.yurisismotto.anyflow.notifications.NotificationSecret
+import io.github.yurisismotto.anyflow.notifications.NotificationSource
 import io.github.yurisismotto.anyflow.pairing.QrPayload
 import io.github.yurisismotto.anyflow.store.TrustStore
 import java.net.InetSocketAddress
@@ -49,6 +55,17 @@ class AnyFlowApp : Application() {
     lateinit var clipboard: ClipboardSync
         private set
     lateinit var systemClipboard: SystemClipboard
+        private set
+
+    /**
+     * `notifications.v1` — the Android source adapter.
+     *
+     * Held here rather than inside the listener service because the service is
+     * created and destroyed by the system as it binds and unbinds, and the
+     * capability's state — role epochs, the id map, the outbound queue —
+     * belongs to the app rather than to one binding.
+     */
+    lateinit var notifications: NotificationSource
         private set
 
     /**
@@ -115,8 +132,25 @@ class AnyFlowApp : Application() {
         // With `autoReceive` off — the default — an accepted clip is held in
         // memory and offered here. The notification carries no clipboard
         // text, only the computer's name and the size.
-        val notifications = ClipboardNotifications(this)
-        clipboard.onClipPending = notifications::show
+        val clipPending = ClipboardNotifications(this)
+        clipboard.onClipPending = clipPending::show
+
+        // notifications.v1. Three permissions, checked independently and none
+        // of them implying another: Android's notification access, this peer's
+        // grant in the trust store, and the roles each side announces. The
+        // secret lives in the Keystore and is resolved lazily, so a keystore
+        // that is briefly unavailable makes the capability inert for that
+        // session rather than replacing a live secret.
+        notifications = NotificationSource(
+            ownPackage = packageName,
+            localDeviceId = trustStore.deviceId,
+            authorizer = { peer -> notificationPolicyFor(peer) },
+            appLabels = ::appLabelFor,
+            secretProvider = ::notificationSecret,
+            lockState = KeyguardLockState(this),
+            access = NotificationAccess.controlFor(this),
+        )
+        notifications.start(appScope)
 
         registry = CapabilityRegistry(
             listOf(
@@ -125,6 +159,7 @@ class AnyFlowApp : Application() {
                 ClipboardCapability(clipboard) { peer ->
                     trustStore.peer(peer)?.deviceName ?: "a paired computer"
                 },
+                NotificationsCapability(notifications),
             ),
         )
         discovery = Discovery(this)
@@ -159,6 +194,63 @@ class AnyFlowApp : Application() {
     ): io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy = runCatching {
         trustStore.clipboardPolicyFor(peer)
     }.getOrDefault(io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy.DENIED)
+
+    /**
+     * What a computer may be told about this phone's notifications, right now.
+     *
+     * Failing closed on any error, for the same reason [clipboardPolicyFor]
+     * does: an unreadable trust store is a reason to permit nothing.
+     */
+    private fun notificationPolicyFor(
+        peer: io.github.yurisismotto.anyflow.identity.Fingerprint,
+    ): NotificationPolicy = runCatching {
+        trustStore.notificationPolicyFor(peer)
+    }.getOrDefault(NotificationPolicy.DENIED)
+
+    /**
+     * `device_notification_secret`, resolved on demand.
+     *
+     * Cached once it is available, because it does not change while the
+     * process lives; **not** cached as "absent", so a keystore that could not
+     * answer once is asked again rather than disabling the capability for the
+     * life of the process. Nothing here can return the key material: the
+     * secret is a non-exportable Keystore HMAC key and this returns a handle
+     * that can only be used to compute a MAC.
+     */
+    @Volatile
+    private var cachedNotificationSecret: NotificationSecret? = null
+
+    private fun notificationSecret(): NotificationSecret? {
+        cachedNotificationSecret?.let { return it }
+        val secret = NotificationSecret.loadOrCreate(
+            NotificationSecret.KeystoreSecretStore(),
+            trustStore,
+        )
+        if (secret != null) {
+            // A state name and a generation count. No key material, ever.
+            Log.i(TAG, "notification secret ${secret.state} generation=${secret.generation}")
+            cachedNotificationSecret = secret
+        }
+        return secret
+    }
+
+    /**
+     * A package name resolved to something a person recognises.
+     *
+     * Only the desktop's alternative would be a package database it does not
+     * have, so the label is resolved here — off the listener callback thread,
+     * because this is a binder call. A package that cannot be resolved falls
+     * back to its own name rather than to an empty string: "com.example.chat"
+     * is worse than "Chat" and much better than nothing.
+     *
+     * This needs no `QUERY_ALL_PACKAGES`: an app that just posted a
+     * notification to our listener is visible to us, and a package that is not
+     * resolvable simply keeps its id.
+     */
+    private fun appLabelFor(packageName: String): String = runCatching {
+        val info = packageManager.getApplicationInfo(packageName, 0)
+        packageManager.getApplicationLabel(info).toString()
+    }.getOrDefault(packageName)
 
     /**
      * Where to try reaching a paired computer, best guess first.
@@ -281,8 +373,16 @@ class AnyFlowApp : Application() {
                         // the device card, because a computer that can write
                         // this phone's clipboard can also see what is pasted
                         // next — a side effect that needs its own yes.
+                        // `notifications.v1` is withheld here for a stronger
+                        // version of the clipboard's reason: a computer that
+                        // can see this phone's notifications sees banking
+                        // alerts, 2FA codes and message previews, and on the
+                        // certification hardware the platform's own OTP
+                        // redaction did not fire at all. It is never in
+                        // `auto_grant` (ADR-0015 §4) and is turned on per peer,
+                        // deliberately, from the device card.
                         grantedCapabilities = connection.negotiatedCapabilities
-                            .toSet() - ClipboardCapability.ID,
+                            .toSet() - ClipboardCapability.ID - NotificationsCapability.ID,
                         addresses = listOf(Endpoints.format(address)),
                     )
                     trustStore.addPeer(peer)
