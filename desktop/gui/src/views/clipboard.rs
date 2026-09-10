@@ -127,7 +127,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
                         if let Ok(Response::Error { message }) = reply {
                             eprintln!("anyflow-gui: could not apply the clip: {message}");
                         }
-                        pages.render();
+                        pages.refresh_now();
                     },
                 );
             });
@@ -242,7 +242,7 @@ fn peer_card(peer: &ClipboardPeerReport, watch_available: bool, pages: &Pages) -
                     if let Ok(Response::Error { message }) = reply {
                         eprintln!("anyflow-gui: could not send the clipboard: {message}");
                     }
-                    pages.render();
+                    pages.refresh_now();
                 },
             );
         });
@@ -307,7 +307,7 @@ fn policy_switch(
                 // Re-read rather than assume: the daemon is the authority on
                 // policy, and a refused change must not leave the switch
                 // showing a state the daemon does not hold.
-                pages.render();
+                pages.refresh_now();
             },
         );
         gtk::glib::Propagation::Proceed

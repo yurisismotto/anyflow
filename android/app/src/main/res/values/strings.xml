@@ -30,4 +30,131 @@
       rather than repeating the app name.
     -->
     <string name="notification_listener_label">Mirror notifications to a paired computer</string>
+
+    <!--
+      notifications.v1 — the consent surface.
+
+      Every string on the notification screens is here rather than inlined in
+      Compose, because permission copy is a security control and has to be
+      reviewable and translatable as one. Two rules bind what may be written
+      here, both from the functional specification (01 §8.1):
+
+        * nothing may offer Android's own OTP redaction as reassurance.
+          POC-NOTIF-01 measured this exact device delivering six OTP-shaped
+          notifications to an untrusted listener entirely unredacted, with the
+          platform flag on and Google's classifier bound. "Android hides
+          verification codes" would be false here;
+        * nothing may imply AnyFlow inspects notification content. It does not,
+          by design (ADR-0015 §5). The honest sentence is the one the product
+          can keep: what you choose to share is shared in full with the
+          computer you named.
+
+      Note also what cannot be interpolated into any string below: a
+      notification's title, body, or an application's own text. There is no
+      format specifier here that could take one.
+    -->
+    <string name="notif_screen_title">Notifications</string>
+    <string name="notif_capability_title">Notifications</string>
+    <string name="notif_capability_description">Show this device\'s notifications on the computer</string>
+
+    <!-- Gate 1 — Android notification access. -->
+    <string name="notif_access_title">Notification access</string>
+    <string name="notif_access_allowed">Allowed</string>
+    <string name="notif_access_not_allowed">Not allowed</string>
+    <string name="notif_access_explainer">Allowing Android notification access lets AnyFlow read notifications on this device. It does not share them with any computer on its own — each computer has to be allowed separately, and then you choose which apps.</string>
+    <string name="notif_access_open_settings">Open Android settings</string>
+    <string name="notif_access_revoke_hint">Turn this off in Android settings at any time. Doing so stops every computer at once.</string>
+
+    <!-- Gate 2 — the per-peer grant. -->
+    <string name="notif_share_title">Share notifications with this computer</string>
+    <string name="notif_share_description">Off until you turn it on. Turning it on shares nothing by itself — you choose which apps next.</string>
+    <string name="notif_mirror_title">Mirroring</string>
+    <string name="notif_mirror_description">Pause without changing anything else</string>
+
+    <!-- Gate 3 and the resulting state. -->
+    <string name="notif_status_sharing_off">Off</string>
+    <string name="notif_status_needs_access">Needs Android access</string>
+    <string name="notif_status_unavailable">Unavailable</string>
+    <string name="notif_status_paused">Paused</string>
+    <string name="notif_status_no_apps">No apps chosen</string>
+    <string name="notif_status_not_connected">Not connected</string>
+    <string name="notif_status_peer_not_receiving">Computer is not receiving</string>
+    <string name="notif_status_ready">Ready</string>
+
+    <string name="notif_detail_sharing_off">This computer cannot see any notification from this device.</string>
+    <string name="notif_detail_needs_access">Android has not given AnyFlow permission to read notifications on this device.</string>
+    <string name="notif_detail_unavailable">AnyFlow cannot read notifications right now. This usually clears on its own.</string>
+    <string name="notif_detail_paused">Sharing is allowed but paused, so nothing is being sent.</string>
+    <string name="notif_detail_no_apps">Nothing is being shared, because no app has been chosen yet.</string>
+    <string name="notif_detail_not_connected">Set up and waiting. Notifications will appear once this device connects.</string>
+    <string name="notif_detail_peer_not_receiving">This device is connected, but the computer has not said it can show notifications. Check that AnyFlow on the computer allows notifications from this device.</string>
+    <string name="notif_detail_ready">Notifications from the apps you chose appear on this computer.</string>
+
+    <!-- The app picker. -->
+    <string name="notif_apps_title">Apps</string>
+    <string name="notif_apps_none">No app chosen</string>
+    <string name="notif_apps_count">%1$d of %2$d apps</string>
+    <!--
+      A plurals resource rather than two strings picked by an `if`: the
+      one/other split is English's, and a translator must be able to supply
+      their own language's categories without the Kotlin changing.
+    -->
+    <plurals name="notif_apps_new">
+        <item quantity="one">%1$d new app is not being shared</item>
+        <item quantity="other">%1$d new apps are not being shared</item>
+    </plurals>
+    <string name="notif_picker_title">Choose apps</string>
+    <string name="notif_picker_intro">Only the apps you tick are shared, and their notifications are shared in full. Nothing is chosen for you.</string>
+    <string name="notif_picker_search">Search apps</string>
+    <string name="notif_picker_search_clear">Clear search</string>
+    <string name="notif_picker_select_all">Select all</string>
+    <string name="notif_picker_clear_all">Clear all</string>
+    <string name="notif_picker_confirm_select_all">Share notifications from all %1$d apps with this computer?</string>
+    <string name="notif_picker_no_results">No app matches that search.</string>
+    <string name="notif_picker_empty">No app could be listed. AnyFlow can only offer apps you can open from your home screen, plus any app that is showing a notification right now.</string>
+    <string name="notif_picker_notifying">Notifying now</string>
+    <string name="notif_picker_shared">Shared</string>
+    <string name="notif_picker_not_shared">Not shared</string>
+    <string name="notif_picker_done">Done</string>
+
+    <!-- The remaining source-side policy. -->
+    <string name="notif_locked_title">When this device is locked</string>
+    <string name="notif_locked_full">Share everything</string>
+    <string name="notif_locked_full_detail">Titles and text are sent as usual.</string>
+    <string name="notif_locked_app_only">Share the app name only</string>
+    <string name="notif_locked_app_only_detail">The computer is told which app notified, and nothing else. Titles and text are removed on this device, before anything is sent.</string>
+    <string name="notif_locked_suppress">Share nothing</string>
+    <string name="notif_locked_suppress_detail">Nothing at all is sent while this device is locked.</string>
+    <string name="notif_locked_not_retroactive">Unlocking does not send what was held back. The next update from an app arrives in full.</string>
+
+    <string name="notif_work_title">Work profile notifications</string>
+    <string name="notif_work_description">Off. Work notifications are never shared unless you turn this on, and the app still has to be chosen.</string>
+    <string name="notif_work_absent">This device has no work profile.</string>
+
+    <string name="notif_ongoing_title">Ongoing notifications</string>
+    <string name="notif_ongoing_description">Music, navigation and “app is running” notices. Off, because they update constantly and usually cannot be dismissed. The app still has to be chosen.</string>
+
+    <string name="notif_dismiss_title">Sync dismissals</string>
+    <string name="notif_dismiss_not_yet">Not available yet. Dismissing a notification on the computer will not dismiss it here.</string>
+
+    <!-- Privacy copy. Reviewed as a security control, not as marketing. -->
+    <string name="notif_privacy_title">What is shared, and what is not</string>
+    <string name="notif_privacy_body">Notifications from the apps you choose are sent in full to the computer you named, over the same direct, pinned connection as everything else — never to a cloud service. AnyFlow does not read, classify or hide anything inside a notification, and it keeps no history: nothing is written to this device or the computer. AnyFlow never shares its own notifications, and never shares a notification an app marks as private to the lock screen.</string>
+
+    <!-- Diagnostics. Protocol vocabulary lives here and nowhere else. -->
+    <string name="notif_diagnostics_title">Details</string>
+    <string name="notif_diag_access">Android notification access</string>
+    <string name="notif_diag_listener">Notification listener</string>
+    <string name="notif_diag_listener_bound">Bound</string>
+    <string name="notif_diag_listener_unbound">Not bound</string>
+    <string name="notif_diag_grant">notifications.v1 grant</string>
+    <string name="notif_diag_granted">Granted</string>
+    <string name="notif_diag_not_granted">Not granted</string>
+    <string name="notif_diag_local_role">This device announces</string>
+    <string name="notif_diag_peer_role">The computer announces</string>
+    <string name="notif_diag_role_source">SOURCE</string>
+    <string name="notif_diag_role_sink">SINK</string>
+    <string name="notif_diag_role_none">no role</string>
+    <string name="notif_diag_epoch">epoch %1$d</string>
+    <string name="notif_diag_no_session">No session</string>
 </resources>

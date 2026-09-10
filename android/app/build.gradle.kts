@@ -112,4 +112,11 @@ dependencies {
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    // The notification consent screens are this wave's deliverable, and the
+    // properties that matter about them — a switch that is off by default,
+    // "Select all" never happening on its own, a status that never claims to
+    // be mirroring while a gate is shut — are behaviour, not pixels.
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

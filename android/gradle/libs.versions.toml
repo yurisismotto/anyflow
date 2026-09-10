@@ -49,6 +49,13 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 # assertions mean what they say.
 json = { group = "org.json", name = "json", version.ref = "json" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
+# Compose UI tests, versioned by the BOM like every other Compose artifact.
+# The consent screens are the deliverable of this wave, and a screenshot is not
+# a test of whether a switch is off by default.
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+# Supplies the empty ComponentActivity `createComposeRule()` composes into.
+# Debug-only: it must never reach a release build.
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
 
 [plugins]

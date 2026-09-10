@@ -1,11 +1,17 @@
 package io.github.yurisismotto.anyflow.ui
 
+import android.graphics.drawable.Drawable
 import androidx.compose.runtime.Immutable
 import io.github.yurisismotto.anyflow.AnyFlowApp
+import io.github.yurisismotto.anyflow.capability.NotificationsCapability
 import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
 import io.github.yurisismotto.anyflow.files.FileTransferManager
 import io.github.yurisismotto.anyflow.identity.Fingerprint
+import io.github.yurisismotto.anyflow.notifications.NotificationApp
+import io.github.yurisismotto.anyflow.notifications.NotificationGates
+import io.github.yurisismotto.anyflow.notifications.NotificationPolicy
+import io.github.yurisismotto.anyflow.notifications.NotificationSource
 import io.github.yurisismotto.anyflow.store.TrustStore
 
 /**
@@ -28,6 +34,24 @@ data class MainUiState(
     val pendingClips: List<ClipboardSync.PendingClipInfo>,
     val clipboardOutcomes: Map<String, ClipboardSync.Outcome>,
     val remoteBatteryPercent: Int?,
+    /**
+     * Android's own notification access, as the platform reports it **now**.
+     *
+     * Re-read on every resume rather than remembered: a person can revoke it
+     * in Settings while this screen is open, and a cached "yes" is exactly the
+     * stale answer that would leave a consent screen claiming to work.
+     */
+    val notificationAccessGranted: Boolean,
+    /** What `notifications.v1` is actually doing. Counts and roles, no content. */
+    val notifications: NotificationSource.Status,
+    /**
+     * Whether this device has a second profile at all.
+     *
+     * Decides only whether the work-profile switch is offered or explained as
+     * inapplicable. It never changes what is shared: the switch is off by
+     * default and an application still has to be chosen either way.
+     */
+    val hasWorkProfile: Boolean,
 ) {
     /** The fingerprint of the peer with a live session, if any. */
     val connectedFingerprintShort: String?
@@ -42,6 +66,30 @@ data class MainUiState(
     /** True when nothing at all is happening — what the Activity tab shows. */
     val hasActivity: Boolean
         get() = offers.isNotEmpty() || transfers.isNotEmpty() || pendingClips.isNotEmpty()
+
+    /**
+     * The three notification gates for one computer, assembled from live state.
+     *
+     * Assembled here, once, rather than in each screen: the whole point of
+     * [NotificationGates] is that a UI cannot accidentally answer two of the
+     * three questions and infer the third.
+     */
+    fun notificationGates(peer: TrustStore.TrustedPeer): NotificationGates {
+        val policy = peer.notificationPolicy
+        val granted = peer.allows(NotificationsCapability.ID)
+        val peerStatus = notifications.peers[peer.fingerprint.toHex()]
+        return NotificationGates(
+            osAccessGranted = notificationAccessGranted,
+            peerGranted = granted,
+            allowMirror = policy.allowMirror,
+            allowedAppCount = policy.allowedApps.size,
+            sourceActive = notifications.listenerConnected &&
+                notifications.accessGranted &&
+                notifications.secretAvailable,
+            peerConnected = peerStatus != null,
+            peerIsSink = peerStatus?.peerIsSink == true,
+        )
+    }
 }
 
 /**
@@ -61,6 +109,34 @@ data class MainActions(
     val onSetClipboardGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
     val onSetBatteryGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
     val onSetClipboardPolicy: (TrustStore.TrustedPeer, ClipboardPolicy) -> Unit,
+    /**
+     * Grants or withdraws `notifications.v1` for one computer.
+     *
+     * Writes the canonical grant through the trust store, the same one the
+     * clipboard and files switches write. There is no second permission
+     * database: the listener lifecycle, the filter and the role announcement
+     * all read that one.
+     */
+    val onSetNotificationsGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
+    /** Replaces one computer's notification policy. Never widens another's. */
+    val onSetNotificationPolicy: (TrustStore.TrustedPeer, NotificationPolicy) -> Unit,
+    /**
+     * Opens Android's own notification-access screen, on AnyFlow's own switch.
+     *
+     * The permission is granted there and nowhere else — there is no dialog
+     * here that could grant it, and the real state is re-read when the person
+     * comes back rather than assumed from the fact that they left.
+     */
+    val onOpenNotificationAccess: () -> Unit,
+    /**
+     * The picker's list for one computer.
+     *
+     * Suspending because it is a hundred binder calls; it must not run during
+     * composition or on the main thread.
+     */
+    val loadNotificationApps: suspend (TrustStore.TrustedPeer) -> List<NotificationApp>,
+    /** One application's icon, loaded locally and never transmitted. */
+    val loadAppIcon: suspend (String) -> Drawable?,
     val onSendClipboard: (Fingerprint) -> Unit,
     val onApplyClip: (Fingerprint) -> Unit,
     val onDismissClip: (Fingerprint) -> Unit,

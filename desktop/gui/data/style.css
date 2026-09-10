@@ -79,6 +79,33 @@ button.af-card:active { background-color: @af_surface_sunken; }
 .af-nav row:selected label { color: @af_blue; font-weight: 600; }
 .af-nav row:hover { background-color: @af_surface_sunken; }
 
+/* ---- an exclusive choice ----------------------------------------------- */
+/*
+ * The lock-policy list, and any list box that is a *choice* rather than a
+ * navigation surface. It sits inside a card, so it borrows the card's ground
+ * instead of painting the list background Adwaita would give it — otherwise a
+ * white slab appears inside the card and the three options read as a separate
+ * panel rather than as the setting they belong to.
+ *
+ * Selection is the same accent the sidebar uses, so "this is the one that is
+ * chosen" looks the same everywhere in the application. It is never the only
+ * signal: the row keeps its title and its description, and assistive
+ * technology reads the selected state from the list box itself.
+ */
+.af-choice {
+    background-color: transparent;
+}
+.af-choice row {
+    border-radius: 8px;
+    padding: 6px 8px;
+    min-height: 40px;
+}
+.af-choice row:selected {
+    background-color: alpha(@af_blue, 0.12);
+}
+.af-choice row:selected label { color: @af_blue; }
+.af-choice row:hover { background-color: @af_surface_sunken; }
+
 /* ---- status language -------------------------------------------------- */
 /*
  * Colour is never the only carrier: each of these sits beside an icon and a

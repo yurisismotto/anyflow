@@ -101,6 +101,11 @@ class NotificationSourceTest {
         var unbinds = 0
         override fun requestUnbind() { unbinds += 1 }
         override fun activeNotifications(): List<PlatformNotification>? = active
+
+        // Names only, exactly as the real service does: the picker asks this
+        // and never the one above, so no title or body is materialised for it.
+        override fun activePackages(): List<String>? =
+            active?.map { it.packageName }?.distinct()
     }
 
     /**

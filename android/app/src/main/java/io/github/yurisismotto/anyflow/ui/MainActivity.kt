@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,17 +26,22 @@ import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.capability.BatteryCapability
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
 import io.github.yurisismotto.anyflow.capability.FilesCapability
+import io.github.yurisismotto.anyflow.capability.NotificationsCapability
 import io.github.yurisismotto.anyflow.clipboard.ClipboardNotifications
 import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSendFailed
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
 import io.github.yurisismotto.anyflow.clipboard.SystemClipboard
 import io.github.yurisismotto.anyflow.identity.Fingerprint
+import io.github.yurisismotto.anyflow.notifications.InstalledApps
+import io.github.yurisismotto.anyflow.notifications.NotificationAccess
 import io.github.yurisismotto.anyflow.pairing.QrPayload
 import io.github.yurisismotto.anyflow.service.ConnectionService
 import io.github.yurisismotto.anyflow.store.TrustStore
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Identity, pairing, connection status, transfers and clipboard.
@@ -107,6 +113,33 @@ class MainActivity : ComponentActivity() {
      */
     private var requestedClip by mutableStateOf<Fingerprint?>(null)
 
+    /**
+     * Android's notification access, as last read from the platform.
+     *
+     * Held here rather than inside a screen because it has to be re-read on
+     * [onResume]: the permission is granted in Android's own settings, and
+     * the only thing this app learns by being resumed is that the person came
+     * back — **not** that they said yes. A consent screen that assumed
+     * otherwise would claim to be working while reading nothing.
+     */
+    private var notificationAccess by mutableStateOf(false)
+
+    /**
+     * Whether a second profile exists on this device.
+     *
+     * Decides only whether the work-profile switch is offered or explained as
+     * inapplicable. Read once: a work profile is not created while an app is
+     * in the foreground.
+     */
+    private val hasWorkProfile: Boolean by lazy {
+        runCatching {
+            (getSystemService(android.os.UserManager::class.java)?.userProfiles?.size ?: 1) > 1
+        }.getOrDefault(false)
+    }
+
+    /** The app-picker's source of applications. Binder calls, off this thread. */
+    private val installedApps by lazy { InstalledApps(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -139,6 +172,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Re-reads the permission state Android owns.
+     *
+     * Called on every resume, which covers the one path that matters: the
+     * person went to Settings and came back. It is also the path that covers
+     * a *revocation* made there, which is why it re-reads rather than only
+     * checking when it expects a grant.
+     */
+    override fun onResume() {
+        super.onResume()
+        notificationAccess = NotificationAccess.isGranted(this)
+    }
+
     /** Collects every observable the UI draws from into one snapshot. */
     @Composable
     private fun rememberMainUiState(): MainUiState {
@@ -151,6 +197,13 @@ class MainActivity : ComponentActivity() {
         val transfers by app.files.visible.collectAsState()
         val pendingClips by app.clipboard.pendingClips.collectAsState()
         val outcomes by app.clipboard.lastOutcome.collectAsState()
+        val notifications by app.notifications.status.collectAsState()
+        // The capability republishes on every bind, unbind and revocation, so
+        // a permission taken away while this screen is open is picked up here
+        // as well as on the next resume.
+        LaunchedEffect(notifications) {
+            notificationAccess = NotificationAccess.isGranted(this@MainActivity)
+        }
         return MainUiState(
             ownDeviceName = app.trustStore.deviceName,
             ownFingerprint = app.identity.fingerprint.toDisplayShort(),
@@ -166,6 +219,9 @@ class MainActivity : ComponentActivity() {
             pendingClips = pendingClips,
             clipboardOutcomes = outcomes,
             remoteBatteryPercent = app.battery.remoteReading()?.percentage,
+            notificationAccessGranted = notificationAccess,
+            notifications = notifications,
+            hasWorkProfile = hasWorkProfile,
         )
     }
 
@@ -190,6 +246,35 @@ class MainActivity : ComponentActivity() {
         onSetClipboardPolicy = { peer, policy ->
             app.trustStore.setClipboardPolicy(peer.fingerprint, policy)
         },
+        onSetNotificationsGrant = { peer, granted ->
+            // The canonical grant, in the canonical place. Withdrawing it here
+            // makes `notificationPolicyFor` answer DENIED on the very next
+            // notification, narrows the announced role on the session that is
+            // already up, and lets the listener unbind when no eligible peer
+            // is left — none of which needs a second permission database.
+            app.trustStore.setGrant(peer.fingerprint, NotificationsCapability.ID, granted)
+            app.notifications.policyChanged()
+        },
+        onSetNotificationPolicy = { peer, policy ->
+            app.trustStore.setNotificationPolicy(peer.fingerprint, policy)
+            // Re-evaluates the listener binding: turning mirroring off for the
+            // last eligible computer releases the listener rather than leaving
+            // it bound and reading.
+            app.notifications.policyChanged()
+        },
+        onOpenNotificationAccess = {
+            runCatching { startActivity(NotificationAccess.settingsIntent(this)) }
+                .onFailure { showError("Could not open Android's notification settings.") }
+        },
+        loadNotificationApps = { peer ->
+            installedApps.load(
+                allowed = peer.notificationPolicy.allowedApps,
+                // Package names from the shade, and only names. Empty when the
+                // listener is not bound, which is the ordinary idle state.
+                notifying = withContext(Dispatchers.IO) { app.notifications.activePackages() },
+            )
+        },
+        loadAppIcon = { packageName -> installedApps.iconFor(packageName) },
         onSendClipboard = { peer -> sendClipboard(peer) },
         onApplyClip = ::applyClip,
         onDismissClip = { peer ->

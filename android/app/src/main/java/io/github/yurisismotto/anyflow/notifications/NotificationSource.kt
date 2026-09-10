@@ -140,6 +140,18 @@ class NotificationSource(
          * current user, which is what the person sees by picking up the phone.
          */
         fun activeNotifications(): List<PlatformNotification>?
+
+        /**
+         * The package names in the shade right now, or null when the listener
+         * is not connected.
+         *
+         * Deliberately **not** `activeNotifications().map { it.packageName }`:
+         * the app picker needs the names and nothing else, and going through
+         * [PlatformNotification] would materialise every title and body in
+         * this process to throw them away. A binder call, so not on the main
+         * thread.
+         */
+        fun activePackages(): List<String>?
     }
 
     /**
@@ -236,7 +248,57 @@ class NotificationSource(
         val trackedNotifications: Int = 0,
         val emitted: Long = 0,
         val dropped: Long = 0,
+        /**
+         * Per-connected-peer role state, keyed by `fingerprint.toHex()`.
+         *
+         * Booleans and counters. It exists so the consent UI can tell "this
+         * computer is not connected" from "connected, and it has not said it
+         * can display notifications" — two states with different fixes that a
+         * single switch would render identically (ADR-0017 §6).
+         */
+        val peers: Map<String, PeerStatus> = emptyMap(),
     )
+
+    /**
+     * What one connected peer looks like from here.
+     *
+     * No field can hold a notification: this is a role claim, two epochs and
+     * a boolean.
+     */
+    data class PeerStatus(
+        /** This device has announced it can source, to this peer. */
+        val localIsSource: Boolean,
+        val localEpoch: Long,
+        /** The peer has announced it can display notifications. */
+        val peerIsSink: Boolean,
+        val peerEpoch: Int,
+    )
+
+    /**
+     * Whether this phone can currently source, for the consent UI.
+     *
+     * The same question [isSourcing] answers for the producer, exposed so the
+     * UI does not have to reassemble it from three flags and get it wrong.
+     */
+    val sourceActive: Boolean get() = _status.value.let {
+        it.listenerConnected && it.accessGranted && it.secretAvailable
+    }
+
+    /**
+     * The package names currently in the notification shade.
+     *
+     * For the app picker, so that an application with no launcher entry that
+     * is actually notifying can be chosen. Only names: no title, no body, no
+     * key, nothing retained. Empty when the listener is not bound, which is
+     * the ordinary state when no granted computer is connected.
+     *
+     * A binder call. Callers must not be on the main thread.
+     */
+    fun activePackages(): Set<String> {
+        val names = runCatching { listenerControl?.activePackages() }.getOrNull()
+            ?: return emptySet()
+        return names.filterTo(LinkedHashSet()) { it.isNotBlank() && it != ownPackage }
+    }
 
     val status: StateFlow<Status> = _status.asStateFlow()
 
@@ -751,6 +813,16 @@ class NotificationSource(
             trackedNotifications = idMap.size(),
             emitted = emitted,
             dropped = dropped,
+            peers = sessions.mapValues { (_, session) ->
+                PeerStatus(
+                    localIsSource = session.roles.current()
+                        ?.contains(NotificationRole.NOTIFICATION_ROLE_SOURCE) == true,
+                    localEpoch = session.roles.epoch(),
+                    peerIsSink = session.peerRoles
+                        .has(NotificationRole.NOTIFICATION_ROLE_SINK),
+                    peerEpoch = session.peerRoles.epoch(),
+                )
+            },
         )
     }
 

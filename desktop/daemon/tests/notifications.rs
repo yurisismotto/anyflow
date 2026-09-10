@@ -848,3 +848,251 @@ fn collect_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// N3 — the consent surface, exercised through the handlers the GUI calls
+// ---------------------------------------------------------------------------
+
+/// The desktop's "Receive notifications from this device" switch, off.
+///
+/// The GUI writes this through `Request::Grant`, exactly as the Trusted peers
+/// page does, so this drives `do_grant` itself rather than the store call
+/// underneath it. What the switch promises is that turning it off takes the
+/// notifications that are *already on the screen* off it — a revocation that
+/// only applied to notifications that had not arrived yet would not have
+/// withdrawn anything a person could see.
+#[tokio::test]
+async fn the_desktop_receive_switch_closes_the_mirrors_it_had_displayed() {
+    let (server, client, captured, session) = paired(NotificationPolicy::default()).await;
+
+    assert!(
+        send_notification_control(
+            &session,
+            clip_pb::notification_control::Body::Upsert(upsert(1, "Ana", "lunch?"))
+        )
+        .await
+    );
+    assert_eq!(
+        captured.next_result(TIMEOUT).await.outcome,
+        clip_pb::NotificationOutcome::Displayed as i32
+    );
+    assert_eq!(server.notification_sink.live_count(), 1);
+
+    let response = anyflow_runtime::server::do_grant(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        CAPABILITY_ID,
+        false,
+    )
+    .await;
+    assert!(
+        matches!(response, anyflow_runtime::control::Response::Ok { .. }),
+        "the daemon accepted the switch: {response:?}"
+    );
+
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while server.notification_sink.live_count() != 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "turning the switch off left notifications on the screen"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(server.notification_sink.closes(), vec![1]);
+}
+
+/// And it takes nothing else with it.
+///
+/// The switch is beside three others on the same card. A person turning
+/// notifications off has not asked to stop receiving files, and a UI that did
+/// that would be taking a decision they never made.
+#[tokio::test]
+async fn the_desktop_receive_switch_leaves_every_other_grant_alone() {
+    let (server, client, _captured, _session) = paired(NotificationPolicy::default()).await;
+
+    for capability in ["battery.v1", "files.v1", "clipboard.v1"] {
+        server.set_grant(client.fingerprint, capability, true).await;
+    }
+
+    let before = server.granted_capabilities(client.fingerprint).await;
+    assert!(before.contains(&CAPABILITY_ID.to_string()));
+
+    anyflow_runtime::server::do_grant(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        CAPABILITY_ID,
+        false,
+    )
+    .await;
+
+    let after = server.granted_capabilities(client.fingerprint).await;
+    assert!(!after.contains(&CAPABILITY_ID.to_string()));
+    for capability in ["battery.v1", "files.v1", "clipboard.v1"] {
+        assert!(
+            after.contains(&capability.to_string()),
+            "{capability} was taken away by a notification switch"
+        );
+    }
+    // And the pairing itself survives: this is a permission, not a revocation.
+    assert!(server.is_paired(client.fingerprint).await);
+}
+
+/// Every notification setting the GUI offers leaves the other capabilities
+/// untouched.
+///
+/// The lock policy and the pause switch are settings, not permissions, and
+/// nothing about them should be able to reach another capability's grant.
+#[tokio::test]
+async fn changing_a_notification_setting_never_touches_another_capability() {
+    use anyflow_runtime::control::NotificationSetting;
+
+    let (server, client, _captured, _session) = paired(NotificationPolicy::default()).await;
+    for capability in ["battery.v1", "files.v1", "clipboard.v1"] {
+        server.set_grant(client.fingerprint, capability, true).await;
+    }
+    let before = server.granted_capabilities(client.fingerprint).await;
+
+    for setting in [
+        NotificationSetting::Mirror { enabled: false },
+        NotificationSetting::Mirror { enabled: true },
+        NotificationSetting::WhenLocked {
+            policy: "full".into(),
+        },
+        NotificationSetting::WhenLocked {
+            policy: "app-only".into(),
+        },
+    ] {
+        let response = anyflow_runtime::server::do_notifications_policy(
+            &server.state,
+            &client.fingerprint.to_hex(),
+            setting,
+        )
+        .await;
+        assert!(
+            matches!(response, anyflow_runtime::control::Response::Ok { .. }),
+            "{response:?}"
+        );
+    }
+
+    assert_eq!(
+        before,
+        server.granted_capabilities(client.fingerprint).await,
+        "a notification setting changed another capability's grant"
+    );
+    // The clipboard's own policy is likewise untouched.
+    assert_eq!(
+        server.clipboard_policy(client.fingerprint).await,
+        anyflow_capability_clipboard::policy::ClipboardPolicy::default(),
+    );
+}
+
+/// Pausing from the GUI closes what is on screen; resuming does not restore it.
+///
+/// Restoring would mean this process had kept a title and a body somewhere for
+/// the length of the pause, which is the notification history the design
+/// forbids. The phone re-sends on its next update or its next snapshot.
+#[tokio::test]
+async fn pausing_from_the_desktop_closes_mirrors_and_resuming_restores_nothing() {
+    use anyflow_runtime::control::NotificationSetting;
+
+    let (server, client, captured, session) = paired(NotificationPolicy::default()).await;
+    assert!(
+        send_notification_control(
+            &session,
+            clip_pb::notification_control::Body::Upsert(upsert(1, "Ana", "lunch?"))
+        )
+        .await
+    );
+    assert_eq!(
+        captured.next_result(TIMEOUT).await.outcome,
+        clip_pb::NotificationOutcome::Displayed as i32
+    );
+
+    anyflow_runtime::server::do_notifications_policy(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        NotificationSetting::Mirror { enabled: false },
+    )
+    .await;
+
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    while server.notification_sink.live_count() != 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "pausing left notifications on the screen"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    anyflow_runtime::server::do_notifications_policy(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        NotificationSetting::Mirror { enabled: true },
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        server.notification_sink.live_count(),
+        0,
+        "resuming redisplayed content this daemon should never have kept"
+    );
+
+    // And the source's next update arrives in full, which is the whole answer
+    // to "why did my notifications not come back".
+    assert!(
+        send_notification_control(
+            &session,
+            clip_pb::notification_control::Body::Upsert(upsert(1, "Ana", "still lunch?"))
+        )
+        .await
+    );
+    assert_eq!(
+        captured.next_result(TIMEOUT).await.outcome,
+        clip_pb::NotificationOutcome::Displayed as i32
+    );
+    assert_eq!(server.notification_sink.live_count(), 1);
+}
+
+/// The status the desktop UI renders carries no notification content.
+///
+/// The page is built entirely from this report, so a field that could hold a
+/// title would be a field a history could be built from. This asserts the
+/// absence at the point the UI reads it, over a session that has actually
+/// displayed something with a distinctive title and body.
+#[tokio::test]
+async fn the_status_the_desktop_ui_reads_carries_no_notification_content() {
+    let (server, client, captured, session) = paired(NotificationPolicy::default()).await;
+
+    const TITLE: &str = "ANYFLOW-N3-STATUS-TITLE";
+    const BODY: &str = "ANYFLOW-N3-STATUS-BODY";
+    assert!(
+        send_notification_control(
+            &session,
+            clip_pb::notification_control::Body::Upsert(upsert(1, TITLE, BODY))
+        )
+        .await
+    );
+    assert_eq!(
+        captured.next_result(TIMEOUT).await.outcome,
+        clip_pb::NotificationOutcome::Displayed as i32
+    );
+
+    let reports = server.notifications.peer_reports().await;
+    let rendered = format!("{reports:?}");
+    assert!(
+        !rendered.is_empty(),
+        "the report was empty, so it proves nothing"
+    );
+    for canary in [TITLE, BODY, "com.example.chat", "Chat"] {
+        assert!(
+            !rendered.contains(canary),
+            "the report the desktop UI renders carried {canary}"
+        );
+    }
+    // And it does carry the counts the page actually needs.
+    let peer = reports
+        .iter()
+        .find(|r| r.peer == client.fingerprint)
+        .expect("a report for the connected peer");
+    assert_eq!(peer.mirrors, 1);
+}

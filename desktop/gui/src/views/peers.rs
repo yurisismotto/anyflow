@@ -156,7 +156,7 @@ fn grant_row(
                 if let Ok(Response::Error { message }) = reply {
                     eprintln!("anyflow-gui: the daemon refused the grant change: {message}");
                 }
-                pages.render();
+                pages.refresh_now();
             },
         );
         gtk::glib::Propagation::Proceed
@@ -192,7 +192,7 @@ fn confirm_revoke(button: &gtk::Button, device_id: String, name: String, pages: 
                 if let Ok(Response::Error { message }) = reply {
                     eprintln!("anyflow-gui: could not revoke: {message}");
                 }
-                pages.render();
+                pages.refresh_now();
             },
         );
     });

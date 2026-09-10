@@ -86,16 +86,18 @@ pub enum Page {
     Dashboard,
     Files,
     Clipboard,
+    Notifications,
     Devices,
     TrustedPeers,
     Settings,
 }
 
 impl Page {
-    const ALL: [Page; 6] = [
+    const ALL: [Page; 7] = [
         Page::Dashboard,
         Page::Files,
         Page::Clipboard,
+        Page::Notifications,
         Page::Devices,
         Page::TrustedPeers,
         Page::Settings,
@@ -106,6 +108,7 @@ impl Page {
             Page::Dashboard => "Dashboard",
             Page::Files => "Files",
             Page::Clipboard => "Clipboard",
+            Page::Notifications => "Notifications",
             Page::Devices => "Devices",
             Page::TrustedPeers => "Trusted peers",
             Page::Settings => "Settings",
@@ -117,6 +120,7 @@ impl Page {
             Page::Dashboard => "go-home-symbolic",
             Page::Files => "folder-symbolic",
             Page::Clipboard => "edit-paste-symbolic",
+            Page::Notifications => "preferences-system-notifications-symbolic",
             Page::Devices => "computer-symbolic",
             Page::TrustedPeers => "system-users-symbolic",
             Page::Settings => "preferences-system-symbolic",
@@ -133,6 +137,7 @@ impl Page {
             Page::Dashboard => "dashboard",
             Page::Files => "files",
             Page::Clipboard => "clipboard",
+            Page::Notifications => "notifications",
             Page::Devices => "devices",
             Page::TrustedPeers => "peers",
             Page::Settings => "settings",
@@ -145,12 +150,22 @@ impl Page {
 /// `None` on a field means "not answered yet", which is displayed as such
 /// rather than as an empty list — "no devices" and "the daemon is not running"
 /// are different situations and the UI must not conflate them.
-#[derive(Default)]
+///
+/// `PartialEq` is what lets [`views::Pages::render`] tell an unchanged poll
+/// from a real change, and it is a property of the control types rather than
+/// of this struct: every field is a report `anyflow-control` defines, so two
+/// states are equal exactly when the daemon said the same thing twice.
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct DaemonState {
     pub status: Option<anyflow_control::StatusReport>,
     pub devices: Option<Vec<anyflow_control::DeviceReport>>,
     pub transfers: Option<Vec<anyflow_control::TransferReport>>,
     pub clipboard: Option<anyflow_control::ClipboardStatusReport>,
+    /// Counts, states and platform identifiers. **No field on this report can
+    /// hold a notification's title, body or application name**, which is what
+    /// makes the notifications page structurally incapable of becoming the
+    /// history the design forbids.
+    pub notifications: Option<anyflow_control::NotificationsStatusReport>,
     /// Set when the daemon could not be reached at all.
     pub error: Option<String>,
 }
@@ -158,6 +173,63 @@ pub struct DaemonState {
 impl DaemonState {
     pub fn reachable(&self) -> bool {
         self.error.is_none() && self.status.is_some()
+    }
+}
+
+/// How many control requests make up one refresh.
+const CYCLE_REQUESTS: usize = 5;
+
+type Reply = anyhow::Result<Response>;
+
+/// One poll of the daemon, collected before anything is drawn.
+///
+/// The control socket answers one question per exchange, so a refresh is
+/// several of them completing at their own pace. This holds the answers until
+/// the last one lands and then commits them together, so the UI never draws a
+/// half-updated poll and — far more importantly — draws once per interval
+/// rather than once per reply.
+struct Cycle {
+    /// Bumped per poll, so a late answer can be recognised and dropped.
+    generation: u64,
+    /// Replies still to come in this poll.
+    outstanding: usize,
+    /// The state being assembled. Committed when `outstanding` reaches zero.
+    pending: DaemonState,
+}
+
+fn fold_status(s: &mut DaemonState, reply: Reply) {
+    match reply {
+        Ok(Response::Status(report)) => {
+            s.status = Some(report);
+            s.error = None;
+        }
+        Ok(Response::Error { message }) => s.error = Some(message),
+        Ok(_) => s.error = Some("unexpected reply from the daemon".into()),
+        Err(e) => s.error = Some(e.to_string()),
+    }
+}
+
+fn fold_devices(s: &mut DaemonState, reply: Reply) {
+    if let Ok(Response::Devices(list)) = reply {
+        s.devices = Some(list);
+    }
+}
+
+fn fold_transfers(s: &mut DaemonState, reply: Reply) {
+    if let Ok(Response::Transfers(list)) = reply {
+        s.transfers = Some(list);
+    }
+}
+
+fn fold_clipboard(s: &mut DaemonState, reply: Reply) {
+    if let Ok(Response::Clipboard(report)) = reply {
+        s.clipboard = Some(report);
+    }
+}
+
+fn fold_notifications(s: &mut DaemonState, reply: Reply) {
+    if let Ok(Response::Notifications(report)) = reply {
+        s.notifications = Some(report);
     }
 }
 
@@ -274,53 +346,73 @@ fn build_window(app: &adw::Application, initial: Page) {
     window.add_breakpoint(breakpoint);
 
     // --- refresh loop ---------------------------------------------------
-    let refresh = {
+    //
+    // One poll is five exchanges, and nothing is drawn until all five have
+    // answered. Drawing per reply is what rebuilt the whole widget tree five
+    // times every `REFRESH_SECS`; a tree rebuilt underneath an assistive
+    // technology is a control that cannot be activated, because the object it
+    // located no longer exists by the time it acts on it.
+    let cycle = Rc::new(RefCell::new(Cycle {
+        generation: 0,
+        outstanding: 0,
+        pending: DaemonState::default(),
+    }));
+
+    let refresh: Rc<dyn Fn()> = {
         let state = state.clone();
         let pages = pages.clone();
-        move || {
-            let (state1, pages1) = (state.clone(), pages.clone());
-            let (state2, pages2) = (state.clone(), pages.clone());
-            let (state3, pages3) = (state.clone(), pages.clone());
-            let (state4, pages4) = (state.clone(), pages.clone());
+        let cycle = cycle.clone();
+        Rc::new(move || {
+            let generation = {
+                let mut c = cycle.borrow_mut();
+                c.generation = c.generation.wrapping_add(1);
+                c.outstanding = CYCLE_REQUESTS;
+                // Seeded from what is already known, so one unanswered
+                // request blanks nothing: "not answered yet" and "answered
+                // with nothing" have to stay different states.
+                c.pending = state.borrow().clone();
+                c.generation
+            };
 
-            client::send(Request::Status, move |result| {
-                {
-                    let mut s = state1.borrow_mut();
-                    match result {
-                        Ok(Response::Status(report)) => {
-                            s.status = Some(report);
-                            s.error = None;
+            let collect = |request: Request, fold: fn(&mut DaemonState, Reply)| {
+                let (state, pages, cycle) = (state.clone(), pages.clone(), cycle.clone());
+                client::send(request, move |result| {
+                    let last = {
+                        let mut c = cycle.borrow_mut();
+                        // A reply from an earlier poll is discarded rather
+                        // than committed over a newer one. It is also what
+                        // stops a daemon that stopped answering from wedging
+                        // the loop: the next tick simply starts a new cycle.
+                        if c.generation != generation {
+                            return;
                         }
-                        Ok(Response::Error { message }) => s.error = Some(message),
-                        Ok(_) => s.error = Some("unexpected reply from the daemon".into()),
-                        Err(e) => s.error = Some(e.to_string()),
+                        fold(&mut c.pending, result);
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.outstanding == 0
+                    };
+                    if last {
+                        let settled = std::mem::take(&mut cycle.borrow_mut().pending);
+                        *state.borrow_mut() = settled;
+                        pages.render();
                     }
-                }
-                pages1.render();
-            });
+                });
+            };
 
-            client::send(Request::Devices, move |result| {
-                if let Ok(Response::Devices(list)) = result {
-                    state2.borrow_mut().devices = Some(list);
-                    pages2.render();
-                }
-            });
-
-            client::send(Request::Transfers, move |result| {
-                if let Ok(Response::Transfers(list)) = result {
-                    state3.borrow_mut().transfers = Some(list);
-                    pages3.render();
-                }
-            });
-
-            client::send(Request::ClipboardStatus, move |result| {
-                if let Ok(Response::Clipboard(report)) = result {
-                    state4.borrow_mut().clipboard = Some(report);
-                    pages4.render();
-                }
-            });
-        }
+            collect(Request::Status, fold_status);
+            collect(Request::Devices, fold_devices);
+            collect(Request::Transfers, fold_transfers);
+            collect(Request::ClipboardStatus, fold_clipboard);
+            collect(Request::NotificationsStatus, fold_notifications);
+        })
     };
+
+    // Every control calls this once the daemon has answered it — see
+    // `Pages::refresh_now`.
+    pages.set_refresh(refresh.clone());
+
+    // Draw the empty state once, so the window is not blank while the first
+    // poll is in flight.
+    pages.render();
     refresh();
     glib::timeout_add_seconds_local(REFRESH_SECS as u32, move || {
         refresh();
