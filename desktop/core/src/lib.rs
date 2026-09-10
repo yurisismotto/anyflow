@@ -21,6 +21,7 @@ pub mod error;
 pub mod fingerprint;
 pub mod framing;
 pub mod identity;
+pub mod notification_policy;
 pub mod notifications;
 pub mod pairing;
 pub mod platform;

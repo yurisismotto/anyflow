@@ -111,6 +111,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyflow-capability-notifications"
+version = "0.1.0"
+dependencies = [
+ "anyflow-core",
+ "anyflow-proto",
+ "async-trait",
+ "futures-lite",
+ "prost",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+]
+
+[[package]]
 name = "anyflow-cli"
 version = "0.1.0"
 dependencies = [
@@ -165,6 +180,7 @@ dependencies = [
  "anyflow-capability-battery",
  "anyflow-capability-clipboard",
  "anyflow-capability-files",
+ "anyflow-capability-notifications",
  "anyflow-control",
  "anyflow-core",
  "anyflow-linux",
@@ -233,6 +249,7 @@ dependencies = [
  "anyflow-capability-battery",
  "anyflow-capability-clipboard",
  "anyflow-capability-files",
+ "anyflow-capability-notifications",
  "anyflow-control",
  "anyflow-core",
  "anyflow-proto",

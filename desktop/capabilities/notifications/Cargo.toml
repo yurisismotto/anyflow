@@ -1,0 +1,66 @@
+[package]
+name = "anyflow-capability-notifications"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# The Linux platform half: the freedesktop notification server over D-Bus and
+# the logind lock source. On by default so every existing caller keeps
+# working; with it off this crate is the `notifications.v1` runtime, the
+# `NotificationSink` seam, the `LockSource` seam and the in-memory
+# implementations of both — no D-Bus, no logind, no platform surface at all.
+# That is exactly what the Wave 0 portable compile gate checks, and it is why
+# `zbus` is an optional dependency rather than a mandatory one: a D-Bus client
+# has no business being unavoidable in a crate a Windows or macOS adapter will
+# reuse.
+default = ["linux-dbus"]
+linux-dbus = ["dep:zbus", "dep:futures-lite"]
+
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Portable, security-critical: `unsafe` is forbidden outright.
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+# `default-features = false`: a capability crate needs the protocol half of
+# `anyflow-core`, never its Unix filesystem adapter. Leaving the default on
+# would drag `unix-fs` into every build through feature unification, and the
+# portability gate would then pass for the wrong reason.
+anyflow-core = { version = "0.1.0", path = "../../core", default-features = false }
+anyflow-proto = { version = "0.1.0", path = "../../proto" }
+async-trait = "0.1"
+prost = "0.14"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tracing = "0.1"
+
+# The freedesktop notification server and the logind lock source, both behind
+# `linux-dbus`. `default-features = false` with only `tokio`: zbus's own async
+# executor would be a second runtime inside a process that already has one.
+# Only for `StreamExt::next` on zbus's own signal streams. Optional and
+# gated with `zbus`, so the portable build pulls in no executor and no stream
+# machinery it has no use for.
+futures-lite = { version = "2", optional = true, default-features = false, features = ["std"] }
+
+[dependencies.zbus]
+version = "5"
+optional = true
+default-features = false
+features = ["tokio"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+# Captures `tracing` output so the "no notification content in logs" rule is
+# proved by a test rather than by grepping the source.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }

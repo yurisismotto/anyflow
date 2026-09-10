@@ -1,0 +1,386 @@
+//! A whole sink, in one process, with a fake desktop.
+//!
+//! Everything here drives the **real** [`NotificationManager`] — the real
+//! validation, the real authorizer question, the real mirror table, the real
+//! worker task and the real ordering — against an in-memory notification
+//! server and an in-memory lock. Nothing is stubbed except the platform, which
+//! is exactly the boundary the [`NotificationSink`] seam exists to draw.
+//!
+//! # Waiting, without sleeping
+//!
+//! Display work happens on a task of its own, so a test that asserted
+//! immediately after sending would race it. Rather than sleeping, every
+//! assertion waits on the thing the worker actually produces: a
+//! `NotificationResult`. Because one worker drains one queue in order, a
+//! result for message *n* proves messages *1..n* have been handled — which is
+//! what [`Harness::barrier`] uses to wait for a snapshot marker, which
+//! produces no result of its own.
+
+#![allow(dead_code)]
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyflow_capability_notifications::backend::{
+    LockSource, MemoryLock, MemorySink, NotificationSink,
+};
+use anyflow_capability_notifications::{
+    NotificationAuthorizer, NotificationManager, NotificationPolicy, CAPABILITY_ID,
+};
+use anyflow_core::capability::OutboundMessage;
+use anyflow_core::Fingerprint;
+use anyflow_proto::v1::capabilities as pb;
+use anyflow_proto::Message;
+use tokio::sync::{mpsc, RwLock};
+
+pub const TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A trust store that a test can edit.
+pub struct Policies {
+    inner: RwLock<std::collections::HashMap<Fingerprint, NotificationPolicy>>,
+}
+
+impl Policies {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: RwLock::new(std::collections::HashMap::new()),
+        })
+    }
+
+    pub async fn grant(&self, peer: Fingerprint, policy: NotificationPolicy) {
+        self.inner.write().await.insert(peer, policy);
+    }
+
+    pub async fn revoke(&self, peer: &Fingerprint) {
+        self.inner.write().await.remove(peer);
+    }
+}
+
+#[async_trait::async_trait]
+impl NotificationAuthorizer for Policies {
+    async fn policy_for(&self, peer: &Fingerprint) -> NotificationPolicy {
+        // Absent means ungranted, and ungranted means DENIED. Exactly what the
+        // daemon's own implementation answers for an unknown or revoked peer.
+        self.inner
+            .read()
+            .await
+            .get(peer)
+            .copied()
+            .unwrap_or(NotificationPolicy::DENIED)
+    }
+}
+
+pub fn fingerprint(seed: u8) -> Fingerprint {
+    Fingerprint::from_hex(&format!("{seed:02x}").repeat(32)).expect("fingerprint")
+}
+
+/// Sixteen bytes seeded from a `u16`, so a test can make more distinct
+/// identities than a byte allows.
+pub fn id_bytes(seed: u16) -> Vec<u8> {
+    let mut out = vec![0u8; 16];
+    out[0] = (seed >> 8) as u8;
+    out[1] = (seed & 0xff) as u8;
+    out
+}
+
+pub const ORIGIN: &str = "0123456789abcdef0123456789abcdef";
+
+/// A `NotificationUpsert` with the fields a test usually cares about.
+pub fn upsert(seed: u16, title: &str, body: &str) -> pb::NotificationUpsert {
+    pb::NotificationUpsert {
+        notification_id: id_bytes(seed),
+        origin_device_id: ORIGIN.to_string(),
+        app_id: "com.example.chat".to_string(),
+        app_label: "Chat".to_string(),
+        title: title.to_string(),
+        body: body.to_string(),
+        posted_at_unix_ms: 1_700_000_000_000,
+        importance: pb::NotificationImportance::Normal as i32,
+        privacy: pb::NotificationPrivacy::Private as i32,
+        category: pb::NotificationCategory::Message as i32,
+        content_hash: content_hash(title, body),
+        ..pb::NotificationUpsert::default()
+    }
+}
+
+/// A digest that stands in for the one the **source** computes.
+///
+/// Deliberately *not* the construction ADR-0016 specifies. This sink never
+/// recomputes `content_hash`, so any 32 bytes that change when the content
+/// changes exercise the code exactly as well as the real digest would — and
+/// using something that is obviously not the real construction is how this
+/// suite proves the sink is not secretly checking.
+pub fn content_hash(title: &str, body: &str) -> Vec<u8> {
+    let mut out = vec![0u8; 32];
+    for (index, byte) in title.bytes().chain(body.bytes()).enumerate() {
+        out[index % 32] ^= byte.wrapping_add(index as u8);
+    }
+    out
+}
+
+pub fn control(body: pb::notification_control::Body) -> Vec<u8> {
+    pb::NotificationControl { body: Some(body) }.encode_to_vec()
+}
+
+pub fn roles(roles: &[pb::NotificationRole], epoch: u32) -> Vec<u8> {
+    control(pb::notification_control::Body::Roles(
+        pb::NotificationRoles {
+            roles: roles.iter().map(|r| *r as i32).collect(),
+            epoch,
+        },
+    ))
+}
+
+pub fn marker(sync_id: &[u8], phase: pb::sync_marker::Phase) -> Vec<u8> {
+    control(pb::notification_control::Body::Sync(pb::SyncMarker {
+        sync_id: sync_id.to_vec(),
+        phase: phase as i32,
+    }))
+}
+
+pub fn remove(seed: u16) -> Vec<u8> {
+    control(pb::notification_control::Body::Remove(
+        pb::NotificationRemove {
+            notification_id: id_bytes(seed),
+            origin_device_id: ORIGIN.to_string(),
+        },
+    ))
+}
+
+/// One peer, one fake desktop, one real manager.
+pub struct Harness {
+    pub manager: Arc<NotificationManager>,
+    pub sink: Arc<MemorySink>,
+    pub lock: Arc<MemoryLock>,
+    pub policies: Arc<Policies>,
+    pub peer: Fingerprint,
+    outbound: mpsc::Receiver<OutboundMessage>,
+    sender: mpsc::Sender<OutboundMessage>,
+    /// Distinct identities used by `barrier`, so a barrier never collides with
+    /// a notification a test is asserting on.
+    barrier_seed: u16,
+}
+
+impl Harness {
+    /// A granted peer that has already announced `SOURCE`, which is the state
+    /// almost every test wants to start from.
+    pub async fn start() -> Self {
+        let mut harness = Self::start_ungranted().await;
+        harness
+            .policies
+            .grant(harness.peer, NotificationPolicy::default())
+            .await;
+        harness.announce_source().await;
+        harness
+    }
+
+    /// A connected peer with no grant and no announced role.
+    pub async fn start_ungranted() -> Self {
+        let sink = Arc::new(MemorySink::new());
+        let lock = Arc::new(MemoryLock::new());
+        let policies = Policies::new();
+
+        let manager = NotificationManager::new(
+            Arc::clone(&sink) as Arc<dyn NotificationSink>,
+            Arc::clone(&lock) as Arc<dyn LockSource>,
+        )
+        .await;
+        manager
+            .set_authorizer(Arc::clone(&policies) as Arc<dyn NotificationAuthorizer>)
+            .await;
+        manager.spawn_platform_pumps();
+
+        let (sender, outbound) = mpsc::channel(256);
+        let peer = fingerprint(0xab);
+        manager.attach_session(peer, sender.clone()).await;
+
+        Self {
+            manager,
+            sink,
+            lock,
+            policies,
+            peer,
+            outbound,
+            sender,
+            barrier_seed: 0xF000,
+        }
+    }
+
+    /// Attaches a second peer, with its own outbound channel.
+    pub async fn second_peer(&self, seed: u8) -> Peer {
+        let (sender, outbound) = mpsc::channel(256);
+        let peer = fingerprint(seed);
+        self.policies
+            .grant(peer, NotificationPolicy::default())
+            .await;
+        self.manager.attach_session(peer, sender.clone()).await;
+
+        let mut second = Peer {
+            peer,
+            outbound,
+            sender,
+            barrier_seed: 0xE000,
+        };
+        second.expect_roles().await;
+        self.manager
+            .handle_control(peer, &roles(&[pb::NotificationRole::Source], 1))
+            .await
+            .expect("roles");
+        second
+    }
+
+    pub async fn send(&self, payload: &[u8]) {
+        self.manager
+            .handle_control(self.peer, payload)
+            .await
+            .expect("a notifications.v1 message must never fail the session");
+    }
+
+    pub async fn send_upsert(&self, message: pb::NotificationUpsert) {
+        self.send(&control(pb::notification_control::Body::Upsert(message)))
+            .await;
+    }
+
+    /// The next message this device sends the peer.
+    pub async fn next_outbound(&mut self) -> pb::NotificationControl {
+        let message = tokio::time::timeout(TIMEOUT, self.outbound.recv())
+            .await
+            .expect("the sink answered within the timeout")
+            .expect("the outbound channel is open");
+        assert_eq!(message.capability_id, CAPABILITY_ID);
+        pb::NotificationControl::decode(message.payload.as_slice()).expect("decodes")
+    }
+
+    /// The next `NotificationResult`, as `(id, outcome)`.
+    pub async fn next_result(&mut self) -> (Vec<u8>, pb::NotificationOutcome) {
+        match self.next_outbound().await.body {
+            Some(pb::notification_control::Body::Result(result)) => (
+                result.notification_id,
+                pb::NotificationOutcome::try_from(result.outcome)
+                    .unwrap_or(pb::NotificationOutcome::Unspecified),
+            ),
+            other => panic!("expected a result, got {other:?}"),
+        }
+    }
+
+    pub async fn expect_outcome(&mut self, expected: pb::NotificationOutcome) {
+        let (_, outcome) = self.next_result().await;
+        assert_eq!(outcome, expected);
+    }
+
+    /// The next `NotificationRoles` this device announces.
+    pub async fn next_roles(&mut self) -> pb::NotificationRoles {
+        match self.next_outbound().await.body {
+            Some(pb::notification_control::Body::Roles(roles)) => roles,
+            other => panic!("expected a roles announcement, got {other:?}"),
+        }
+    }
+
+    /// Consumes the announcement every fresh session begins with.
+    pub async fn expect_roles(&mut self) -> pb::NotificationRoles {
+        self.next_roles().await
+    }
+
+    async fn announce_source(&mut self) {
+        self.expect_roles().await;
+        self.send(&roles(&[pb::NotificationRole::Source], 1)).await;
+    }
+
+    /// Waits until everything sent so far has been handled.
+    ///
+    /// Sends a removal for an identity nothing has ever used and waits for its
+    /// answer. One worker drains one queue in order, so that answer cannot
+    /// arrive before every earlier item has been processed — including a
+    /// snapshot marker, which produces no answer of its own.
+    ///
+    /// The *outcome* is deliberately not asserted, only the identity: the
+    /// answer depends on the peer's current grant and role, and a barrier that
+    /// insisted on `UNKNOWN_NOTIFICATION` would stop working for exactly the
+    /// tests that revoke something.
+    pub async fn barrier(&mut self) {
+        self.barrier_seed += 1;
+        let seed = self.barrier_seed;
+        self.send(&remove(seed)).await;
+        let (id, _) = self.next_result().await;
+        assert_eq!(id, id_bytes(seed), "the barrier answered the wrong message");
+    }
+
+    /// Waits for something the fake desktop can be asked about.
+    ///
+    /// The barrier above proves the worker reached a message; this proves an
+    /// *effect* happened, which is what a test needs when the effect is
+    /// triggered by something other than a message — a revocation, a lock, a
+    /// server going away. Polling rather than sleeping a fixed time, so a
+    /// loaded machine makes the suite slower rather than flaky.
+    pub async fn wait_for(&self, what: &str, mut condition: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + TIMEOUT;
+        loop {
+            if condition() {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for {what}"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// This peer's report, after everything queued has been handled.
+    pub async fn report(&mut self) -> anyflow_capability_notifications::PeerReport {
+        self.barrier().await;
+        self.manager
+            .peer_reports()
+            .await
+            .into_iter()
+            .find(|r| r.peer == self.peer)
+            .expect("the peer has a report")
+    }
+}
+
+/// A second connected peer.
+pub struct Peer {
+    pub peer: Fingerprint,
+    outbound: mpsc::Receiver<OutboundMessage>,
+    sender: mpsc::Sender<OutboundMessage>,
+    barrier_seed: u16,
+}
+
+impl Peer {
+    pub async fn next_outbound(&mut self) -> pb::NotificationControl {
+        let message = tokio::time::timeout(TIMEOUT, self.outbound.recv())
+            .await
+            .expect("answered within the timeout")
+            .expect("the outbound channel is open");
+        pb::NotificationControl::decode(message.payload.as_slice()).expect("decodes")
+    }
+
+    pub async fn next_result(&mut self) -> (Vec<u8>, pb::NotificationOutcome) {
+        match self.next_outbound().await.body {
+            Some(pb::notification_control::Body::Result(result)) => (
+                result.notification_id,
+                pb::NotificationOutcome::try_from(result.outcome)
+                    .unwrap_or(pb::NotificationOutcome::Unspecified),
+            ),
+            other => panic!("expected a result, got {other:?}"),
+        }
+    }
+
+    pub async fn expect_roles(&mut self) -> pb::NotificationRoles {
+        match self.next_outbound().await.body {
+            Some(pb::notification_control::Body::Roles(roles)) => roles,
+            other => panic!("expected a roles announcement, got {other:?}"),
+        }
+    }
+
+    pub async fn barrier(&mut self, manager: &Arc<NotificationManager>) {
+        self.barrier_seed += 1;
+        let seed = self.barrier_seed;
+        manager
+            .handle_control(self.peer, &remove(seed))
+            .await
+            .expect("remove");
+        let (id, _) = self.next_result().await;
+        assert_eq!(id, id_bytes(seed));
+    }
+}

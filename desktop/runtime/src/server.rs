@@ -15,8 +15,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::control::{
     BatteryReport, ClipboardFlag, ClipboardPeerReport, ClipboardStatusReport, ConnectionReport,
-    DeviceReport, DeviceState, Event, PendingClipReport, Request, Response, StatusReport,
-    TransferReport, BATTERY_STALE_AFTER_SECS,
+    DeviceReport, DeviceState, Event, NotificationPeerReport, NotificationSetting,
+    NotificationsStatusReport, PendingClipReport, Request, Response, StatusReport, TransferReport,
+    BATTERY_STALE_AFTER_SECS,
 };
 use crate::state::DaemonState;
 
@@ -123,6 +124,14 @@ async fn serve_client<S: anyflow_control::transport::ControlStream>(
             enabled,
         } => {
             let response = do_clipboard_policy(&state, &device, flag, enabled).await;
+            send(&mut write, &response).await?;
+        }
+        Request::NotificationsStatus => {
+            let report = build_notifications_status(&state).await;
+            send(&mut write, &Response::Notifications(report)).await?;
+        }
+        Request::NotificationsPolicy { device, setting } => {
+            let response = do_notifications_policy(&state, &device, setting).await;
             send(&mut write, &response).await?;
         }
     }
@@ -343,6 +352,10 @@ async fn do_unpair(state: &Arc<DaemonState>, device: &str) -> Response {
             // auto-send. Without this a revoked device would keep being
             // pushed to until something else happened to bump the epoch.
             state.notify_clipboard_policy_changed();
+            // And `notifications.v1` has state on the *screen*, which no
+            // session teardown removes. A revoked device's notifications come
+            // off it now.
+            state.notify_notifications_revoked(&fingerprint).await;
             Response::Ok {
                 message: format!("revoked {}", fingerprint.to_display_short()),
             }
@@ -456,6 +469,15 @@ async fn do_grant(
     // outbound watcher is a running task and has to be told.
     if capability == anyflow_capability_clipboard::CAPABILITY_ID {
         state.notify_clipboard_policy_changed();
+    }
+
+    // Withdrawing a notification grant has to take the notifications that are
+    // already on the screen off it. Inbound authorization needs no telling —
+    // it is re-read per message — but a mirror already displayed is state this
+    // daemon put there, and a revocation that left it up would only apply to
+    // notifications that had not arrived yet.
+    if !granted && capability == anyflow_capability_notifications::CAPABILITY_ID {
+        state.notify_notifications_revoked(&fingerprint).await;
     }
 
     Response::Ok {
@@ -1006,4 +1028,163 @@ fn local_addresses(port: u16) -> Vec<std::net::SocketAddr> {
 /// `Ipv6Addr::is_unicast_link_local` is still unstable, so test the prefix.
 fn is_link_local_v6(ip: &std::net::Ipv6Addr) -> bool {
     (ip.segments()[0] & 0xffc0) == 0xfe80
+}
+
+// ---------------------------------------------------------------------------
+// notifications.v1
+// ---------------------------------------------------------------------------
+
+/// Builds the notification diagnostic.
+///
+/// Counts and states only. Nothing here reads, holds or renders a
+/// notification's title, body or application name — there is no field on
+/// [`NotificationsStatusReport`] that could carry one, which is the property
+/// that makes this safe to print, log and paste into a bug report.
+async fn build_notifications_status(state: &Arc<DaemonState>) -> NotificationsStatusReport {
+    let Some(notifications) = state.notifications.clone() else {
+        return NotificationsStatusReport {
+            enabled: false,
+            backend: "none".into(),
+            backend_detail: "notifications.v1 is not enabled in this daemon".into(),
+            available: false,
+            body_markup: false,
+            persistence: false,
+            lock_source: "none".into(),
+            lock_detail: "notifications.v1 is not enabled in this daemon".into(),
+            // Not "unlocked". A report about a capability that does not exist
+            // must not read as an assurance about the screen.
+            locked: true,
+            mirrors: 0,
+            peers: Vec::new(),
+        };
+    };
+
+    let capabilities = notifications.capabilities().clone();
+    let reports = notifications.peer_reports().await;
+
+    let rows: Vec<anyflow_core::store::TrustedPeer> = {
+        let store = state.store.lock().await;
+        store.peers().cloned().collect()
+    };
+
+    let mut peers = Vec::with_capacity(rows.len());
+    for p in &rows {
+        let live = reports.iter().find(|r| r.peer == p.fingerprint);
+        peers.push(NotificationPeerReport {
+            device_id: p.device_id.clone(),
+            device_name: p.device_name.clone(),
+            fingerprint_short: p.fingerprint.to_display_short(),
+            granted: p.allows(anyflow_capability_notifications::CAPABILITY_ID),
+            revoked: p.revoked,
+            connected: state.session_for(&p.fingerprint).await.is_some(),
+            allow_mirror: p.notification_policy.allow_mirror,
+            when_locked: p.notification_policy.when_sink_locked.as_str().to_string(),
+            allow_dismiss_sync: p.notification_policy.allow_dismiss_sync,
+            mirrors: live.map_or(0, |r| r.mirrors),
+            displayed: live.map_or(0, |r| r.displayed),
+            evicted: live.map_or(0, |r| r.evicted),
+            local_roles: live.map_or(0, |r| r.local_roles),
+            local_epoch: live.map_or(0, |r| r.local_epoch),
+            peer_is_source: live.is_some_and(|r| r.peer_is_source),
+            peer_epoch: live.map_or(0, |r| r.peer_epoch),
+            snapshot_open: live.is_some_and(|r| r.snapshot_open),
+            queued: live.map_or(0, |r| r.queue.pending),
+            coalesced: live.map_or(0, |r| r.queue.coalesced),
+            dropped: live.map_or(0, |r| r.queue.dropped_terminal),
+        });
+    }
+
+    NotificationsStatusReport {
+        enabled: true,
+        backend: notifications.sink().id().to_string(),
+        backend_detail: notifications.sink().describe(),
+        available: notifications.is_available(),
+        body_markup: capabilities.body_markup,
+        persistence: capabilities.persistence,
+        lock_source: notifications.lock_source().id().to_string(),
+        lock_detail: notifications.lock_source().describe(),
+        locked: notifications.is_locked(),
+        mirrors: reports.iter().map(|r| r.mirrors).sum(),
+        peers,
+    }
+}
+
+/// Changes one per-peer notification setting.
+///
+/// The grant is a separate command (`anyflow grant <device>
+/// notifications.v1`) and is deliberately not settable from here: a policy
+/// edit must not be able to hand out the permission the policy is scoped by.
+async fn do_notifications_policy(
+    state: &Arc<DaemonState>,
+    device: &str,
+    setting: NotificationSetting,
+) -> Response {
+    let fingerprint = match state.resolve_device(device).await {
+        Ok(f) => f,
+        Err(message) => return Response::Error { message },
+    };
+
+    let current = {
+        let store = state.store.lock().await;
+        match store.trusted_peer(&fingerprint) {
+            Some(p) => p.notification_policy,
+            None => {
+                return Response::Error {
+                    message: "that device is not paired (or its pairing was revoked)".into(),
+                }
+            }
+        }
+    };
+
+    let mut updated = current;
+    let described = match &setting {
+        NotificationSetting::Mirror { enabled } => {
+            updated.allow_mirror = *enabled;
+            format!("mirror={}", if *enabled { "on" } else { "off" })
+        }
+        NotificationSetting::WhenLocked { policy } => {
+            match anyflow_core::notification_policy::LockPolicy::parse(policy) {
+                Some(parsed) => {
+                    updated.when_sink_locked = parsed;
+                    format!("when-locked={}", parsed.as_str())
+                }
+                // Not guessed at, and not defaulted: a typo must never select
+                // the most permissive option.
+                None => {
+                    return Response::Error {
+                        message: format!(
+                            "'{policy}' is not a lock policy. Use one of: \
+                             full, app-only, suppress"
+                        ),
+                    }
+                }
+            }
+        }
+        NotificationSetting::DismissSync { enabled } => {
+            updated.allow_dismiss_sync = *enabled;
+            format!("dismiss-sync={}", if *enabled { "on" } else { "off" })
+        }
+    };
+
+    let result = {
+        let mut store = state.store.lock().await;
+        store.set_notification_policy(&fingerprint, updated)
+    };
+    if let Err(e) = result {
+        return Response::Error {
+            message: format!("could not persist the policy: {e}"),
+        };
+    }
+
+    // Turning mirroring off is a withdrawal, and a withdrawal has to take the
+    // notifications that are already up down. Turning it back on displays
+    // nothing retroactively: the source re-states what is active on its next
+    // snapshot, which is the only place the truth lives.
+    if matches!(setting, NotificationSetting::Mirror { enabled: false }) {
+        state.notify_notifications_revoked(&fingerprint).await;
+    }
+
+    Response::Ok {
+        message: format!("{} {}", fingerprint.to_display_short(), described),
+    }
 }

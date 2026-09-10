@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use anyflow_control::{
-    BatteryReport, ClipboardFlag, ClipboardStatusReport, DeviceReport, Event, Request, Response,
-    TransferReport,
+    BatteryReport, ClipboardFlag, ClipboardStatusReport, DeviceReport, Event, NotificationSetting,
+    NotificationsStatusReport, Request, Response, TransferReport,
 };
 use anyflow_linux::control_socket_path;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -76,6 +76,72 @@ enum Command {
     /// Share text clipboards with a paired device.
     #[command(subcommand)]
     Clipboard(ClipboardCommand),
+
+    /// Show a paired device's notifications on this desktop.
+    #[command(subcommand)]
+    Notifications(NotificationsCommand),
+}
+
+#[derive(Subcommand, Debug)]
+enum NotificationsCommand {
+    /// What notification mirroring can do here, and the policy for each
+    /// device.
+    ///
+    /// Shows the notification server this session actually has, where the
+    /// lock state is read from, and how many notifications are currently
+    /// mirrored. It never lists the notifications themselves: there is no
+    /// notification history anywhere in AnyFlow, and this is not one.
+    Status,
+
+    /// Show or stop showing a device's notifications here.
+    Mirror {
+        device: String,
+        #[arg(value_enum)]
+        state: Toggle,
+    },
+
+    /// What to show while this desktop is locked.
+    ///
+    /// Defaults to `app-only`: the application's name, with no title and no
+    /// body. A locked screen is the case the setting exists for — somebody
+    /// walking past a desk should not be able to read a phone's messages off
+    /// it — so `full` is a deliberate choice, not a convenience.
+    WhenLocked {
+        device: String,
+        #[arg(value_enum)]
+        policy: WhenLocked,
+    },
+
+    /// Let closing a notification here dismiss it on the device too.
+    ///
+    /// Stored, and **inert in this release**: nothing sends a dismissal yet.
+    /// The setting exists so that the default a later release must respect is
+    /// already written down, and it defaults off.
+    DismissSync {
+        device: String,
+        #[arg(value_enum)]
+        state: Toggle,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum WhenLocked {
+    /// Everything, as if unlocked.
+    Full,
+    /// The application's name only.
+    AppOnly,
+    /// Nothing at all, and existing notifications are closed.
+    Suppress,
+}
+
+impl WhenLocked {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::AppOnly => "app-only",
+            Self::Suppress => "suppress",
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -237,6 +303,34 @@ async fn main() -> anyhow::Result<()> {
             };
             simple(stream, request).await
         }
+        Command::Notifications(notifications) => {
+            let request = match notifications {
+                NotificationsCommand::Status => Request::NotificationsStatus,
+                NotificationsCommand::Mirror { device, state } => Request::NotificationsPolicy {
+                    device,
+                    setting: NotificationSetting::Mirror {
+                        enabled: state.enabled(),
+                    },
+                },
+                NotificationsCommand::WhenLocked { device, policy } => {
+                    Request::NotificationsPolicy {
+                        device,
+                        setting: NotificationSetting::WhenLocked {
+                            policy: policy.as_str().to_string(),
+                        },
+                    }
+                }
+                NotificationsCommand::DismissSync { device, state } => {
+                    Request::NotificationsPolicy {
+                        device,
+                        setting: NotificationSetting::DismissSync {
+                            enabled: state.enabled(),
+                        },
+                    }
+                }
+            };
+            simple(stream, request).await
+        }
     }
 }
 
@@ -301,6 +395,7 @@ async fn simple(stream: UnixStream, request: Request) -> anyhow::Result<()> {
             }
         }
         Response::Clipboard(report) => print_clipboard_status(&report),
+        Response::Notifications(report) => print_notifications_status(&report),
         Response::Pong { rtt_ms } => println!("pong in {rtt_ms} ms"),
         Response::Ok { message } => println!("{message}"),
         Response::Error { message } => {
@@ -697,4 +792,114 @@ async fn write_json<W: AsyncWriteExt + Unpin>(w: &mut W, value: &Request) -> any
     w.write_all(&bytes).await?;
     w.flush().await?;
     Ok(())
+}
+
+/// Renders `anyflow notifications status`.
+///
+/// Every line here is a count, a state or a platform identifier. **No line can
+/// carry a notification's title, body or application name**, because no field
+/// on the report can — which is what makes the output safe to paste into a bug
+/// report without reading it first.
+fn print_notifications_status(report: &NotificationsStatusReport) {
+    if !report.enabled {
+        println!("notifications.v1 is not enabled: {}", report.backend_detail);
+        return;
+    }
+
+    println!("Notifications");
+    println!("  server        {}", report.backend_detail);
+    println!(
+        "  reachable     {}",
+        if report.available {
+            "yes"
+        } else {
+            "NO — this desktop announces no SINK role, so nothing is sent to it"
+        }
+    );
+    println!(
+        "  body markup   {}",
+        if report.body_markup {
+            "yes — bodies are escaped before they are sent"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "  persistence   {}",
+        if report.persistence {
+            "yes — notifications stay in the list until acknowledged"
+        } else {
+            "no — notifications are transient banners"
+        }
+    );
+    println!("  lock state    {}", report.lock_detail);
+    println!(
+        "  screen        {}",
+        if report.locked { "LOCKED" } else { "unlocked" }
+    );
+    println!("  mirrored now  {}", report.mirrors);
+
+    if report.peers.is_empty() {
+        println!("\n  no paired devices.");
+        return;
+    }
+
+    println!("\n  Devices");
+    for peer in &report.peers {
+        println!("    {} ({})", peer.device_name, peer.fingerprint_short);
+        println!(
+            "      notifications.v1 {}",
+            match (peer.granted, peer.revoked) {
+                (_, true) => "device REVOKED".to_string(),
+                (true, false) => "granted".to_string(),
+                (false, false) =>
+                    "NOT granted (run: anyflow grant <device> notifications.v1)".to_string(),
+            }
+        );
+        println!(
+            "      mirror {}   when locked {}   dismiss-sync {}",
+            if peer.allow_mirror { "on " } else { "off" },
+            peer.when_locked,
+            if peer.allow_dismiss_sync {
+                "on (inert in this release)"
+            } else {
+                "off"
+            }
+        );
+        println!(
+            "      showing {} of {} mirrored{}",
+            peer.displayed,
+            peer.mirrors,
+            if peer.evicted > 0 {
+                format!(", {} closed at the ceiling", peer.evicted)
+            } else {
+                String::new()
+            }
+        );
+
+        if peer.connected {
+            println!(
+                "      roles: this desktop announced {} (epoch {}); the device {} (epoch {})",
+                peer.local_roles,
+                peer.local_epoch,
+                if peer.peer_is_source {
+                    "can source notifications"
+                } else {
+                    "claims no source role"
+                },
+                peer.peer_epoch
+            );
+            if peer.snapshot_open {
+                println!("      a snapshot is in progress");
+            }
+            if peer.queued > 0 || peer.coalesced > 0 || peer.dropped > 0 {
+                println!(
+                    "      queue: {} pending, {} coalesced, {} dropped",
+                    peer.queued, peer.coalesced, peer.dropped
+                );
+            }
+        } else {
+            println!("      not connected");
+        }
+    }
 }

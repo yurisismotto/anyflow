@@ -4,6 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use anyflow_core::clipboard_policy::ClipboardPolicy;
 use anyflow_core::identity::LocalIdentity;
+use anyflow_core::notification_policy::NotificationPolicy;
 use anyflow_core::pairing::PairingToken;
 use anyflow_core::qr::QrPayload;
 use anyflow_core::store::{Store, TrustedPeer};
@@ -188,6 +189,7 @@ fn peer(fingerprint: Fingerprint, name: &str) -> TrustedPeer {
         last_protocol_version: 1,
         revoked: false,
         clipboard_policy: ClipboardPolicy::default(),
+        notification_policy: NotificationPolicy::default(),
     }
 }
 

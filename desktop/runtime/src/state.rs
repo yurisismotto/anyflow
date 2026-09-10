@@ -7,8 +7,10 @@ use std::time::{Duration, SystemTime};
 
 use anyflow_capability_clipboard::{ClipboardAuthorizer, ClipboardManager, ClipboardPolicy};
 use anyflow_capability_files::{FilesAuthorizer, TransferManager};
+use anyflow_capability_notifications::{NotificationAuthorizer, NotificationManager};
 use anyflow_core::capability::CapabilityRegistry;
 use anyflow_core::error::{PairingError, Result};
+use anyflow_core::notification_policy::NotificationPolicy;
 use anyflow_core::pairing::PairingSession;
 use anyflow_core::session::{PeerStatus, SessionHandle, SessionHost, SessionId};
 use anyflow_core::store::{Store, TrustedPeer};
@@ -33,6 +35,10 @@ pub struct DaemonState {
     /// `clipboard.v1`. Same reasoning as `transfers`: absent rather than
     /// half-wired.
     pub clipboard: Option<Arc<ClipboardManager>>,
+    /// `notifications.v1`. Same reasoning again. `None` is also what a daemon
+    /// composed without a notification sink gets — which is a normal state,
+    /// not a broken one: the capability is simply not registered.
+    pub notifications: Option<Arc<NotificationManager>>,
 
     /// The single open pairing window, if any.
     pairing: Mutex<Option<PairingSession>>,
@@ -72,6 +78,7 @@ impl DaemonState {
             battery,
             transfers: None,
             clipboard: None,
+            notifications: None,
             pairing: Mutex::new(None),
             confirm_tx: Mutex::new(None),
             sessions: RwLock::new(HashMap::new()),
@@ -103,6 +110,34 @@ impl DaemonState {
     pub fn with_clipboard(mut self, clipboard: Arc<ClipboardManager>) -> Self {
         self.clipboard = Some(clipboard);
         self
+    }
+
+    /// Attaches the notification manager. Same circular-construction reason
+    /// as [`with_transfers`] and [`with_clipboard`].
+    ///
+    /// [`with_transfers`]: Self::with_transfers
+    /// [`with_clipboard`]: Self::with_clipboard
+    pub fn with_notifications(mut self, notifications: Arc<NotificationManager>) -> Self {
+        self.notifications = Some(notifications);
+        self
+    }
+
+    /// Closes every notification a peer has on this screen, now.
+    ///
+    /// Called from every path that withdraws a `notifications.v1` grant or
+    /// revokes a pairing. The inbound authorization needs no telling — it is
+    /// re-read from the trust store on every message — but the notifications
+    /// **already on the screen** are state this daemon put there, and leaving
+    /// them up after the user said "not this device" would mean a revocation
+    /// that took effect only for notifications that had not arrived yet.
+    ///
+    /// There is deliberately no grace here. A grace is for a peer that may
+    /// come back; a revoked peer is one the user has just said should not be
+    /// on this screen.
+    pub async fn notify_notifications_revoked(&self, peer: &Fingerprint) {
+        if let Some(notifications) = &self.notifications {
+            notifications.revoke_peer(peer).await;
+        }
     }
 
     /// Tells the clipboard watcher that a grant or policy may have changed.
@@ -337,6 +372,34 @@ impl ClipboardAuthorizer for DaemonState {
     }
 }
 
+/// The `notifications.v1` grant *and* policy check, asked fresh every time.
+///
+/// One call answers both questions, for the reason [`ClipboardAuthorizer`]'s
+/// does: a caller that had to ask "is it granted?" and "what is the policy?"
+/// separately could do the second and forget the first, and the failure would
+/// be silent — a revoked device whose stored policy still said `allow_mirror`.
+/// Returning [`NotificationPolicy::DENIED`] for an unknown, revoked or
+/// ungranted peer makes that mistake unrepresentable.
+///
+/// It matters more here than it does for the clipboard. The transport filters
+/// the negotiated capability list against the grant when the session is
+/// *built*, so a grant withdrawn afterwards is not noticed there at all; this
+/// is the only thing standing between a revoked device and the screen.
+#[async_trait::async_trait]
+impl NotificationAuthorizer for DaemonState {
+    async fn policy_for(&self, peer: &Fingerprint) -> NotificationPolicy {
+        let store = self.store.lock().await;
+        match store.trusted_peer(peer) {
+            // `trusted_peer` already excludes revoked devices; `allows`
+            // re-checks that and the per-capability grant.
+            Some(p) if p.allows(anyflow_capability_notifications::CAPABILITY_ID) => {
+                p.notification_policy
+            }
+            _ => NotificationPolicy::DENIED,
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl SessionHost for DaemonState {
     fn local_device_info(&self) -> v1::DeviceInfo {
@@ -453,6 +516,11 @@ impl SessionHost for DaemonState {
             // flag here is inert until someone grants the capability by hand
             // — and even then the two automatic directions stay off.
             clipboard_policy: ClipboardPolicy::default(),
+            // Same again for `notifications.v1`, which is also absent from
+            // `auto_grant`: nothing here does anything until a human grants
+            // the capability, and a locked desktop then shows an app name
+            // rather than a message.
+            notification_policy: NotificationPolicy::default(),
         };
         store.add_peer(peer)
     }

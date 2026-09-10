@@ -37,6 +37,7 @@ const PORTABLE_CRATES: &[&str] = &[
     "capabilities/battery",
     "capabilities/clipboard",
     "capabilities/files",
+    "capabilities/notifications",
 ];
 
 /// The one exception, and why it is allowed.
@@ -57,6 +58,43 @@ const FEATURE_GATED_PLATFORM_MODULES: &[&str] = &[
     // `anyflow-capability-clipboard/linux-backends`.
     "capabilities/clipboard/src/backend/wayland.rs",
     "capabilities/clipboard/src/backend/x11.rs",
+];
+
+/// Files that must not name a *notification platform*, even though they pass
+/// the `std::os` markers above.
+///
+/// `PLATFORM_MARKERS` catches a crate that reaches for the operating system's
+/// API surface. It does not catch a crate that reaches for a *desktop* — a
+/// D-Bus name, a freedesktop interface, a logind object path — because none of
+/// those needs `std::os` to say. `zbus` is a pure-Rust client and a
+/// `gdbus`-shaped string literal is just a string.
+///
+/// So the notifications capability gets a second, narrower check: the seam and
+/// everything above it must not name a bus, an interface or a desktop, and the
+/// two feature-gated backend modules are the only files permitted to. Without
+/// this the crate could grow a `zbus::Connection` in `lib.rs` and the portable
+/// gate would still be green, right up until the MSVC job failed for a reason
+/// nobody had encoded as a rule.
+const DESKTOP_MARKERS: &[&str] = &[
+    "zbus",
+    "org.freedesktop",
+    "org.gnome",
+    "org.kde",
+    "dbus",
+    "logind",
+    "gnome-shell",
+];
+
+/// The two files allowed to name a desktop, and why.
+///
+/// Each is behind `anyflow-capability-notifications/linux-dbus`; turning the
+/// feature off removes both from the build entirely, which is what the portable
+/// compile gate checks.
+const DESKTOP_PLATFORM_MODULES: &[&str] = &[
+    // `org.freedesktop.Notifications` over the session bus.
+    "capabilities/notifications/src/backend/dbus.rs",
+    // `org.freedesktop.login1.Session.LockedHint` over the system bus.
+    "capabilities/notifications/src/backend/logind.rs",
 ];
 
 /// Markers that mean "this file knows what operating system it is on".
@@ -191,6 +229,85 @@ fn each_exception_is_actually_behind_a_feature() {
             declared_behind_feature,
             "{path} is an allowed platform module but its `pub mod {module}` \
              is not behind a `#[cfg(feature = ...)]`. Without the gate the \
+             exception is just an exemption."
+        );
+    }
+}
+
+#[test]
+fn the_notification_seam_names_no_desktop_outside_its_two_backend_modules() {
+    let mut violations = Vec::new();
+
+    for (path, text) in crate_sources("capabilities/notifications") {
+        if DESKTOP_PLATFORM_MODULES.contains(&path.as_str()) {
+            continue;
+        }
+        for (number, line) in text.lines().enumerate() {
+            // A mention inside prose is a mention of the boundary, not a
+            // crossing of it — these files document at length *why* the seam
+            // exists, and which D-Bus behaviours were measured.
+            let code = line.trim_start();
+            if code.starts_with("//") || code.starts_with("*") || code.starts_with("///") {
+                continue;
+            }
+            // The seam has to *declare* its platform halves, and the
+            // declaration necessarily names them. `#[cfg(feature = ...)]` and
+            // the `pub mod` it guards are the boundary being drawn, not
+            // crossed — and the test below checks that every such declaration
+            // really is behind the feature.
+            if code.starts_with("pub mod ") || code.starts_with("#[cfg(feature") {
+                continue;
+            }
+            for marker in DESKTOP_MARKERS {
+                if line.contains(marker) {
+                    violations.push(format!("{}:{}: {}", path, number + 1, code.trim()));
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "the notification sink seam, or the capability above it, named a \
+         desktop. Either the code belongs in a feature-gated backend module, \
+         or the module belongs in DESKTOP_PLATFORM_MODULES with an argument \
+         for why:\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+#[test]
+fn each_desktop_module_exists_and_is_behind_the_linux_feature() {
+    // A stale exception is worse than none: it silently widens the allowance
+    // to a path nothing occupies, and hides the next file that moves there.
+    let root = desktop_root();
+    for path in DESKTOP_PLATFORM_MODULES {
+        assert!(
+            root.join(path).exists(),
+            "{path} is listed as a desktop platform module but does not exist. \
+             Remove the exception."
+        );
+
+        let module = Path::new(path)
+            .file_stem()
+            .expect("stem")
+            .to_string_lossy()
+            .to_string();
+        let declared_behind_feature =
+            crate_sources("capabilities/notifications")
+                .into_iter()
+                .any(|(_, text)| {
+                    text.lines().collect::<Vec<_>>().windows(4).any(|window| {
+                        window.iter().any(|l| l.contains("cfg(feature"))
+                            && window
+                                .iter()
+                                .any(|l| l.trim().starts_with("pub mod ") && l.contains(&module))
+                    })
+                });
+        assert!(
+            declared_behind_feature,
+            "{path} is an allowed desktop module but its `pub mod {module}` is \
+             not behind a `#[cfg(feature = ...)]`. Without the gate the \
              exception is just an exemption."
         );
     }

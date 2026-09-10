@@ -102,7 +102,8 @@ jobs:
             'anyflow-control',
             'anyflow-capability-clipboard',
             'anyflow-capability-files',
-            'anyflow-capability-battery'
+            'anyflow-capability-battery',
+            'anyflow-capability-notifications'
           )
           $have = (cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages.name
           $missing = $expected | Where-Object { $have -notcontains $_ }
@@ -124,7 +125,8 @@ jobs:
             -p anyflow-control `
             -p anyflow-capability-clipboard `
             -p anyflow-capability-files `
-            -p anyflow-capability-battery
+            -p anyflow-capability-battery `
+            -p anyflow-capability-notifications
 
       # Strengthening, not a substitute: `check` stops at metadata, `build`
       # runs codegen and links, which is where `ring`'s MSVC objects and the
@@ -138,7 +140,8 @@ jobs:
             -p anyflow-control `
             -p anyflow-capability-clipboard `
             -p anyflow-capability-files `
-            -p anyflow-capability-battery
+            -p anyflow-capability-battery `
+            -p anyflow-capability-notifications
 
       # ---------------------------------------------------------------- 4 --
       # Test targets. Five of the six portable crates compile every test
@@ -172,6 +175,32 @@ jobs:
             exit 1
           }
 
+      # The same discipline for the notifications capability, whose test set
+      # is split three ways: `sink` and `logging` are portable and compile
+      # everywhere, while `real_dbus` and `real_lock` are whole-file
+      # `#![cfg(feature = "linux-dbus")]` and compile to empty binaries with
+      # the feature off. That is why they need no exclusion below — but a *new*
+      # target must be classified deliberately rather than discovered when this
+      # job goes red.
+      - name: Notification test files unchanged (classification guard)
+        run: |
+          $expected = @(
+            'logging.rs',
+            'real_dbus.rs',
+            'real_lock.rs',
+            'sink.rs'
+          ) | Sort-Object
+          $actual = Get-ChildItem capabilities/notifications/tests -Filter *.rs -File |
+                    Select-Object -ExpandProperty Name | Sort-Object
+          if (Compare-Object $expected $actual) {
+            Write-Host "::error::capabilities/notifications/tests changed. Classify the new target:"
+            Write-Host "::error::  portable (compiles with --no-default-features), or"
+            Write-Host "::error::  Linux-only (whole file behind #![cfg(feature = `"linux-dbus`")])?"
+            Write-Host "expected: $($expected -join ', ')"
+            Write-Host "actual  : $($actual   -join ', ')"
+            exit 1
+          }
+
       - name: Portable test targets compile — MSVC
         run: |
           cargo test --locked --no-run --no-default-features `
@@ -180,7 +209,8 @@ jobs:
             -p anyflow-control `
             -p anyflow-capability-clipboard `
             -p anyflow-capability-files `
-            -p anyflow-capability-battery
+            -p anyflow-capability-battery `
+            -p anyflow-capability-notifications
 
           cargo test --locked --no-run --no-default-features `
             --target x86_64-pc-windows-msvc `
@@ -208,6 +238,7 @@ jobs:
             -p anyflow-capability-clipboard `
             -p anyflow-capability-files `
             -p anyflow-capability-battery `
+            -p anyflow-capability-notifications `
             --prefix none --format '{p} [{f}]'
 
           $lines = $tree | ForEach-Object { $_ -replace ' \(\*\)$','' } | Sort-Object -Unique
@@ -233,7 +264,7 @@ jobs:
           }
 
           # And no platform Cargo feature came back on through unification.
-          $forbiddenFeatures = @('unix-fs', 'linux-backends', 'upower')
+          $forbiddenFeatures = @('unix-fs', 'linux-backends', 'upower', 'linux-dbus')
           $bad = @()
           foreach ($line in ($lines | Where-Object { $_ -like 'anyflow-*' })) {
             if ($line -match '\[(.*)\]$') {
@@ -256,7 +287,8 @@ jobs:
       - name: Unsafe policy unchanged (ARCH-010)
         run: |
           $forbid = @('proto','core','control','runtime',
-                      'capabilities/clipboard','capabilities/files','capabilities/battery')
+                      'capabilities/clipboard','capabilities/files','capabilities/battery',
+                      'capabilities/notifications')
           $deny   = @('platform-linux','daemon','cli','gui')
           $failed = $false
           foreach ($c in $forbid) {
