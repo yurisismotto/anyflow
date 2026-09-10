@@ -101,6 +101,42 @@ pub enum Request {
         flag: ClipboardFlag,
         enabled: bool,
     },
+
+    /// What `notifications.v1` can do on this machine, and per-peer policy.
+    ///
+    /// A diagnostic, not a settings surface: it reports the notification
+    /// server, the lock source, how many notifications are currently mirrored
+    /// and what each peer is allowed. The user-facing policy screens are a
+    /// later wave's; this exists so that "is the sink actually working, and
+    /// which session is it watching?" has an answer that does not require
+    /// reading the daemon log.
+    NotificationsStatus,
+
+    /// Changes one per-peer notification policy setting.
+    NotificationsPolicy {
+        device: String,
+        setting: NotificationSetting,
+    },
+}
+
+/// Which per-peer notification setting a [`Request::NotificationsPolicy`]
+/// changes.
+///
+/// An enum rather than three optional fields, so that adding a setting is a
+/// new variant and a `match` the compiler checks, rather than a nullable field
+/// every handler has to remember to look at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "setting", rename_all = "snake_case")]
+pub enum NotificationSetting {
+    /// Whether this peer's notifications are displayed here at all.
+    Mirror { enabled: bool },
+    /// What is displayed while this desktop session is locked: `full`,
+    /// `app-only` or `suppress`.
+    WhenLocked { policy: String },
+    /// Whether a dismissal here may travel to the source device.
+    ///
+    /// Stored, and inert until the wave that implements dismissal.
+    DismissSync { enabled: bool },
 }
 
 /// Which per-peer clipboard policy flag a [`Request::ClipboardPolicy`] sets.
@@ -132,6 +168,7 @@ pub enum Response {
     Devices(Vec<DeviceReport>),
     Transfers(Vec<TransferReport>),
     Clipboard(ClipboardStatusReport),
+    Notifications(NotificationsStatusReport),
     Pong { rtt_ms: u64 },
     Ok { message: String },
     Error { message: String },
@@ -281,6 +318,78 @@ pub struct PendingClipReport {
     pub sensitive: bool,
     pub origin_device_id: String,
     pub age_secs: u64,
+}
+
+/// What `notifications.v1` can do on this machine.
+///
+/// Counts and states only. **There is no field here that could hold a
+/// notification's title, body or application name**, and no screen anywhere
+/// lists received notifications — a history is what the design forbids, not a
+/// feature deferred for time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationsStatusReport {
+    /// Whether the capability is registered at all.
+    pub enabled: bool,
+    /// The platform sink, e.g. `freedesktop`.
+    pub backend: String,
+    /// One line on what is actually there — the server's own name, version
+    /// and spec level.
+    pub backend_detail: String,
+    /// Whether a notification server is reachable right now. This is the one
+    /// input to whether this device announces the `SINK` role.
+    pub available: bool,
+    /// Whether the server parses markup in a body, and therefore whether a
+    /// body is escaped before it is sent.
+    pub body_markup: bool,
+    /// Whether notifications stay in a list rather than only appearing as a
+    /// transient banner.
+    pub persistence: bool,
+    /// Where the lock state comes from, e.g. the logind session object path.
+    pub lock_source: String,
+    pub lock_detail: String,
+    /// Whether this desktop session is locked, as last observed.
+    pub locked: bool,
+    /// How many notifications are currently mirrored, across all peers.
+    pub mirrors: usize,
+    pub peers: Vec<NotificationPeerReport>,
+}
+
+/// One device's notification grant, policy and live mirror state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationPeerReport {
+    pub device_id: String,
+    pub device_name: String,
+    pub fingerprint_short: String,
+    /// Whether `notifications.v1` is granted. Without it every setting below
+    /// is inert, which is why it is reported next to them.
+    pub granted: bool,
+    /// Whether the pairing itself was revoked. Reported separately from
+    /// `granted` because "not granted" and "no longer trusted at all" are
+    /// different situations with different fixes.
+    pub revoked: bool,
+    pub connected: bool,
+    pub allow_mirror: bool,
+    /// `full`, `app-only` or `suppress`.
+    pub when_locked: String,
+    pub allow_dismiss_sync: bool,
+    /// How many of this peer's notifications are on this screen.
+    pub mirrors: usize,
+    /// How many of those the notification server has actually accepted.
+    pub displayed: usize,
+    /// Mirrors closed because the per-peer ceiling was reached. Present so
+    /// that the bounded-growth property is observable rather than claimed.
+    pub evicted: u64,
+    /// How many roles this device last announced to the peer, and the epoch.
+    pub local_roles: usize,
+    pub local_epoch: u32,
+    /// Whether the peer has claimed it can source notifications.
+    pub peer_is_source: bool,
+    pub peer_epoch: u32,
+    pub snapshot_open: bool,
+    /// Pending display work, and the counters that make the bounds visible.
+    pub queued: usize,
+    pub coalesced: u64,
+    pub dropped: u64,
 }
 
 /// How a known device stands *right now*.

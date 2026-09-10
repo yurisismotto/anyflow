@@ -12,6 +12,7 @@ members = [
     "capabilities/battery",
     "capabilities/clipboard",
     "capabilities/files",
+    "capabilities/notifications",
 ]
 
 [workspace.package]

@@ -11,6 +11,10 @@ use anyflow_capability_clipboard::{ClipboardCapability, ClipboardManager};
 use anyflow_capability_files::{
     Destination, FilesCapability, FilesConfig, StreamRole, TransferApproval, TransferManager,
 };
+use anyflow_capability_notifications::backend::{
+    dbus::DbusSink, logind::LogindLock, LockSource, NoSink, NotificationSink, UnknownLock,
+};
+use anyflow_capability_notifications::{NotificationManager, NotificationsCapability};
 use anyflow_control::transport::ControlTransport;
 use anyflow_core::capability::CapabilityRegistry;
 use anyflow_daemon::{listener, mdns, server, state::DaemonState};
@@ -180,10 +184,61 @@ async fn main() -> anyhow::Result<()> {
     let clipboard = ClipboardManager::new(clipboard_backend, device_id.clone());
     tracing::info!(backend = %clipboard.backend().describe(), "clipboard.v1 ready");
 
+    // notifications.v1. Absent from `auto_grant` for a stronger version of
+    // the same reason `clipboard.v1` is: a device that can put notifications
+    // on this screen is a device whose messages a passer-by can read, and
+    // ADR-0015 §4 requires that to be granted by hand.
+    //
+    // The two platform seams are probed once, here, so that
+    // `anyflow notifications status` reports what this session can actually do
+    // instead of each command discovering it separately — and so that the
+    // first role announcement is a fact rather than a hope.
+    //
+    // Neither probe failing is fatal. A machine with no notification server is
+    // a normal, reportable state: the capability is still registered and still
+    // negotiated, and it simply announces no `SINK` role, which is precisely
+    // what roles exist to express (ADR-0017). Registering it unconditionally
+    // is deliberate — gating the handshake on a platform condition the user
+    // can change at 14:32 would mean a reconnect were needed to pick it up.
+    let notification_sink: Arc<dyn NotificationSink> = match DbusSink::connect().await {
+        Some(sink) => Arc::new(sink),
+        // Not a sink that accepts and discards: that would announce `SINK` and
+        // then swallow every notification a phone sent, with the phone having
+        // no way to know. `NoSink` reports unavailable, the role narrows, and
+        // the peer is told the truth.
+        None => Arc::new(NoSink),
+    };
+    // A session whose lock state cannot be determined is treated as locked, by
+    // the type rather than by a check a caller could forget. It is the
+    // fail-closed direction and it is the one a privacy control must take.
+    let notification_lock: Arc<dyn LockSource> = match LogindLock::connect().await {
+        Some(lock) => Arc::new(lock),
+        None => {
+            tracing::warn!(
+                "no logind session to read LockedHint from; this desktop will                  be treated as locked, so notifications will be reduced"
+            );
+            Arc::new(UnknownLock)
+        }
+    };
+    let notifications = NotificationManager::new(
+        Arc::clone(&notification_sink),
+        Arc::clone(&notification_lock),
+    )
+    .await;
+    tracing::info!(
+        sink = %notification_sink.describe(),
+        lock = %notification_lock.describe(),
+        available = notifications.is_available(),
+        "notifications.v1 ready"
+    );
+
     let registry = CapabilityRegistry::builder()
         .register(Arc::new(battery))
         .register(Arc::new(FilesCapability::new(Arc::clone(&transfers))))
         .register(Arc::new(ClipboardCapability::new(Arc::clone(&clipboard))))
+        .register(Arc::new(NotificationsCapability::new(Arc::clone(
+            &notifications,
+        ))))
         .build();
     tracing::info!(capabilities = ?registry.advertised(), "capabilities registered");
 
@@ -194,7 +249,8 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(
         DaemonState::new(store, registry, battery_state)
             .with_transfers(Arc::clone(&transfers))
-            .with_clipboard(Arc::clone(&clipboard)),
+            .with_clipboard(Arc::clone(&clipboard))
+            .with_notifications(Arc::clone(&notifications)),
     );
 
     // The state is the authorizer: every grant question is answered from the
@@ -215,6 +271,22 @@ async fn main() -> anyhow::Result<()> {
     // Supervised, and idle until some peer actually asks for auto-send: with
     // nobody asking it holds no helper process and no X connection.
     let _clipboard_watcher = clipboard.spawn_watcher();
+
+    // Same rule again for notifications: the grant and the per-peer policy are
+    // answered from the trust store on every message, never from a set
+    // captured at handshake time. This one carries more weight than the other
+    // two — the transport's own grant filter runs when the session is built,
+    // so after that point this is the only thing between a revoked device and
+    // the screen.
+    notifications
+        .set_authorizer(
+            Arc::clone(&state) as Arc<dyn anyflow_capability_notifications::NotificationAuthorizer>
+        )
+        .await;
+    // The three platform signals: the desktop closing a notification, the
+    // notification server appearing or going away, and the session locking.
+    // All event-driven; none polled.
+    let _notification_pumps = notifications.spawn_platform_pumps();
 
     // ---- listeners --------------------------------------------------------
     let bound = listener::bind_endpoints(port)?;

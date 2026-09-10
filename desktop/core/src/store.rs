@@ -36,6 +36,7 @@ use crate::fingerprint::Fingerprint;
 #[cfg(feature = "unix-fs")]
 use crate::identity::SoftwareBacking;
 use crate::identity::{Identity, IdentityBackend, IdentityState, KeyBacking};
+use crate::notification_policy::NotificationPolicy;
 use crate::secret_store::{SecretStore, StoreAccessError};
 
 /// Bumped from 1 to 2 by Wave 0, which added `key_backing`.
@@ -83,6 +84,21 @@ pub struct TrustedPeer {
     /// disabling a direction the user had enabled.
     #[serde(default)]
     pub clipboard_policy: ClipboardPolicy,
+
+    /// Per-peer `notifications.v1` display policy.
+    ///
+    /// Same structure and same reasoning as `clipboard_policy`: the grant says
+    /// whether this device may speak notifications at all, and this says how
+    /// much of each notification is displayed here and when. Both are decided
+    /// locally — no protocol message writes either — and **neither holds a
+    /// notification's title, body or any other content**. There is no field on
+    /// this type that could.
+    ///
+    /// `#[serde(default)]` for the reason above it: every trust store in the
+    /// field predates this capability and must load with the safe defaults
+    /// rather than failing, or silently reading `false` across the board.
+    #[serde(default)]
+    pub notification_policy: NotificationPolicy,
 }
 
 impl TrustedPeer {
@@ -465,6 +481,21 @@ impl Store {
     ) -> Result<()> {
         if let Some(p) = self.peers.get_mut(fp) {
             p.clipboard_policy = policy;
+        }
+        self.persist()
+    }
+
+    /// Replaces one peer's notification policy.
+    ///
+    /// Persisted immediately, for the same reason
+    /// [`set_clipboard_policy`](Self::set_clipboard_policy) is.
+    pub fn set_notification_policy(
+        &mut self,
+        fp: &Fingerprint,
+        policy: NotificationPolicy,
+    ) -> Result<()> {
+        if let Some(p) = self.peers.get_mut(fp) {
+            p.notification_policy = policy;
         }
         self.persist()
     }

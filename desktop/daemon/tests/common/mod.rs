@@ -53,6 +53,12 @@ pub struct TestServer {
     /// the developer's real one.
     pub clipboard: Arc<ClipboardManager>,
     pub clipboard_backend: Arc<MemoryBackend>,
+    /// `notifications.v1`, with an in-memory notification server and a
+    /// steerable lock, so the suite never posts a notification on the
+    /// developer's desktop and never has to lock their screen.
+    pub notifications: Arc<NotificationManager>,
+    pub notification_sink: Arc<MemorySink>,
+    pub notification_lock: Arc<MemoryLock>,
     /// Where this server stores received files.
     pub downloads: std::path::PathBuf,
     /// Steers the "does a human accept this file?" answer.
@@ -110,10 +116,26 @@ impl TestServer {
             store.identity().device_id().to_string(),
         );
 
+        // An in-memory notification server, never the session's own: a suite
+        // that posted a column of test notifications into the developer's
+        // shade on every `cargo test` would be intolerable, and one that read
+        // the real lock state would behave differently depending on whether
+        // the screen happened to be locked while it ran.
+        let notification_sink = Arc::new(MemorySink::new());
+        let notification_lock = Arc::new(MemoryLock::new());
+        let notifications = NotificationManager::new(
+            Arc::clone(&notification_sink) as Arc<dyn NotificationSink>,
+            Arc::clone(&notification_lock) as Arc<dyn LockSource>,
+        )
+        .await;
+
         let registry = CapabilityRegistry::builder()
             .register(Arc::new(BatteryCapability::new(Arc::clone(&battery))))
             .register(Arc::new(FilesCapability::new(Arc::clone(&transfers))))
             .register(Arc::new(ClipboardCapability::new(Arc::clone(&clipboard))))
+            .register(Arc::new(NotificationsCapability::new(Arc::clone(
+                &notifications,
+            ))))
             .build();
 
         let tls = anyflow_core::tls::server_config(store.identity()).expect("server config");
@@ -122,7 +144,8 @@ impl TestServer {
         let state = Arc::new(
             DaemonState::new(store, registry, Arc::clone(&battery))
                 .with_transfers(Arc::clone(&transfers))
-                .with_clipboard(Arc::clone(&clipboard)),
+                .with_clipboard(Arc::clone(&clipboard))
+                .with_notifications(Arc::clone(&notifications)),
         );
 
         // The real authorizer: the trust store, asked fresh every time. The
@@ -134,6 +157,11 @@ impl TestServer {
 
         // Same rule for the clipboard: the real trust store answers every
         // grant question, so the tests exercise production authorization.
+        notifications
+            .set_authorizer(Arc::clone(&state) as Arc<dyn NotificationAuthorizer>)
+            .await;
+        notifications.spawn_platform_pumps();
+
         clipboard
             .set_authorizer(Arc::clone(&state) as Arc<dyn ClipboardAuthorizer>)
             .await;
@@ -169,6 +197,9 @@ impl TestServer {
             transfers,
             clipboard,
             clipboard_backend,
+            notifications,
+            notification_sink,
+            notification_lock,
             downloads,
             approvals,
             _dir: dir,
@@ -192,6 +223,16 @@ impl TestServer {
                 .expect("persist policy");
         }
         self.state.notify_clipboard_policy_changed();
+    }
+
+    /// Sets one peer's notification policy through the real store.
+    pub async fn set_notification_policy(&self, peer: Fingerprint, policy: NotificationPolicy) {
+        {
+            let mut store = self.state.store.lock().await;
+            store
+                .set_notification_policy(&peer, policy)
+                .expect("persist policy");
+        }
     }
 
     /// Grants or withdraws a capability for a peer, through the real store.
@@ -300,6 +341,7 @@ impl SessionHost for ClientHost {
                     "battery.v1".into(),
                     "files.v1".into(),
                     "clipboard.v1".into(),
+                    "notifications.v1".into(),
                 ],
             }
         } else {
@@ -358,6 +400,22 @@ impl TestClient {
         (client, captured)
     }
 
+    /// A client that speaks `notifications.v1` by hand.
+    ///
+    /// The same idea as [`new_raw_clipboard`], and needed for the same reason:
+    /// only a hand-written client can send what a correct source never
+    /// would — a bad-width identifier, an unpaired `END`, a `DismissRequest`
+    /// from a device that sources nothing — and read exactly what the desktop
+    /// replies.
+    ///
+    /// [`new_raw_clipboard`]: Self::new_raw_clipboard
+    pub fn new_raw_notifications(name: &str) -> (Self, Arc<CapturedNotifications>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let captured = Arc::new(CapturedNotifications { rx: Mutex::new(rx) });
+        let client = Self::build_with(name, None, None, Some(tx));
+        (client, captured)
+    }
+
     pub fn new(name: &str) -> Self {
         Self::build(name, None, None)
     }
@@ -366,6 +424,15 @@ impl TestClient {
         name: &str,
         capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
         clipboard_capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+    ) -> Self {
+        Self::build_with(name, capture, clipboard_capture, None)
+    }
+
+    fn build_with(
+        name: &str,
+        capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+        clipboard_capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+        notification_capture: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
     ) -> Self {
         init_crypto();
         let identity =
@@ -410,6 +477,19 @@ impl TestClient {
             // every clipboard test would silently test nothing.
             None => builder.register(Arc::new(CapturingCapability {
                 id: "clipboard.v1".to_string(),
+                tx: tokio::sync::mpsc::unbounded_channel().0,
+            })),
+        };
+        builder = match notification_capture {
+            Some(tx) => builder.register(Arc::new(CapturingCapability {
+                id: "notifications.v1".to_string(),
+                tx,
+            })),
+            // A client that is not driving notifications by hand still has to
+            // *advertise* the capability, or it would never be negotiated and
+            // every notification test would silently test nothing.
+            None => builder.register(Arc::new(CapturingCapability {
+                id: "notifications.v1".to_string(),
                 tx: tokio::sync::mpsc::unbounded_channel().0,
             })),
         };
@@ -651,6 +731,12 @@ use anyflow_capability_files::transfer::{FailureReason, TransferId, TransferStat
 use anyflow_capability_files::{
     DataStreamDialer, DataStreamIo, Destination, FilesAuthorizer, FilesCapability, FilesConfig,
     IncomingOffer, StreamRole, TransferApproval, TransferManager, TransferSnapshot,
+};
+use anyflow_capability_notifications::backend::{
+    LockSource, MemoryLock, MemorySink, NotificationSink,
+};
+use anyflow_capability_notifications::{
+    NotificationAuthorizer, NotificationManager, NotificationPolicy, NotificationsCapability,
 };
 
 fn is_partial(name: &str) -> bool {
@@ -951,6 +1037,72 @@ impl Captured {
 pub use anyflow_proto::v1::capabilities as pb;
 /// The same module, under a name the clipboard helpers read better with.
 pub use anyflow_proto::v1::capabilities as clip_pb;
+
+/// The raw notification side of a client: what the desktop said, undigested.
+pub struct CapturedNotifications {
+    rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
+}
+
+impl CapturedNotifications {
+    /// Waits for the next `notifications.v1` message from the desktop.
+    pub async fn next_control(&self, timeout: Duration) -> clip_pb::NotificationControl {
+        let payload = tokio::time::timeout(timeout, async {
+            let mut rx = self.rx.lock().await;
+            rx.recv().await
+        })
+        .await
+        .expect("the desktop answered within the timeout")
+        .expect("the capture channel is open");
+        <clip_pb::NotificationControl as prost::Message>::decode(&payload[..])
+            .expect("decodable NotificationControl")
+    }
+
+    /// The next `NotificationResult`.
+    pub async fn next_result(&self, timeout: Duration) -> clip_pb::NotificationResult {
+        match self.next_control(timeout).await.body {
+            Some(clip_pb::notification_control::Body::Result(r)) => r,
+            other => panic!("expected a NotificationResult, got {other:?}"),
+        }
+    }
+
+    /// The next `NotificationRoles` announcement.
+    pub async fn next_roles(&self, timeout: Duration) -> clip_pb::NotificationRoles {
+        match self.next_control(timeout).await.body {
+            Some(clip_pb::notification_control::Body::Roles(r)) => r,
+            other => panic!("expected a NotificationRoles, got {other:?}"),
+        }
+    }
+
+    /// Everything queued so far, without waiting.
+    pub async fn drain(&self) -> Vec<clip_pb::NotificationControl> {
+        let mut rx = self.rx.lock().await;
+        let mut out = Vec::new();
+        while let Ok(payload) = rx.try_recv() {
+            out.push(
+                <clip_pb::NotificationControl as prost::Message>::decode(&payload[..])
+                    .expect("decodable NotificationControl"),
+            );
+        }
+        out
+    }
+}
+
+/// Sends one `notifications.v1` control message over a live session.
+pub async fn send_notification_control(
+    session: &ConnectedSession,
+    body: clip_pb::notification_control::Body,
+) -> bool {
+    let payload = <clip_pb::NotificationControl as prost::Message>::encode_to_vec(
+        &clip_pb::NotificationControl { body: Some(body) },
+    );
+    session
+        .handle
+        .send_capability(anyflow_core::capability::OutboundMessage {
+            capability_id: "notifications.v1".to_string(),
+            payload,
+        })
+        .await
+}
 
 /// Sends one `files.v1` control message over a live session.
 pub async fn send_files_control(session: &ConnectedSession, body: pb::file_control::Body) -> bool {

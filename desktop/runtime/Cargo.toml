@@ -26,6 +26,7 @@ anyflow-control = { version = "0.1.0", path = "../control" }
 anyflow-capability-battery = { version = "0.1.0", path = "../capabilities/battery" }
 anyflow-capability-clipboard = { version = "0.1.0", path = "../capabilities/clipboard" }
 anyflow-capability-files = { version = "0.1.0", path = "../capabilities/files" }
+anyflow-capability-notifications = { version = "0.1.0", path = "../capabilities/notifications" }
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
