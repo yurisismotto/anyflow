@@ -16,6 +16,18 @@ sealed interface Screen {
     /** The tab this destination lives under, for the bottom bar. */
     val tab: Tab
 
+    /**
+     * Where Back goes, or null at a root.
+     *
+     * The hierarchy is a tree with one parent per node, so the parent is a
+     * property of the destination rather than a stack to be maintained.
+     * Nothing here can drift out of step with a history that was pushed
+     * somewhere else — the app-picker returns to the notification screen that
+     * opened it whether it was reached by tapping, by rotating the device, or
+     * by the process being recreated from its saved state.
+     */
+    val parent: Screen? get() = null
+
     data object Devices : Screen {
         override val tab = Tab.Devices
     }
@@ -31,11 +43,31 @@ sealed interface Screen {
     /** One computer's permissions, automation and trust. */
     data class PeerDetail(val fingerprintHex: String) : Screen {
         override val tab = Tab.Devices
+        override val parent get() = Devices
     }
 
     /** The deliberate act of sending the clipboard somewhere. */
     data class SendClipboard(val fingerprintHex: String) : Screen {
         override val tab = Tab.Devices
+        override val parent get() = PeerDetail(fingerprintHex)
+    }
+
+    /** One computer's notification consent: the three gates, and the policy. */
+    data class PeerNotifications(val fingerprintHex: String) : Screen {
+        override val tab = Tab.Devices
+        override val parent get() = PeerDetail(fingerprintHex)
+    }
+
+    /**
+     * Which applications one computer may receive.
+     *
+     * A screen of its own rather than a dialog: it is a list of a hundred
+     * rows with a search box, and it is the last step of enabling the feature
+     * rather than an afterthought reached from a menu.
+     */
+    data class AppPicker(val fingerprintHex: String) : Screen {
+        override val tab = Tab.Devices
+        override val parent get() = PeerNotifications(fingerprintHex)
     }
 }
 
@@ -59,6 +91,8 @@ val ScreenSaver: Saver<Screen, Any> = Saver(
             Screen.Settings -> listOf("settings")
             is Screen.PeerDetail -> listOf("peer", screen.fingerprintHex)
             is Screen.SendClipboard -> listOf("send", screen.fingerprintHex)
+            is Screen.PeerNotifications -> listOf("notifications", screen.fingerprintHex)
+            is Screen.AppPicker -> listOf("apps", screen.fingerprintHex)
         }
     },
     restore = { saved ->
@@ -69,6 +103,9 @@ val ScreenSaver: Saver<Screen, Any> = Saver(
             "settings" -> Screen.Settings
             "peer" -> parts.getOrNull(1)?.let(Screen::PeerDetail) ?: Screen.Devices
             "send" -> parts.getOrNull(1)?.let(Screen::SendClipboard) ?: Screen.Devices
+            "notifications" ->
+                parts.getOrNull(1)?.let(Screen::PeerNotifications) ?: Screen.Devices
+            "apps" -> parts.getOrNull(1)?.let(Screen::AppPicker) ?: Screen.Devices
             else -> Screen.Devices
         }
     },

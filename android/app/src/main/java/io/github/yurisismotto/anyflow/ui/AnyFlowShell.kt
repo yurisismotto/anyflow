@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -59,9 +60,10 @@ fun AnyFlowShell(
     var screen by rememberSaveable(stateSaver = ScreenSaver) {
         mutableStateOf<Screen>(Screen.Devices)
     }
-    // One level of back is all the hierarchy has: a detail returns to its tab.
-    val atRoot = screen is Screen.Devices || screen is Screen.Activity || screen is Screen.Settings
-    BackHandler(enabled = !atRoot) { screen = Screen.Devices }
+    // Back walks the declared parent chain rather than a pushed history, so a
+    // rotation or a process death lands on the same parent it would have.
+    val parent = screen.parent
+    BackHandler(enabled = parent != null) { parent?.let { screen = it } }
 
     val colors = AnyFlowTheme.colors
     // Read here rather than inside transitionSpec: that lambda is not a
@@ -70,7 +72,7 @@ fun AnyFlowShell(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = colors.background,
-        topBar = { ShellTopBar(screen, onBack = { screen = Screen.Devices }) },
+        topBar = { ShellTopBar(screen, onBack = { screen.parent?.let { screen = it } }) },
         bottomBar = {
             ShellBottomBar(
                 current = screen.tab,
@@ -119,13 +121,27 @@ fun AnyFlowShell(
                         fingerprintHex = current.fingerprintHex,
                         onBack = { screen = Screen.Devices },
                         onSendClipboard = { screen = Screen.SendClipboard(it) },
+                        onOpenNotifications = { screen = Screen.PeerNotifications(it) },
                     )
 
                     is Screen.SendClipboard -> SendClipboardScreen(
                         state = state,
                         actions = actions,
                         fingerprintHex = current.fingerprintHex,
-                        onBack = { screen = Screen.Devices },
+                        onBack = { screen = Screen.PeerDetail(current.fingerprintHex) },
+                    )
+
+                    is Screen.PeerNotifications -> NotificationSettingsScreen(
+                        state = state,
+                        actions = actions,
+                        fingerprintHex = current.fingerprintHex,
+                        onOpenAppPicker = { screen = Screen.AppPicker(it) },
+                    )
+
+                    is Screen.AppPicker -> AppPickerScreen(
+                        state = state,
+                        actions = actions,
+                        fingerprintHex = current.fingerprintHex,
                     )
                 }
               }
@@ -152,9 +168,10 @@ private fun ShellTopBar(screen: Screen, onBack: () -> Unit) {
         Screen.Settings -> "Settings"
         is Screen.PeerDetail -> "Device"
         is Screen.SendClipboard -> "Send clipboard"
+        is Screen.PeerNotifications -> stringResource(R.string.notif_screen_title)
+        is Screen.AppPicker -> stringResource(R.string.notif_picker_title)
     }
-    val showsBack = screen !is Screen.Devices && screen !is Screen.Activity &&
-        screen !is Screen.Settings
+    val showsBack = screen.parent != null
 
     TopAppBar(
         title = {

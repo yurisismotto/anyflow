@@ -411,7 +411,13 @@ async fn build_transfers(state: &Arc<DaemonState>) -> Vec<TransferReport> {
 }
 
 /// Grants or withdraws a capability for one device.
-async fn do_grant(
+///
+/// Public so the integration suite can drive the *real* handler rather than a
+/// reimplementation of it. The consequences below — a cancelled transfer, a
+/// re-pointed clipboard watcher, a notification taken off the screen — are the
+/// part that would be easy to get wrong in a copy, and they are exactly what
+/// the GUI's grant switch depends on.
+pub async fn do_grant(
     state: &Arc<DaemonState>,
     device: &str,
     capability: &str,
@@ -1114,7 +1120,11 @@ async fn build_notifications_status(state: &Arc<DaemonState>) -> NotificationsSt
 /// The grant is a separate command (`anyflow grant <device>
 /// notifications.v1`) and is deliberately not settable from here: a policy
 /// edit must not be able to hand out the permission the policy is scoped by.
-async fn do_notifications_policy(
+///
+/// Public for the same reason [`do_grant`] is: the mirror-closing behaviour
+/// when displaying is switched off is what the GUI's switch relies on, and a
+/// test that reimplemented it would prove nothing about the real path.
+pub async fn do_notifications_policy(
     state: &Arc<DaemonState>,
     device: &str,
     setting: NotificationSetting,

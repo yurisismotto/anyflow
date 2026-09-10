@@ -236,6 +236,42 @@ impl TestServer {
     }
 
     /// Grants or withdraws a capability for a peer, through the real store.
+    /// Every capability this peer currently holds, sorted.
+    ///
+    /// Read back from the store rather than remembered, so a test that asserts
+    /// "nothing else changed" is asserting it about what was persisted.
+    pub async fn granted_capabilities(&self, peer: Fingerprint) -> Vec<String> {
+        let store = self.state.store.lock().await;
+        let mut out: Vec<String> = store
+            .peer_record(&peer)
+            .map(|record| {
+                record
+                    .granted_capabilities
+                    .iter()
+                    .filter(|(_, granted)| **granted)
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.sort();
+        out
+    }
+
+    /// Whether the pairing itself survives. A permission is not a revocation.
+    pub async fn is_paired(&self, peer: Fingerprint) -> bool {
+        let store = self.state.store.lock().await;
+        store.peer_record(&peer).is_some_and(|r| !r.revoked)
+    }
+
+    /// This peer's stored clipboard policy, for the isolation assertions.
+    pub async fn clipboard_policy(&self, peer: Fingerprint) -> ClipboardPolicy {
+        let store = self.state.store.lock().await;
+        store
+            .peer_record(&peer)
+            .map(|r| r.clipboard_policy)
+            .unwrap_or_default()
+    }
+
     pub async fn set_grant(&self, peer: Fingerprint, capability: &str, granted: bool) {
         let mut store = self.state.store.lock().await;
         store

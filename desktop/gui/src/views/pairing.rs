@@ -170,7 +170,7 @@ pub fn present_pairing_dialog(parent: Option<&gtk::Window>, pages: &Pages) {
                 identity_body.append(&widgets::body(&detail));
                 confirm.set_sensitive(false);
                 expiry.set_label(&status);
-                pages.render();
+                pages.refresh_now();
                 if status == "paired" {
                     dialog.close();
                 }

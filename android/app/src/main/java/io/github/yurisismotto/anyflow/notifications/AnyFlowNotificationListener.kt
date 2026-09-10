@@ -4,7 +4,10 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.os.Process
+import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -69,6 +72,12 @@ class AnyFlowNotificationListener : NotificationListenerService() {
             // outstanding notifications visible to the current user, which is
             // what a person sees by picking up the phone.
             activeNotifications?.mapNotNull { extract(it) }
+        }.getOrNull()
+
+        override fun activePackages(): List<String>? = runCatching {
+            // Names only. Nothing is extracted, so no title or body from the
+            // shade is materialised in this process for the picker's sake.
+            activeNotifications?.map { it.packageName }?.distinct()
         }.getOrNull()
     }
 
@@ -246,6 +255,36 @@ object NotificationAccess {
         runCatching {
             NotificationListenerService.requestRebind(component(context))
         }
+    }
+
+    /**
+     * Where to send someone who wants to grant or revoke notification access.
+     *
+     * `ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS` plus the component extra
+     * lands on **AnyFlow's own switch**, with its own explanation, rather than
+     * on a list of every application on the device that a person then has to
+     * search. It is API 30; the floor here is 29, so the whole-list action is
+     * the documented fallback for that one release.
+     *
+     * `FLAG_ACTIVITY_NEW_TASK` is not set: this is launched from an Activity
+     * the person is looking at, and it must come back to that Activity so the
+     * real permission state can be re-read on resume.
+     *
+     * **AnyFlow never asks for this permission any other way.** There is no
+     * dialog that grants it, no accessibility-service workaround, and no
+     * `CompanionDeviceManager` association — ADR-0015 §10 records why the last
+     * of those is a notification-privacy decision and not a convenience.
+     */
+    fun settingsIntent(context: Context): Intent {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val detail = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                .putExtra(
+                    Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                    component(context).flattenToString(),
+                )
+            if (detail.resolveActivity(context.packageManager) != null) return detail
+        }
+        return Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
     }
 
     /**

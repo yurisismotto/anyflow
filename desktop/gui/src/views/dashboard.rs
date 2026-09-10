@@ -150,6 +150,18 @@ fn device_card(device: &DeviceReport) -> gtk::Box {
             "battery-symbolic",
             "af-tile-violet",
         ),
+        // Listed for the same reason the other three are: a person looking at
+        // this card should be able to see every grant a device holds, and
+        // omitting the one that carries their messages would be the worst
+        // omission to make. "Allowed" here still means only that the grant
+        // exists — whether anything is actually mirroring is the Notifications
+        // page's question, and it has more than one answer.
+        (
+            "notifications.v1",
+            "Notifications",
+            "preferences-system-notifications-symbolic",
+            "af-tile-amber",
+        ),
     ] {
         let granted = device.granted_capabilities.iter().any(|c| c == id);
         let chip = widgets::row(SPACING_XS);

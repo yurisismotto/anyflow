@@ -65,6 +65,45 @@
       See docs/security/THREAT_MODEL.md and docs/adr/ADR-0015-notification-access.md.
     -->
 
+    <!--
+      What the notification app-picker is allowed to see.
+
+      Android 11 (API 30) filters package visibility. A picker that lets a
+      person choose which applications may be mirrored has to be able to name
+      them, and there are exactly two ways to do that:
+
+        * QUERY_ALL_PACKAGES — the whole installed set, including every app
+          that has no launcher entry and nothing to do with notifications. It
+          is on the deliberately-absent list above and stays there: it is far
+          wider than this feature needs, and Play treats it as a
+          restricted permission precisely because it is an inventory of the
+          user's device;
+        * this `<queries>` element — the documented, unrestricted mechanism.
+          It makes visible exactly the applications that declare a launcher
+          entry, which is the same set the person sees on their home screen
+          and therefore the only set a picker can meaningfully offer.
+
+      Measured on the certification hardware (SM-X620, Android 16 / API 36,
+      One UI 8.0): 97 launchable applications, all 97 labels and icons
+      resolvable, against 501 packages installed — so this is a narrowing of
+      roughly five to one against QUERY_ALL_PACKAGES, not a synonym for it.
+      Every application observed posting a notification on that device was in
+      the 97.
+
+      Packages with no launcher entry that nonetheless post notifications —
+      the system UI, a weather daemon, `com.android.shell` — are not made
+      visible by this element and are not enumerated. They reach the picker
+      only when they are actually in the notification shade, through the
+      listener that is already bound and already reading them, which is
+      access the user has separately granted. See NotificationApps.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application

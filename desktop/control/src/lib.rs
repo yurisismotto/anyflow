@@ -206,7 +206,7 @@ pub enum Event {
 /// once it is verified and promoted. It is local information and is never
 /// sent to a peer — an absolute path on the receiver is exactly the kind of
 /// thing the offer format deliberately has no room for.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransferReport {
     /// Full hex. Local only: the truncated form is what reaches a log.
     pub transfer_id: String,
@@ -232,7 +232,7 @@ pub struct TransferReport {
 /// A pending clip is described by its size, a hash prefix and its age. That
 /// is enough to tell two clips apart and to decide whether to apply one, and
 /// it means the control socket never carries clipboard content.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClipboardStatusReport {
     /// Whether the capability is registered at all.
     pub enabled: bool,
@@ -282,7 +282,7 @@ fn default_true() -> bool {
 }
 
 /// One device's clipboard grant and policy.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClipboardPeerReport {
     pub device_id: String,
     pub device_name: String,
@@ -306,7 +306,7 @@ pub struct ClipboardPeerReport {
 }
 
 /// A clip held in memory because `auto_receive` is off. No content.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingClipReport {
     pub device_name: String,
     pub fingerprint_short: String,
@@ -326,7 +326,7 @@ pub struct PendingClipReport {
 /// notification's title, body or application name**, and no screen anywhere
 /// lists received notifications — a history is what the design forbids, not a
 /// feature deferred for time.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationsStatusReport {
     /// Whether the capability is registered at all.
     pub enabled: bool,
@@ -355,7 +355,7 @@ pub struct NotificationsStatusReport {
 }
 
 /// One device's notification grant, policy and live mirror state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationPeerReport {
     pub device_id: String,
     pub device_name: String,
@@ -425,7 +425,7 @@ impl std::fmt::Display for DeviceState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusReport {
     pub device_name: String,
     pub device_id: String,
@@ -456,7 +456,7 @@ pub struct StatusReport {
     pub pairing_active: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionReport {
     pub device_id: String,
     pub device_name: String,
@@ -471,7 +471,7 @@ pub struct ConnectionReport {
     pub silent_secs: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BatteryReport {
     pub percentage: u32,
     pub charging_state: String,
@@ -481,7 +481,7 @@ pub struct BatteryReport {
     pub stale: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceReport {
     pub device_id: String,
     pub device_name: String,

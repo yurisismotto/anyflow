@@ -100,6 +100,22 @@ data class NotificationPolicy(
      */
     val allowedApps: Set<String> = emptySet(),
     /**
+     * Every application the picker has shown this person, the last time they
+     * looked. **Not** an allow-list.
+     *
+     * It exists so that "3 new apps are not being shared" can be true rather
+     * than a guess. Deny-by-default already handles the security half — an
+     * application installed after the choice is not in [allowedApps] and is
+     * not shared — and this handles the discoverability half, which is
+     * otherwise a person wondering why their new messaging app is silent.
+     *
+     * Empty until the picker has been opened once, which is what stops a
+     * fresh install announcing that all ninety-seven of its applications are
+     * new. Package names are settings the person was shown; no notification
+     * content reaches this field, and there is no shape it could take here.
+     */
+    val knownApps: Set<String> = emptySet(),
+    /**
      * Work-profile notifications, behind their own switch and **off**.
      *
      * A listener in the personal profile receives work-profile notifications
@@ -155,6 +171,7 @@ data class NotificationPolicy(
     fun toJson(): JSONObject = JSONObject().apply {
         put(KEY_ALLOW_MIRROR, allowMirror)
         put(KEY_ALLOWED_APPS, JSONArray(allowedApps.sorted()))
+        put(KEY_KNOWN_APPS, JSONArray(knownApps.sorted()))
         put(KEY_INCLUDE_WORK_PROFILE, includeWorkProfile)
         put(KEY_INCLUDE_ONGOING, includeOngoing)
         put(KEY_WHEN_SOURCE_LOCKED, whenSourceLocked.name)
@@ -166,6 +183,7 @@ data class NotificationPolicy(
         val DENIED = NotificationPolicy(
             allowMirror = false,
             allowedApps = emptySet(),
+            knownApps = emptySet(),
             includeWorkProfile = false,
             includeOngoing = false,
             whenSourceLocked = LockPolicy.SUPPRESS,
@@ -174,6 +192,7 @@ data class NotificationPolicy(
 
         private const val KEY_ALLOW_MIRROR = "allowMirror"
         private const val KEY_ALLOWED_APPS = "allowedApps"
+        private const val KEY_KNOWN_APPS = "knownApps"
         private const val KEY_INCLUDE_WORK_PROFILE = "includeWorkProfile"
         private const val KEY_INCLUDE_ONGOING = "includeOngoing"
         private const val KEY_WHEN_SOURCE_LOCKED = "whenSourceLocked"
@@ -189,16 +208,10 @@ data class NotificationPolicy(
          */
         fun fromJson(json: JSONObject?): NotificationPolicy {
             if (json == null) return NotificationPolicy()
-            val apps = json.optJSONArray(KEY_ALLOWED_APPS)
             return NotificationPolicy(
                 allowMirror = json.optBoolean(KEY_ALLOW_MIRROR, true),
-                allowedApps = buildSet {
-                    if (apps != null) {
-                        for (index in 0 until apps.length()) {
-                            apps.optString(index).takeIf { it.isNotEmpty() }?.let { add(it) }
-                        }
-                    }
-                },
+                allowedApps = readPackages(json.optJSONArray(KEY_ALLOWED_APPS)),
+                knownApps = readPackages(json.optJSONArray(KEY_KNOWN_APPS)),
                 includeWorkProfile = json.optBoolean(KEY_INCLUDE_WORK_PROFILE, false),
                 includeOngoing = json.optBoolean(KEY_INCLUDE_ONGOING, false),
                 whenSourceLocked = LockPolicy.fromName(
@@ -209,5 +222,13 @@ data class NotificationPolicy(
         }
 
         private fun onOff(value: Boolean) = if (value) "on" else "off"
+
+        /** A stored array of package names, ignoring anything unusable. */
+        private fun readPackages(array: JSONArray?): Set<String> = buildSet {
+            if (array == null) return@buildSet
+            for (index in 0 until array.length()) {
+                array.optString(index).takeIf { it.isNotEmpty() }?.let { add(it) }
+            }
+        }
     }
 }
