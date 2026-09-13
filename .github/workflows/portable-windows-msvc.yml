@@ -32,7 +32,7 @@ on:
       - 'desktop/**'
       - '.github/workflows/portable-windows-msvc.yml'
   push:
-    branches: [main, develop, 'feature/**']
+    branches: [main, develop]
     paths:
       - 'desktop/**'
       - '.github/workflows/portable-windows-msvc.yml'
@@ -176,7 +176,7 @@ jobs:
           }
 
       # The same discipline for the notifications capability, whose test set
-      # is split three ways: `sink` and `logging` are portable and compile
+      # is split three ways: `dismiss`, `sink` and `logging` are portable and compile
       # everywhere, while `real_dbus` and `real_lock` are whole-file
       # `#![cfg(feature = "linux-dbus")]` and compile to empty binaries with
       # the feature off. That is why they need no exclusion below — but a *new*
@@ -185,6 +185,7 @@ jobs:
       - name: Notification test files unchanged (classification guard)
         run: |
           $expected = @(
+            'dismiss.rs',
             'logging.rs',
             'real_dbus.rs',
             'real_lock.rs',
