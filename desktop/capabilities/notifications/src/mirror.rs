@@ -31,6 +31,15 @@
 //! | `app_name` | So that when the screen locks, the mirrors already on it can be re-posted reduced to the app's name |
 //! | `urgency` | Same: a reduced re-post must not become louder or quieter than the notification it replaces |
 //! | `reduced` | Whether what is on screen is already the reduced form, so a lock event does not re-post what is already reduced |
+//! | `origin_device_id` | The source's own name for the device the notification lives on, echoed back in a `DismissRequest` so the source can check it is the origin |
+//!
+//! `origin_device_id` is **not identity** and is not what addresses this
+//! entry — the pinned fingerprint is, and that is the whole point of the key
+//! above. It is retained because `DismissRequest` carries it and the source
+//! requires it to name the source itself, so the only way to send a dismiss a
+//! phone will honour is to give back what the phone said. A peer that lied
+//! about it has lied to itself: the field it gets back is the one it sent.
+//! Validated to exactly 32 lowercase hex characters before it reaches here.
 //!
 //! `app_name` is the only peer-supplied *text* retained, it is bounded at 64
 //! characters by [`crate::text`], and it is the one thing an `AppOnly`
@@ -71,6 +80,12 @@ pub struct MirrorEntry {
     pub urgency: Urgency,
     /// Whether what is currently on screen is the lock-reduced form.
     pub reduced: bool,
+    /// The `origin_device_id` the source sent with the last accepted upsert.
+    ///
+    /// Display and protocol data, never identity (ADR-0016 §7). Kept only so
+    /// that a `DismissRequest` for this mirror can name the device the source
+    /// itself named, which is what the source checks before acting.
+    pub origin_device_id: String,
     /// Insertion order, for oldest-first eviction at the ceiling.
     seq: u64,
 }
@@ -126,6 +141,7 @@ impl MirrorTable {
     /// notification it names. Evicting without closing would leave a
     /// notification on the screen that nothing can ever update or remove,
     /// which is the one failure mode worse than dropping it.
+    #[allow(clippy::too_many_arguments)]
     pub fn insert(
         &mut self,
         id: NotificationId,
@@ -134,6 +150,7 @@ impl MirrorTable {
         app_name: String,
         urgency: Urgency,
         reduced: bool,
+        origin_device_id: String,
     ) -> Option<(NotificationId, MirrorEntry)> {
         let evicted = if self.entries.contains_key(&id) {
             // Replacing an existing identity frees no slot and needs none.
@@ -153,6 +170,7 @@ impl MirrorTable {
                 app_name,
                 urgency,
                 reduced,
+                origin_device_id,
                 seq,
             },
         );
@@ -179,22 +197,41 @@ impl MirrorTable {
         self.entries.remove(id)
     }
 
-    /// Forgets the entry whose server id is `server_id`, returning its
-    /// identity.
+    /// Forgets the entry whose server id is `server_id`, returning it.
     ///
     /// This is the `NotificationClosed` path. The server invalidates an id
     /// **before** it sends the signal — *"may not be used in any further
     /// communications with the server"* — so the entry has to go, or the next
     /// upsert for that identity would name a dead id and quietly create a
     /// second notification instead of updating the first.
-    pub fn forget_server_id(&mut self, server_id: ServerId) -> Option<NotificationId> {
+    ///
+    /// # This function is N4's entire race story
+    ///
+    /// Returning `Some` means *this close signal found a mirror that was still
+    /// live*, and that is the only condition under which a `DismissRequest`
+    /// may be produced. Everything that removes a mirror for any other reason
+    /// — a `NotificationRemove` from the source, the snapshot reconciliation,
+    /// the lock policy, the per-peer ceiling, a revocation, the reconnect
+    /// grace, a notification-server restart — takes the entry out *first* and
+    /// closes the notification afterwards, so the close signal it provokes
+    /// arrives here and finds nothing.
+    ///
+    /// A second signal for the same id, a signal for an id a restarted server
+    /// has reissued to somebody else, and a signal for a mirror this process
+    /// already purged therefore all answer `None` and cause no remote effect.
+    /// That is structural: there is no timer, no flag and no window, and no
+    /// suppression cache to expire at the wrong moment.
+    pub fn forget_server_id(
+        &mut self,
+        server_id: ServerId,
+    ) -> Option<(NotificationId, MirrorEntry)> {
         let id = self
             .entries
             .iter()
             .find(|(_, e)| e.server_id == Some(server_id))
             .map(|(id, _)| id.clone())?;
-        self.entries.remove(&id);
-        Some(id)
+        let entry = self.entries.remove(&id)?;
+        Some((id, entry))
     }
 
     /// Drops every server id without dropping the entries.
@@ -269,6 +306,8 @@ mod tests {
         NotificationId::from_bytes(&[seed; 16]).expect("16 bytes")
     }
 
+    const ORIGIN: &str = "0123456789abcdef0123456789abcdef";
+
     fn put(table: &mut MirrorTable, seed: u8, server: u32) {
         table.insert(
             id(seed),
@@ -277,6 +316,7 @@ mod tests {
             "App".into(),
             Urgency::Normal,
             false,
+            ORIGIN.into(),
         );
     }
 
@@ -304,6 +344,7 @@ mod tests {
             "App".into(),
             Urgency::Normal,
             false,
+            ORIGIN.into(),
         );
         let (evicted_id, entry) = evicted.expect("the ceiling evicts");
         assert_eq!(evicted_id, id(0), "the oldest goes, not an arbitrary one");
@@ -317,12 +358,15 @@ mod tests {
         let mut table = MirrorTable::new();
         put(&mut table, 1, 10);
         put(&mut table, 2, 11);
-        assert_eq!(table.forget_server_id(11), Some(id(2)));
+        let (forgotten, entry) = table.forget_server_id(11).expect("the entry was live");
+        assert_eq!(forgotten, id(2));
+        assert_eq!(entry.origin_device_id, ORIGIN, "so a dismiss can name it");
         assert!(!table.contains(&id(2)));
         assert!(table.contains(&id(1)));
         // A second signal for the same id finds nothing, and says so rather
-        // than removing something else.
-        assert_eq!(table.forget_server_id(11), None);
+        // than removing something else. This is what makes a duplicate close
+        // signal produce at most one DismissRequest.
+        assert!(table.forget_server_id(11).is_none());
     }
 
     #[test]
@@ -361,6 +405,7 @@ mod tests {
             "Very Distinctive App Name".into(),
             Urgency::Normal,
             false,
+            ORIGIN.into(),
         );
         table.insert(
             id(2),
@@ -369,6 +414,7 @@ mod tests {
             "Another".into(),
             Urgency::Low,
             true,
+            ORIGIN.into(),
         );
 
         let rendered = table.to_string();

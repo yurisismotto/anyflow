@@ -63,6 +63,23 @@ pub enum Work {
     Upsert(Box<crate::Incoming>),
     /// Close one notification and forget it.
     Remove(NotificationId),
+    /// Ask the source to dismiss one notification a human closed here.
+    ///
+    /// The only outbound work item that asks a peer to *do* something, and it
+    /// goes through this queue rather than being sent from the close pump for
+    /// the reason every other outbound message does: one peer's traffic is
+    /// written by one task, so a dismiss can never overtake the result or the
+    /// role announcement that preceded it.
+    ///
+    /// It is **not terminal**. Losing one leaves the notification in the
+    /// phone's own shade, where the person can still dismiss it; losing a
+    /// `Remove` would leave a notification on a desktop nothing can ever take
+    /// off. And it carries `origin_device_id` because the message does — the
+    /// source requires that it names the source.
+    Dismiss {
+        id: NotificationId,
+        origin_device_id: String,
+    },
     /// A snapshot bracket marker, carried verbatim.
     Sync(anyflow_proto::v1::capabilities::SyncMarker),
     /// The screen locked or unlocked: re-evaluate what is on it.
@@ -115,6 +132,7 @@ impl Work {
             Self::AnnounceRoles => "roles",
             Self::Upsert(_) => "upsert",
             Self::Remove(_) => "remove",
+            Self::Dismiss { .. } => "dismiss",
             Self::Sync(_) => "sync",
             Self::LockChanged(_) => "lock",
             Self::CloseAll(_) => "close-all",

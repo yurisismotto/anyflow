@@ -19,6 +19,7 @@ mod common;
 
 use std::time::Duration;
 
+use anyflow_capability_notifications::backend::CloseReason;
 use anyflow_capability_notifications::{LockPolicy, NotificationPolicy, CAPABILITY_ID};
 use common::*;
 
@@ -78,6 +79,10 @@ fn marker_body(
     })
 }
 
+fn upsert_body(message: clip_pb::NotificationUpsert) -> clip_pb::notification_control::Body {
+    clip_pb::notification_control::Body::Upsert(message)
+}
+
 fn remove_body(seed: u16) -> clip_pb::notification_control::Body {
     clip_pb::notification_control::Body::Remove(clip_pb::NotificationRemove {
         notification_id: id_bytes(seed),
@@ -128,8 +133,18 @@ async fn paired(
     assert_eq!(announced.epoch, 1);
     assert_eq!(
         announced.roles,
-        vec![clip_pb::NotificationRole::Sink as i32],
-        "the desktop announces SINK, and only SINK"
+        vec![
+            clip_pb::NotificationRole::Sink as i32,
+            clip_pb::NotificationRole::DismissReporter as i32,
+        ],
+        "ADR-0017 §1's v1 assignment for Linux: it displays, and it reports \
+         human dismissals"
+    );
+    assert!(
+        !announced
+            .roles
+            .contains(&(clip_pb::NotificationRole::DismissTarget as i32)),
+        "the desktop sources nothing, so there is nothing here to dismiss"
     );
 
     // And the phone says it can source.
@@ -381,6 +396,158 @@ async fn a_dismiss_request_is_refused_over_the_real_transport() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// N4 — a human dismissal, over the real transport
+// ---------------------------------------------------------------------------
+
+/// The whole feature, over TLS, through the real daemon, in one test.
+///
+/// A granted peer with dismiss sync on mirrors a notification; a person closes
+/// it on this desktop; the desktop sends exactly one `DismissRequest` naming
+/// the identity and origin the phone sent. Everything below the socket is the
+/// production path — the real trust store, the real authorizer, the real
+/// worker, the real mirror table.
+#[tokio::test]
+async fn a_human_dismissal_travels_to_the_source_over_the_real_transport() {
+    let (server, _client, captured, session) = paired(NotificationPolicy {
+        allow_dismiss_sync: true,
+        ..NotificationPolicy::default()
+    })
+    .await;
+
+    // The phone claims both of its v1 roles, which is what N4's Android
+    // adapter announces.
+    assert!(
+        send_notification_control(
+            &session,
+            roles_body(
+                &[
+                    clip_pb::NotificationRole::Source,
+                    clip_pb::NotificationRole::DismissTarget,
+                ],
+                2,
+            )
+        )
+        .await
+    );
+
+    assert!(send_notification_control(&session, upsert_body(upsert(1, "Ana", "lunch?"))).await);
+    let result = captured.next_result(TIMEOUT).await;
+    assert_eq!(
+        result.outcome,
+        clip_pb::NotificationOutcome::Displayed as i32
+    );
+    let server_id = server
+        .notification_sink
+        .last_server_id()
+        .expect("the desktop is showing it");
+
+    // A person closes it. Reason 2, and only reason 2.
+    server
+        .notification_sink
+        .user_closes(server_id, CloseReason::Dismissed)
+        .await;
+
+    let dismiss = captured.next_dismiss(TIMEOUT).await;
+    assert_eq!(dismiss.notification_id, id_bytes(1));
+    assert_eq!(dismiss.origin_device_id, ORIGIN);
+
+    // And the mirror is already gone here, which is what makes the source's
+    // `NotificationRemove` converge as UNKNOWN_NOTIFICATION instead of
+    // starting a second lap.
+    assert_eq!(server.notification_sink.live_count(), 0);
+    assert!(send_notification_control(&session, remove_body(1)).await);
+    let converged = captured.next_result(TIMEOUT).await;
+    assert_eq!(
+        converged.outcome,
+        clip_pb::NotificationOutcome::UnknownNotification as i32,
+        "the loop has one lap and no second"
+    );
+}
+
+/// The default, over the transport: nothing is asked of the phone.
+#[tokio::test]
+async fn an_expiry_sends_nothing_over_the_real_transport() {
+    let (server, _client, captured, session) = paired(NotificationPolicy {
+        allow_dismiss_sync: true,
+        ..NotificationPolicy::default()
+    })
+    .await;
+    assert!(
+        send_notification_control(
+            &session,
+            roles_body(
+                &[
+                    clip_pb::NotificationRole::Source,
+                    clip_pb::NotificationRole::DismissTarget,
+                ],
+                2,
+            )
+        )
+        .await
+    );
+    assert!(send_notification_control(&session, upsert_body(upsert(1, "Ana", "lunch?"))).await);
+    let _ = captured.next_result(TIMEOUT).await;
+    let server_id = server
+        .notification_sink
+        .last_server_id()
+        .expect("displayed");
+
+    // A banner times out on a screen nobody is looking at.
+    server
+        .notification_sink
+        .user_closes(server_id, CloseReason::Expired)
+        .await;
+
+    // A second notification, whose answer proves the worker got that far — so
+    // a dismissal queued before it would have come out first.
+    assert!(send_notification_control(&session, upsert_body(upsert(2, "Bo", "hello"))).await);
+    let next = captured.next_result(TIMEOUT).await;
+    assert_eq!(
+        next.notification_id,
+        id_bytes(2),
+        "something was sent between the expiry and this answer"
+    );
+}
+
+/// Dismiss sync off — the shipped default — sends nothing either.
+#[tokio::test]
+async fn the_default_policy_sends_no_dismissal_over_the_real_transport() {
+    let (server, _client, captured, session) = paired(NotificationPolicy::default()).await;
+    assert!(
+        send_notification_control(
+            &session,
+            roles_body(
+                &[
+                    clip_pb::NotificationRole::Source,
+                    clip_pb::NotificationRole::DismissTarget,
+                ],
+                2,
+            )
+        )
+        .await
+    );
+    assert!(send_notification_control(&session, upsert_body(upsert(1, "Ana", "lunch?"))).await);
+    let _ = captured.next_result(TIMEOUT).await;
+    let server_id = server
+        .notification_sink
+        .last_server_id()
+        .expect("displayed");
+
+    server
+        .notification_sink
+        .user_closes(server_id, CloseReason::Dismissed)
+        .await;
+
+    assert!(send_notification_control(&session, upsert_body(upsert(2, "Bo", "hello"))).await);
+    let next = captured.next_result(TIMEOUT).await;
+    assert_eq!(
+        next.notification_id,
+        id_bytes(2),
+        "a dismissal was sent with the setting off"
+    );
+}
+
 #[tokio::test]
 async fn the_role_narrows_and_widens_without_a_reconnect() {
     let (server, _client, captured, _session) = paired(NotificationPolicy::default()).await;
@@ -392,7 +559,13 @@ async fn the_role_narrows_and_widens_without_a_reconnect() {
 
     server.notification_sink.come_back().await;
     let widened = captured.next_roles(TIMEOUT).await;
-    assert_eq!(widened.roles, vec![clip_pb::NotificationRole::Sink as i32]);
+    assert_eq!(
+        widened.roles,
+        vec![
+            clip_pb::NotificationRole::Sink as i32,
+            clip_pb::NotificationRole::DismissReporter as i32,
+        ]
+    );
     assert_eq!(widened.epoch, 3);
 }
 
@@ -961,6 +1134,11 @@ async fn changing_a_notification_setting_never_touches_another_capability() {
         NotificationSetting::WhenLocked {
             policy: "app-only".into(),
         },
+        // The N4 switch. It is the one setting on the screen that lets another
+        // device act on this one, so "it changes nothing else" is worth
+        // proving at the level the daemon actually writes it.
+        NotificationSetting::DismissSync { enabled: true },
+        NotificationSetting::DismissSync { enabled: false },
     ] {
         let response = anyflow_runtime::server::do_notifications_policy(
             &server.state,
@@ -983,6 +1161,54 @@ async fn changing_a_notification_setting_never_touches_another_capability() {
     assert_eq!(
         server.clipboard_policy(client.fingerprint).await,
         anyflow_capability_clipboard::policy::ClipboardPolicy::default(),
+    );
+    // And the notification policy is back where it started: the last setting
+    // in the loop turned dismiss sync off again, and nothing else moved.
+    assert_eq!(
+        server.notification_policy(client.fingerprint).await,
+        NotificationPolicy::default(),
+    );
+}
+
+/// Turning dismiss sync on writes exactly that field and no other.
+///
+/// The daemon's own half of the guarantee the two UIs make. It matters here
+/// rather than only in the UI because the UI is not the only writer: the CLI
+/// and the control socket reach the same function.
+#[tokio::test]
+async fn the_dismiss_sync_setting_changes_only_itself() {
+    use anyflow_runtime::control::NotificationSetting;
+
+    let (server, client, _captured, _session) = paired(NotificationPolicy {
+        when_sink_locked: anyflow_core::notification_policy::LockPolicy::Full,
+        ..NotificationPolicy::default()
+    })
+    .await;
+    let before = server.notification_policy(client.fingerprint).await;
+    assert!(!before.allow_dismiss_sync, "the stored default is off");
+
+    let response = anyflow_runtime::server::do_notifications_policy(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        NotificationSetting::DismissSync { enabled: true },
+    )
+    .await;
+    assert!(matches!(
+        response,
+        anyflow_runtime::control::Response::Ok { .. }
+    ));
+
+    let after = server.notification_policy(client.fingerprint).await;
+    assert!(after.allow_dismiss_sync);
+    assert_eq!(after.allow_mirror, before.allow_mirror);
+    assert_eq!(
+        after.when_sink_locked, before.when_sink_locked,
+        "the lock policy must not be reset by a dismiss-sync change"
+    );
+    assert_eq!(
+        server.granted_capabilities(client.fingerprint).await.len(),
+        // Unchanged: a policy is not a grant.
+        server.granted_capabilities(client.fingerprint).await.len(),
     );
 }
 

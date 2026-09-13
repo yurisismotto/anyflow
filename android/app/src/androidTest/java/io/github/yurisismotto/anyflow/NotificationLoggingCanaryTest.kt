@@ -267,6 +267,179 @@ class NotificationLoggingCanaryTest {
     }
 
     // -----------------------------------------------------------------------
+    // N4: the dismissal paths
+    // -----------------------------------------------------------------------
+    //
+    // These carry an identity from one device to another and end in a platform
+    // call that takes the **raw Android notification key** — the one value in
+    // the whole capability that must never leave this phone. So the canary set
+    // includes that key, and every dismissal outcome is exercised: the one that
+    // works, and each of the six ways it can be refused.
+
+    /** A dismissal that succeeds. The key is used, and never written down. */
+    @Test
+    fun a_permitted_dismissal_writes_no_content_and_no_raw_key() {
+        val captured = runFlow {
+            val listener = FakeListener(listOf(notification()))
+            val source = source(
+                policy = NotificationPolicy(
+                    allowedApps = setOf(PACKAGE),
+                    allowDismissSync = true,
+                ),
+                listener = listener,
+            )
+            attach(source, listener)
+            source.onPosted(notification())
+            settle()
+
+            source.onInbound(peer, dismiss(idOf()))
+            settle()
+            // The platform really was asked, so this is not passing because
+            // nothing happened.
+            assertTrue(
+                "the dismissal did not reach the platform",
+                listener.cancelled.contains(KEY),
+            )
+
+            source.onRemoved(KEY, listenerCancelled = true)
+            settle()
+        }
+        assertClean(captured)
+    }
+
+    /** Every refusal, including the ones a person will actually hit. */
+    @Test
+    fun every_refused_dismissal_writes_only_a_reason_class() {
+        val captured = runFlow {
+            val listener = FakeListener(listOf(notification()))
+            val source = source(
+                policy = NotificationPolicy(
+                    allowedApps = setOf(PACKAGE),
+                    allowDismissSync = true,
+                ),
+                listener = listener,
+            )
+            attach(source, listener)
+            source.onPosted(notification())
+            settle()
+            val id = idOf()
+
+            // Malformed: a bad-width identity, and a bad origin.
+            source.onInbound(peer, dismiss(ByteString.copyFrom(ByteArray(7))))
+            source.onInbound(peer, dismiss(id, origin = "not-a-device-id"))
+            // Another device's origin.
+            source.onInbound(peer, dismiss(id, origin = "f".repeat(32)))
+            // An id this phone never issued.
+            source.onInbound(peer, dismiss(ByteString.copyFrom(ByteArray(16) { 0x5a })))
+            // A peer with no grant at all.
+            source.onInbound(ungranted, dismiss(id))
+            settle()
+        }
+        assertClean(captured)
+        assertTrue(
+            "the refusals wrote nothing, so this proves nothing",
+            captured.contains("dismiss refused"),
+        )
+    }
+
+    /** Policy off — the default, and the busiest refusal path there will be. */
+    @Test
+    fun a_dismissal_refused_by_policy_writes_no_content() {
+        val captured = runFlow {
+            val listener = FakeListener(listOf(notification()))
+            val source = source(
+                policy = NotificationPolicy(allowedApps = setOf(PACKAGE)),
+                listener = listener,
+            )
+            attach(source, listener)
+            source.onPosted(notification())
+            settle()
+            source.onInbound(peer, dismiss(idOf()))
+            settle()
+            assertTrue("the policy did not refuse it", listener.cancelled.isEmpty())
+        }
+        assertClean(captured)
+    }
+
+    /**
+     * The error path, which is where a leak actually hides.
+     *
+     * The platform throws with the canaries — and the raw key — in the
+     * exception message, exactly as a real `SecurityException` from the
+     * notification manager might name what it refused.
+     */
+    @Test
+    fun a_cancel_that_throws_does_not_render_its_exception_message() {
+        val captured = runFlow {
+            val listener = FakeListener(listOf(notification()))
+            listener.cancelSucceeds = false
+            val source = source(
+                policy = NotificationPolicy(
+                    allowedApps = setOf(PACKAGE),
+                    allowDismissSync = true,
+                ),
+                listener = listener,
+            )
+            attach(source, listener)
+            source.onPosted(notification())
+            settle()
+            source.onInbound(peer, dismiss(idOf()))
+            settle()
+            assertTrue("the cancel was never attempted", listener.cancelled.isNotEmpty())
+        }
+        assertClean(captured)
+    }
+
+    /** A notification that is not clearable. Refused, and quietly. */
+    @Test
+    fun a_non_dismissible_refusal_writes_no_content() {
+        val captured = runFlow {
+            val ongoing = notification(ongoing = true)
+            val listener = FakeListener(listOf(ongoing))
+            val source = source(
+                policy = NotificationPolicy(
+                    allowedApps = setOf(PACKAGE),
+                    includeOngoing = true,
+                    allowDismissSync = true,
+                ),
+                listener = listener,
+            )
+            attach(source, listener)
+            source.onPosted(ongoing)
+            settle()
+            source.onInbound(peer, dismiss(idOf()))
+            settle()
+            assertTrue(listener.cancelled.isEmpty())
+        }
+        assertClean(captured)
+    }
+
+    /**
+     * The identity a dismissal names, taken from what the wire actually
+     * carried — never derived here.
+     *
+     * Read live rather than from `attach`'s snapshot, which is taken before
+     * any notification is posted.
+     */
+    private fun idOf(): ByteString =
+        synchronized(sent) { sent.toList() }
+            .first { it.bodyCase == NotificationControl.BodyCase.UPSERT }
+            .upsert
+            .notificationId
+
+    private fun dismiss(
+        id: ByteString,
+        origin: String = "0123456789abcdef0123456789abcdef",
+    ): NotificationControl =
+        NotificationControl.newBuilder()
+            .setDismiss(
+                io.github.yurisismotto.anyflow.proto.capabilities.DismissRequest.newBuilder()
+                    .setNotificationId(id)
+                    .setOriginDeviceId(origin),
+            )
+            .build()
+
+    // -----------------------------------------------------------------------
     // The assertion
     // -----------------------------------------------------------------------
 
@@ -299,10 +472,32 @@ class NotificationLoggingCanaryTest {
     // -----------------------------------------------------------------------
 
     private class FakeListener(
-        val active: List<PlatformNotification> = emptyList(),
+        active: List<PlatformNotification> = emptyList(),
     ) : NotificationSource.ListenerControl {
+        var active: List<PlatformNotification> = active
+
+        /** Every raw key `cancel` was called with. Never sent anywhere. */
+        val cancelled = mutableListOf<String>()
+
+        /** Makes the cancel fail, so the error path logs too. */
+        var cancelSucceeds = true
+
         override fun requestUnbind() = Unit
         override fun activeNotifications(): List<PlatformNotification> = active
+        override fun activeNotification(platformKey: String): PlatformNotification? =
+            active.firstOrNull { it.platformKey == platformKey }
+
+        override fun cancel(platformKey: String): Boolean {
+            cancelled += platformKey
+            if (!cancelSucceeds) {
+                // A platform refusal, with the canaries in the message — the
+                // shape of exception a careless `catch` would log verbatim.
+                throw IllegalStateException("cannot cancel $platformKey ($TITLE / $BODY)")
+            }
+            active = active.filterNot { it.platformKey == platformKey }
+            return true
+        }
+
         override fun activePackages(): List<String> = active.map { it.packageName }.distinct()
     }
 
@@ -415,13 +610,14 @@ class NotificationLoggingCanaryTest {
         packageName: String = PACKAGE,
         title: String = TITLE,
         body: String = BODY,
+        ongoing: Boolean = false,
     ) = PlatformNotification(
         platformKey = key,
         packageName = packageName,
         secondaryProfile = false,
         postedAtUnixMs = 1_700_000_000_000L,
-        ongoing = false,
-        clearable = true,
+        ongoing = ongoing,
+        clearable = !ongoing,
         visibility = NotificationMapping.VISIBILITY_PRIVATE,
         androidImportance = NotificationMapping.ANDROID_IMPORTANCE_DEFAULT,
         category = "msg",

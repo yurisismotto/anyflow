@@ -388,22 +388,200 @@ class NotificationConsentUiTest {
 
     // --- what must not be here ---------------------------------------------
 
+    // --- dismissal: the one control that acts on this device ---------------
+
+    private val DISMISS = "Allow this computer to dismiss notifications"
+
+    /**
+     * The default, and the one that would matter most if it were wrong.
+     *
+     * A switch that shipped on would mean everybody who ever granted
+     * `notifications.v1` had silently authorised a computer to act on their
+     * phone — and it is a default that cannot be walked back for existing
+     * installs once it ships.
+     */
     @Test
-    fun there_is_no_working_dismissal_control() {
-        // N4 owns the runtime. A switch here would be a promise this release
-        // cannot keep, and a person who turned it on would reasonably report
-        // the phone not clearing as a bug.
+    fun the_dismissal_switch_is_off_by_default() {
         show(Fx.state(Fx.peer(granted = true)), Fx.Recorder())
-        compose.onNodeWithText("Sync dismissals").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(DISMISS).performScrollTo().assertIsDisplayed()
+        switchFor(DISMISS).assertIsOff()
+    }
+
+    /**
+     * And it says what it does to this phone, and what it does not.
+     *
+     * The copy is a security control, not marketing: "allow this computer to
+     * dismiss notifications" is exactly the phrase somebody could read as
+     * "allow this computer to control my notifications", so the row says which
+     * of the two it is.
+     */
+    @Test
+    fun the_dismissal_copy_names_the_effect_and_bounds_it() {
+        show(Fx.state(Fx.peer(granted = true)), Fx.Recorder())
         compose
-            .onNodeWithText("Not available yet", substring = true)
+            .onNodeWithText("dismisses the original here", substring = true)
+            .performScrollTo()
             .assertIsDisplayed()
-        // Neither as a label with a toggle on it, nor as a switch that carries
-        // the row's name the way every real one on this screen does.
-        compose.onAllNodes(isToggleable() and hasText("Sync dismissals")).assertCountEquals(0)
+        for (bound in listOf("buttons", "reply", "open an app", "clear everything at once")) {
+            compose
+                .onNodeWithText(bound, substring = true)
+                .assertIsDisplayed()
+        }
+        // And it must not imply anything about ongoing notifications either.
         compose
-            .onAllNodes(isToggleable() and hasContentDescription("Sync dismissals"))
-            .assertCountEquals(0)
+            .onNodeWithText("Ongoing notifications are never dismissed", substring = true)
+            .assertIsDisplayed()
+    }
+
+    /** Turning it on writes exactly one field, and no other. */
+    @Test
+    fun the_dismissal_switch_changes_only_the_dismiss_policy() {
+        val recorder = Fx.Recorder()
+        val before = NotificationPolicy(
+            allowedApps = setOf("com.example.chat"),
+            includeOngoing = true,
+            whenSourceLocked = LockPolicy.FULL,
+        )
+        show(Fx.state(Fx.peer(granted = true, policy = before)), recorder)
+
+        switchFor(DISMISS).performScrollTo().performClick()
+
+        val written = recorder.policies.single()
+        assertTrue(written.allowDismissSync)
+        assertEquals(before.allowMirror, written.allowMirror)
+        assertEquals(before.allowedApps, written.allowedApps)
+        assertEquals(before.knownApps, written.knownApps)
+        assertEquals(before.includeOngoing, written.includeOngoing)
+        assertEquals(before.includeWorkProfile, written.includeWorkProfile)
+        assertEquals(before.whenSourceLocked, written.whenSourceLocked)
+        // And it is not a grant change: the capability grant has its own row.
+        assertTrue(recorder.grants.isEmpty())
+    }
+
+    /** A stored `true` is drawn as on. */
+    @Test
+    fun the_dismissal_switch_shows_what_is_stored() {
+        show(
+            Fx.state(
+                Fx.peer(
+                    granted = true,
+                    policy = NotificationPolicy(
+                        allowedApps = setOf("com.example.chat"),
+                        allowDismissSync = true,
+                    ),
+                ),
+            ),
+            Fx.Recorder(),
+        )
+        switchFor(DISMISS).performScrollTo().assertIsOn()
+        // The ACTIVE state line, not the description. Both contain the phrase
+        // "dismisses the original here" — the description says what the switch
+        // would do, and this says that it is doing it — so the assertion has to
+        // name the half that only appears when the state is actually active.
+        compose
+            .onNodeWithText("On. Dismissing a mirrored notification", substring = true)
+            .assertIsDisplayed()
+    }
+
+    /**
+     * On, and the computer cannot report a dismissal. The switch still shows
+     * the stored choice — it is the person's — and the line underneath says
+     * plainly that nothing will happen, and what would change that.
+     */
+    @Test
+    fun an_unusable_dismissal_state_is_truthful_rather_than_silent() {
+        show(
+            Fx.state(
+                Fx.peer(
+                    granted = true,
+                    policy = NotificationPolicy(
+                        allowedApps = setOf("com.example.chat"),
+                        allowDismissSync = true,
+                    ),
+                ),
+                status = Fx.sourcingStatus(peerIsDismissReporter = false),
+            ),
+            Fx.Recorder(),
+        )
+        switchFor(DISMISS).performScrollTo().assertIsOn()
+        compose
+            .onNodeWithText("has not said it can report", substring = true)
+            .assertIsDisplayed()
+        compose
+            .onNodeWithText("may need to reconnect", substring = true)
+            .assertIsDisplayed()
+    }
+
+    /**
+     * Without the OS grant the row names the real gate rather than blaming the
+     * computer, because that is where the fix is.
+     */
+    @Test
+    fun without_android_access_the_dismissal_row_names_the_real_gate() {
+        show(
+            Fx.state(
+                Fx.peer(
+                    granted = true,
+                    policy = NotificationPolicy(
+                        allowedApps = setOf("com.example.chat"),
+                        allowDismissSync = true,
+                    ),
+                ),
+                accessGranted = false,
+                status = Fx.idleStatus(accessGranted = false),
+            ),
+            Fx.Recorder(),
+        )
+        compose
+            .onNodeWithText("Android has not given AnyFlow notification access", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    /**
+     * A control that could not be honoured is not offered at all: with no
+     * `notifications.v1` grant, the whole section below it is absent.
+     */
+    @Test
+    fun an_ungranted_computer_is_offered_no_dismissal_control() {
+        show(Fx.state(Fx.peer(granted = false)), Fx.Recorder())
+        compose.onAllNodesWithText(DISMISS).assertCountEquals(0)
+        compose.onAllNodes(isToggleable() and hasContentDescription(DISMISS)).assertCountEquals(0)
+    }
+
+    // --- what must not be here ---------------------------------------------
+
+    /**
+     * The dismissal switch is the whole of it. There is no control here for a
+     * notification's actions, a reply, opening an app or clearing everything —
+     * because `DismissRequest` has no field that could carry any of them.
+     */
+    @Test
+    fun no_control_here_goes_further_than_a_dismissal() {
+        show(
+            Fx.state(
+                Fx.peer(
+                    granted = true,
+                    policy = NotificationPolicy(
+                        allowedApps = setOf("com.example.chat"),
+                        allowDismissSync = true,
+                    ),
+                ),
+            ),
+            Fx.Recorder(),
+        )
+        for (forbidden in listOf(
+            "Reply from",
+            "Allow replies",
+            "notification actions",
+            "Clear all",
+            "Dismiss all",
+            "Snooze",
+            "Open app",
+        )) {
+            compose.onAllNodesWithText(forbidden, substring = true, ignoreCase = true)
+                .assertCountEquals(0)
+        }
     }
 
     @Test

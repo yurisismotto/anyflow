@@ -87,9 +87,14 @@ import io.github.yurisismotto.anyflow.ui.theme.MinTouchTarget
  * No list of notifications, past or present, and no screen that says one is
  * coming. No "restore full content when unlocked" setting — it cannot exist
  * without keeping a title and a body in memory across the lock, which is a
- * history by another name. No working dismissal switch, because the runtime
- * that would make it true is N4's and a switch that implies otherwise is
- * worse than no switch.
+ * history by another name. No dismissal *history*: the dismissal switch at the
+ * bottom of this screen shows two counters for the current connection and
+ * nothing that could name what was dismissed.
+ *
+ * And nothing wider than a dismissal. There is no control here for notification
+ * actions, replies, opening an app or clearing everything, because
+ * `DismissRequest` has no field that could carry any of them — the absence is
+ * in the schema, not in this file.
  */
 @Composable
 fun NotificationSettingsScreen(
@@ -306,28 +311,58 @@ fun NotificationSettingsScreen(
                 )
             }
 
-            // --- dismissal, which does not work yet and says so ------------
+            // --- dismissal: the one control that acts on this device -------
+            //
+            // Last on the screen, and deliberately so. Everything above it is
+            // about what leaves this phone; this is the only setting that lets
+            // a computer change something here, and it reads as the different
+            // kind of decision it is.
             AnyFlowCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_close),
-                        contentDescription = null,
-                        tint = colors.disabled,
-                        modifier = Modifier.size(AnyFlowIconSize.large),
+                AnyFlowCapabilityRow(
+                    title = stringResource(R.string.notif_dismiss_title),
+                    description = stringResource(R.string.notif_dismiss_description),
+                    icon = R.drawable.ic_close,
+                    accent = colors.accentAmber,
+                    checked = policy.allowDismissSync,
+                    onCheckedChange = {
+                        actions.onSetNotificationPolicy(
+                            peer,
+                            // Exactly one field. The grant, the app list, the
+                            // mirroring switch and the lock policy are all
+                            // reached through their own `copy` calls elsewhere
+                            // on this screen, and this one cannot touch them.
+                            policy.copy(allowDismissSync = it),
+                        )
+                    },
+                )
+                // The switch says on or off; this says whether "on" is
+                // currently doing anything, and what to do when it is not.
+                // They are two different facts and a switch alone cannot carry
+                // both — which is the whole reason the state is a type.
+                val dismissState = gates.dismissReadiness()
+                Text(
+                    stringResource(NotificationUiMapping.dismissDetail(dismissState)),
+                    style = AnyFlowType.caption,
+                    color = if (dismissState.needsAttention) {
+                        colors.accentAmber
+                    } else {
+                        colors.textSecondary
+                    },
+                )
+                val peerStatus = state.notifications.peers[fingerprintHex]
+                if (peerStatus != null && peerStatus.dismissRequests > 0) {
+                    // Counts, on this connection, from memory. There is no
+                    // list of dismissals anywhere and no field that could hold
+                    // one — a dismiss event journal is what §26 forbids.
+                    Text(
+                        stringResource(
+                            R.string.notif_dismiss_counts,
+                            peerStatus.dismissRequests,
+                            peerStatus.dismissesPerformed,
+                        ),
+                        style = AnyFlowType.caption,
+                        color = colors.textMuted,
                     )
-                    Spacer(Modifier.width(AnyFlowSpacing.sm))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.notif_dismiss_title),
-                            style = AnyFlowType.body,
-                            color = colors.disabled,
-                        )
-                        Text(
-                            stringResource(R.string.notif_dismiss_not_yet),
-                            style = AnyFlowType.caption,
-                            color = colors.disabled,
-                        )
-                    }
                 }
             }
         }
@@ -497,16 +532,24 @@ private fun NotificationDiagnostics(state: MainUiState, fingerprintHex: String) 
         } else {
             DiagnosticRow(
                 stringResource(R.string.notif_diag_local_role),
-                roleText(peerStatus.localIsSource, R.string.notif_diag_role_source) +
-                    " · " + stringResource(
-                        R.string.notif_diag_epoch,
-                        peerStatus.localEpoch.toInt(),
-                    ),
+                roles(
+                    peerStatus.localIsSource to R.string.notif_diag_role_source,
+                    peerStatus.localIsDismissTarget to R.string.notif_diag_role_dismiss_target,
+                ) + " · " + stringResource(
+                    R.string.notif_diag_epoch,
+                    peerStatus.localEpoch.toInt(),
+                ),
             )
             DiagnosticRow(
                 stringResource(R.string.notif_diag_peer_role),
-                roleText(peerStatus.peerIsSink, R.string.notif_diag_role_sink) +
-                    " · " + stringResource(R.string.notif_diag_epoch, peerStatus.peerEpoch),
+                roles(
+                    peerStatus.peerIsSink to R.string.notif_diag_role_sink,
+                    peerStatus.peerIsDismissReporter to R.string.notif_diag_role_dismiss_reporter,
+                ) + " · " + stringResource(R.string.notif_diag_epoch, peerStatus.peerEpoch),
+            )
+            DiagnosticRow(
+                stringResource(R.string.notif_diag_dismiss),
+                "${peerStatus.dismissRequests} asked · ${peerStatus.dismissesPerformed} done",
             )
         }
         Text(
@@ -520,9 +563,23 @@ private fun NotificationDiagnostics(state: MainUiState, fingerprintHex: String) 
     }
 }
 
+/**
+ * The protocol role names a side is currently announcing, or "no role".
+ *
+ * A set rather than a single name, because both ends now claim two. It lives
+ * in Details and nowhere else: `SOURCE` and `DISMISS_TARGET` mean everything
+ * to somebody working out why two devices disagree, and nothing to anybody
+ * else.
+ */
 @Composable
-private fun roleText(present: Boolean, @StringRes role: Int): String =
-    if (present) stringResource(role) else stringResource(R.string.notif_diag_role_none)
+private fun roles(vararg claims: Pair<Boolean, Int>): String {
+    val present = claims.filter { it.first }.map { stringResource(it.second) }
+    return if (present.isEmpty()) {
+        stringResource(R.string.notif_diag_role_none)
+    } else {
+        present.joinToString(" + ")
+    }
+}
 
 @Composable
 private fun DiagnosticRow(label: String, value: String) {

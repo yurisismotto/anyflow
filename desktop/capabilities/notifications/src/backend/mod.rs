@@ -175,11 +175,14 @@ pub type SinkResult<T> = std::result::Result<T, SinkError>;
 /// * **[`Undefined`] carries no information**, so it cannot justify an action
 ///   on another device.
 ///
-/// **N2 acts on none of them remotely.** The type exists, the reasons are
-/// recorded accurately, and the only local effect is that the mirror's entry
-/// is dropped — because the server invalidates the id *before* the signal is
-/// sent, so a later `replaces_id` naming it would create a second notification
-/// rather than update the first.
+/// **N4 acts on exactly one of them, and only outwards.** A
+/// [`Dismissed`] close for a mirror this process still holds becomes one
+/// `DismissRequest` to the peer that sourced it, subject to both ends' policy
+/// and the peer's `DISMISS_TARGET` role; every other reason produces no remote
+/// effect whatsoever. The local effect is the same for all four: the mirror's
+/// entry is dropped — because the server invalidates the id *before* the
+/// signal is sent, so a later `replaces_id` naming it would create a second
+/// notification rather than update the first.
 ///
 /// [`Dismissed`]: CloseReason::Dismissed
 /// [`Expired`]: CloseReason::Expired
@@ -215,9 +218,11 @@ impl CloseReason {
 
     /// Whether a human performed this close.
     ///
-    /// **N4 is the only wave that may act on a `true` here.** It is written
-    /// down now, next to the reasons, so that the rule and the data are not in
-    /// two different files by the time it matters.
+    /// **The only `true` in this function is the only thing in the whole
+    /// capability that may cause a `DismissRequest`.** It is deliberately a
+    /// single `matches!` on a single variant rather than a list of exclusions:
+    /// a rule written as "everything except expiry" grows a hole the day a
+    /// fifth reason is added, and the hole would clear somebody's phone.
     pub fn is_human_dismissal(&self) -> bool {
         matches!(self, Self::Dismissed)
     }
@@ -248,6 +253,24 @@ pub struct SinkCapabilities {
     /// appearing as a transient banner. GNOME advertises this, which is why
     /// duplicate suppression here is a visible requirement and not a tidy one.
     pub persistence: bool,
+    /// Whether this backend can positively identify a **human** dismissal of a
+    /// notification it displayed.
+    ///
+    /// The one field here that is not read from the server's own
+    /// `GetCapabilities`, because it is not a property of the server alone: it
+    /// is true when a close signal actually reaches this process *and* its
+    /// reason distinguishes a person closing a notification from a banner
+    /// timing out or from our own `CloseNotification` returning. For
+    /// freedesktop that is `NotificationClosed` plus reason 2
+    /// ([`CloseReason::Dismissed`]).
+    ///
+    /// **This is the single input to the `DISMISS_REPORTER` role**, and it
+    /// defaults to `false` so that a backend which has not answered the
+    /// question claims nothing. A desktop that cannot tell a human dismissal
+    /// from an expiry must never announce that it will report one: a peer that
+    /// believed the claim would have its notifications cleared every time a
+    /// banner timed out on a screen nobody was looking at.
+    pub dismiss_reporting: bool,
 }
 
 /// Display, replace and close notifications on this desktop.
@@ -386,6 +409,8 @@ struct MemorySinkState {
     displays: Vec<(Option<ServerId>, Mirror)>,
     /// Every `close` call, in order.
     closes: Vec<ServerId>,
+    /// The id the last successful `display` returned.
+    last_id: Option<ServerId>,
     failure: Option<SinkError>,
     capabilities: SinkCapabilities,
     available: bool,
@@ -411,6 +436,10 @@ impl MemorySink {
                     body_markup: true,
                     body: true,
                     persistence: true,
+                    // And GNOME does deliver `NotificationClosed` with reason
+                    // 2 for a human close, HOST VERIFIED in N2 and re-proved
+                    // in N4's `real_dbus` gate.
+                    dismiss_reporting: true,
                 },
                 available: true,
                 ..MemorySinkState::default()
@@ -436,6 +465,15 @@ impl MemorySink {
     /// Every `close` call so far, in order.
     pub fn closes(&self) -> Vec<ServerId> {
         self.lock().closes.clone()
+    }
+
+    /// The id the last successful `display` returned.
+    ///
+    /// The server's number, not a count of calls: the two differ as soon as a
+    /// replacement or a restart is involved, and a test that assumed they were
+    /// the same would be asserting against its own arithmetic.
+    pub fn last_server_id(&self) -> Option<ServerId> {
+        self.lock().last_id
     }
 
     /// How many notifications this server currently holds.
@@ -540,6 +578,7 @@ impl NotificationSink for MemorySink {
             }
         };
         state.live.insert(id, mirror.clone());
+        state.last_id = Some(id);
         Ok(id)
     }
 
@@ -752,6 +791,19 @@ mod tests {
                 "{other:?} must never dismiss anything on the source"
             );
         }
+    }
+
+    #[test]
+    fn a_backend_that_says_nothing_claims_no_dismiss_reporting() {
+        // The default is what a new adapter gets, and what `NoSink` returns.
+        // It must be the fail-closed answer: no `DISMISS_REPORTER` role.
+        assert!(!SinkCapabilities::default().dismiss_reporting);
+        assert!(!NoSink.capabilities().dismiss_reporting);
+    }
+
+    #[test]
+    fn the_fake_desktop_reports_dismissals_like_gnome_does() {
+        assert!(MemorySink::new().capabilities().dismiss_reporting);
     }
 
     #[tokio::test]

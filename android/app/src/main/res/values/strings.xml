@@ -134,8 +134,25 @@
     <string name="notif_ongoing_title">Ongoing notifications</string>
     <string name="notif_ongoing_description">Music, navigation and “app is running” notices. Off, because they update constantly and usually cannot be dismissed. The app still has to be chosen.</string>
 
-    <string name="notif_dismiss_title">Sync dismissals</string>
-    <string name="notif_dismiss_not_yet">Not available yet. Dismissing a notification on the computer will not dismiss it here.</string>
+    <!--
+      Dismiss sync. This is the only setting on the screen that lets another
+      device change something on this one, so the copy is reviewed as a
+      security control: it names the effect plainly, and it says what the
+      setting is NOT, because "allow this computer to dismiss notifications" is
+      exactly the phrase somebody could read as "allow this computer to control
+      my notifications".
+    -->
+    <string name="notif_dismiss_title">Allow this computer to dismiss notifications</string>
+    <string name="notif_dismiss_description">Off. When on, dismissing a mirrored notification on that computer also dismisses the original here. That is all it can do: it cannot tap a notification’s buttons, reply, open an app, or clear everything at once. Ongoing notifications are never dismissed this way.</string>
+    <string name="notif_dismiss_state_needs_access">Android has not given AnyFlow notification access, so nothing on this device can be dismissed from anywhere.</string>
+    <string name="notif_dismiss_state_off">Off. Dismissing a notification on that computer leaves this one alone.</string>
+    <string name="notif_dismiss_state_not_connected">On. It takes effect the next time that computer connects.</string>
+    <string name="notif_dismiss_state_peer_cannot_report">On, and that computer has not said it can report when you dismiss something. Nothing will be dismissed here until it can. If you have just changed a setting there, the two may need to reconnect.</string>
+    <string name="notif_dismiss_state_active">On. Dismissing a mirrored notification on that computer dismisses the original here.</string>
+    <string name="notif_dismiss_counts">%1$d dismissal requested by that computer, %2$d carried out.</string>
+    <string name="notif_diag_dismiss">Dismissals from this computer</string>
+    <string name="notif_diag_role_dismiss_target">DISMISS_TARGET</string>
+    <string name="notif_diag_role_dismiss_reporter">DISMISS_REPORTER</string>
 
     <!-- Privacy copy. Reviewed as a security control, not as marketing. -->
     <string name="notif_privacy_title">What is shared, and what is not</string>

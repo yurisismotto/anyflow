@@ -52,9 +52,40 @@
 //! buffer, not a "recent" screen, and nothing in `state.json`. No actions, no
 //! buttons, no reply, no URL, no command — `notifications_v1.proto` has no
 //! field that could carry one and [`backend::NotificationSink`] has no method
-//! that could invoke one. No `DismissRequest`: N2 observes desktop closes and
-//! records their reasons, and sends nothing. No relay: there is no code path
-//! from an inbound message for one peer to an outbound message for another.
+//! that could invoke one. No relay: there is no code path from an inbound
+//! message for one peer to an outbound message for another. No dismiss event
+//! journal: a dismissal produces one message and two counters, and nothing is
+//! written anywhere.
+//!
+//! # Dismissal synchronisation (N4)
+//!
+//! One human dismissal on this desktop, one `DismissRequest` to the peer that
+//! sourced the notification, and nothing else — no action, no reply, no
+//! clear-all, and no other reason for closing a notification travels anywhere.
+//!
+//! ```text
+//!   a person closes a mirror on this desktop
+//!         │
+//!         ▼  NotificationClosed(server_id, reason = 2)   ← reason 2 ONLY
+//!   MirrorTable::forget_server_id  →  Some(entry)        ← still live?
+//!         │
+//!         ▼  allow_mirror && allow_dismiss_sync (this desktop's policy)
+//!         ▼  the peer announced DISMISS_TARGET
+//!         ▼  this desktop announced DISMISS_REPORTER
+//!   Work::Dismiss  →  the peer's worker  →  DismissRequest{id, origin}
+//! ```
+//!
+//! Five gates, each of which fails closed and each of which is a different
+//! question. [`backend::CloseReason::is_human_dismissal`] answers the first;
+//! [`mirror::MirrorTable::forget_server_id`] answers the second and is where
+//! every race in the design is resolved; the rest are policy, the peer's claim
+//! and this device's own claim.
+//!
+//! The mirror is **already gone locally** by the time the request is sent, so
+//! the `NotificationRemove` the source sends after it cancels — if it sends one
+//! at all; the source suppresses the echo to the peer that asked — finds
+//! nothing and answers `UNKNOWN_NOTIFICATION`. That is convergence, not an
+//! error, and it is what stops the loop having a second lap.
 
 pub mod backend;
 pub mod limits;
@@ -224,6 +255,18 @@ struct PeerState {
     connected: bool,
     /// The most recent lock state this peer's mirrors were rendered under.
     locked: bool,
+    /// How many `DismissRequest`s this desktop has sent this peer.
+    ///
+    /// A count, so "one physical dismissal produced exactly one request" is
+    /// observable rather than asserted. Not a journal: there is no identity,
+    /// no time and no content here, and it dies with the process.
+    dismissals_sent: u64,
+    /// How many of those the source answered with something other than
+    /// `REMOVED` — refused by its policy, not dismissible, already gone.
+    ///
+    /// Reported because it is the honest answer to "I turned this on and my
+    /// phone is not clearing": the desktop asked, and the phone said no.
+    dismissals_refused: u64,
 }
 
 impl PeerState {
@@ -236,6 +279,8 @@ impl PeerState {
             snapshot_deadline: None,
             connected: false,
             locked: false,
+            dismissals_sent: 0,
+            dismissals_refused: 0,
         }
     }
 }
@@ -282,7 +327,18 @@ pub struct PeerReport {
     pub local_epoch: u32,
     /// Whether the peer has claimed it can source notifications.
     pub peer_is_source: bool,
+    /// Whether the peer has claimed it will act on a `DismissRequest`.
+    ///
+    /// Reported separately from [`Self::peer_is_source`] because they narrow
+    /// independently and have different fixes: a phone can stop sourcing and
+    /// still honour dismissals for what it already sent.
+    pub peer_is_dismiss_target: bool,
     pub peer_epoch: u32,
+    /// Whether this desktop told the peer it will report human dismissals.
+    pub local_reports_dismissals: bool,
+    /// `DismissRequest`s sent to this peer, and how many it refused.
+    pub dismissals_sent: u64,
+    pub dismissals_refused: u64,
     pub snapshot_open: bool,
     pub queue: QueueStats,
 }
@@ -307,6 +363,19 @@ pub struct NotificationManager {
     /// The last lock state observed, so a newly attached peer starts from the
     /// truth rather than from an optimistic default.
     locked: AtomicBool,
+    /// How many `NotificationClosed` signals this device has processed.
+    ///
+    /// A monotonic count of an event that otherwise has **no observable
+    /// effect at all** in the cases that matter most: a close for a mirror
+    /// that is already gone changes nothing, sends nothing and leaves nothing
+    /// to wait on. Every negative test in `tests/dismiss.rs` is about exactly
+    /// that shape, and without this they would have to sleep and hope — which
+    /// is how a suite comes to pass because the thing it was watching for had
+    /// not happened *yet*.
+    ///
+    /// It is a number. It names no notification, no peer and no reason, it is
+    /// not persisted, and it is not in any report a peer can see.
+    closes_observed: AtomicU64,
 }
 
 impl NotificationManager {
@@ -338,6 +407,7 @@ impl NotificationManager {
             peers: RwLock::new(HashMap::new()),
             available: AtomicBool::new(available),
             locked: AtomicBool::new(locked),
+            closes_observed: AtomicU64::new(0),
         })
     }
 
@@ -370,6 +440,25 @@ impl NotificationManager {
     /// Whether this desktop session is locked, as last observed.
     pub fn is_locked(&self) -> bool {
         self.locked.load(Ordering::Acquire)
+    }
+
+    /// Whether this desktop's backend can positively identify a **human**
+    /// dismissal, and therefore whether it announces `DISMISS_REPORTER`.
+    ///
+    /// Read from the backend once at connect and never re-negotiated, exactly
+    /// as the other sink capabilities are. It is a property of the platform,
+    /// not of a peer and not of a policy.
+    pub fn reports_dismissals(&self) -> bool {
+        self.capabilities.dismiss_reporting
+    }
+
+    /// How many desktop close signals have been fully processed.
+    ///
+    /// See [`Self::closes_observed`]'s field documentation: it exists so that
+    /// "this close produced no remote effect" can be asserted after the close
+    /// has demonstrably been handled, rather than after an arbitrary delay.
+    pub fn closes_observed(&self) -> u64 {
+        self.closes_observed.load(Ordering::Acquire)
     }
 
     async fn policy_for(&self, peer: &Fingerprint) -> NotificationPolicy {
@@ -516,7 +605,11 @@ impl NotificationManager {
                 local_roles: state.local_roles.count(),
                 local_epoch: state.local_roles.epoch(),
                 peer_is_source: state.peer_roles.has(Role::Source),
+                peer_is_dismiss_target: state.peer_roles.has(Role::DismissTarget),
                 peer_epoch: state.peer_roles.epoch(),
+                local_reports_dismissals: state.local_roles.announced(Role::DismissReporter),
+                dismissals_sent: state.dismissals_sent,
+                dismissals_refused: state.dismissals_refused,
                 snapshot_open: state.snapshot.is_open(),
                 queue: slot.queue.stats(),
             });
@@ -607,12 +700,18 @@ impl NotificationManager {
             }
 
             Some(pb::notification_control::Body::Dismiss(message)) => {
-                // Linux is a sink in v1. A `DismissRequest` asks this device to
-                // cancel a notification it sourced, and this device sources
-                // none — it has never announced `DISMISS_TARGET` and has no
-                // path to cancel anything anywhere. Refused, and the session
-                // survives: one capability refusing a message must not cost
-                // the user everything else.
+                // Linux is a sink in v1, and N4 does not change that. A
+                // `DismissRequest` asks its receiver to cancel a notification
+                // *it* sourced; this device sources none, has never announced
+                // `DISMISS_TARGET`, and has no path from any inbound message
+                // to closing anything but its own mirrors.
+                //
+                // Note the direction: N4 makes this desktop a dismiss
+                // *reporter*, which is the outbound half. The inbound half
+                // stays refused, and the two are separate roles precisely so
+                // that implementing one cannot quietly implement the other.
+                // Refused, and the session survives: one capability refusing a
+                // message must not cost the user everything else.
                 let outcome = if policy.is_denied() {
                     Outcome::NotAuthorized
                 } else {
@@ -636,6 +735,16 @@ impl NotificationManager {
                     outcome = ?outcome,
                     "peer reported a notification outcome"
                 );
+                // A dismissal the source declined is the one verdict an
+                // operator needs a number for: "I turned this on and my phone
+                // is not clearing" is answered by the phone having said no.
+                //
+                // A count, keyed on nothing and holding nothing. Which
+                // notification it was is deliberately not retained: that would
+                // be a dismiss event journal, which §26 forbids.
+                if is_declined_dismissal(outcome) {
+                    slot.state.lock().await.dismissals_refused += 1;
+                }
             }
 
             // A body this build does not know, or none at all. `validate_control`
@@ -837,6 +946,10 @@ impl NotificationManager {
                 );
                 self.answer(slot, &id, outcome).await;
             }
+            Work::Dismiss {
+                id,
+                origin_device_id,
+            } => self.send_dismiss(slot, &id, &origin_device_id).await,
             Work::Sync(marker) => self.apply_sync(slot, &marker).await,
             Work::LockChanged(locked) => self.apply_lock_change(slot, locked).await,
             Work::CloseAll(reason) => self.close_all(slot, reason).await,
@@ -845,9 +958,10 @@ impl NotificationManager {
 
     async fn announce_roles(&self, slot: &Arc<PeerSlot>) {
         let available = self.is_available();
+        let reporting = self.reports_dismissals();
         let announcement = {
             let mut state = slot.state.lock().await;
-            state.local_roles.announce(available)
+            state.local_roles.announce(available, reporting)
         };
         let Some(announcement) = announcement else {
             return;
@@ -970,6 +1084,7 @@ impl NotificationManager {
                         mirror.app_name.clone(),
                         mirror.urgency,
                         presentation.is_reduced(),
+                        incoming.message.origin_device_id.clone(),
                     )
                 };
                 if let Some((_, entry)) = evicted {
@@ -1000,6 +1115,7 @@ impl NotificationManager {
                     mirror.app_name.clone(),
                     mirror.urgency,
                     presentation.is_reduced(),
+                    incoming.message.origin_device_id.clone(),
                 );
                 Outcome::from_sink_error(&error)
             }
@@ -1339,7 +1455,8 @@ impl NotificationManager {
         }
     }
 
-    /// Records that a notification this device posted has been closed.
+    /// Records that a notification this device posted has been closed, and —
+    /// for a human dismissal alone — asks the source to dismiss it too.
     ///
     /// The server invalidates the id **before** it sends the signal — *"may
     /// not be used in any further communications with the server"* — so the
@@ -1347,27 +1464,171 @@ impl NotificationManager {
     /// name a dead id and silently create a second notification instead of
     /// replacing the first.
     ///
-    /// **Nothing is sent to any peer.** The reason is recorded accurately
-    /// because N4 needs the distinction, and N4 is the wave that may act on
-    /// it.
+    /// # Why looking the entry up is the whole race story
+    ///
+    /// `forget_server_id` answers `Some` only when this signal found a mirror
+    /// that was **still live**, and everything that removes a mirror for any
+    /// other reason removes the entry *before* closing the notification. So
+    /// the following all reach this function and all send nothing, with no
+    /// timer, no flag and no suppression cache to get wrong:
+    ///
+    /// * a second signal for the same id — the first consumed the entry;
+    /// * a signal for an id a restarted server reissued to somebody else —
+    ///   [`mirror::MirrorTable::invalidate_server_ids`] dropped every handle;
+    /// * our own `CloseNotification` returning after a `NotificationRemove`,
+    ///   a snapshot omission, the lock policy, the per-peer ceiling, a grant
+    ///   revocation or the reconnect grace — each removed the entry first;
+    /// * a close for a peer that has gone away.
+    ///
+    /// # And the reason is checked before anything else
+    ///
+    /// An expiry, a programmatic close and an undefined reason all remove the
+    /// entry and send nothing. Only [`CloseReason::Dismissed`] may travel, for
+    /// the reason ADR-0015 §6 gives: a desktop banner timing out is not a
+    /// decision, and treating one as a decision would clear somebody's phone
+    /// every time they walked away from their desk.
     pub async fn note_closed(&self, closed: Closed) {
         let slots: Vec<_> = self.peers.read().await.values().cloned().collect();
         for slot in slots {
             let forgotten = slot.state.lock().await.mirrors.forget_server_id(closed.id);
-            if let Some(id) = forgotten {
-                tracing::debug!(
-                    peer = %slot.peer.to_display_short(),
-                    notification = %redact::id_prefix(&id),
-                    reason = closed.reason.as_str(),
-                    "the desktop closed a mirror"
-                );
-                // A human dismissal is recorded here and acted on nowhere.
-                // `CloseReason::is_human_dismissal` is the seam N4 will read;
-                // there is deliberately no call to any peer from this
-                // function, and `git grep DismissRequest` in this crate finds
-                // only prose.
-                return;
+            let Some((id, entry)) = forgotten else {
+                continue;
+            };
+
+            tracing::debug!(
+                peer = %slot.peer.to_display_short(),
+                notification = %redact::id_prefix(&id),
+                reason = closed.reason.as_str(),
+                "the desktop closed a mirror"
+            );
+
+            if closed.reason.is_human_dismissal() {
+                self.maybe_request_dismissal(&slot, id, entry.origin_device_id)
+                    .await;
             }
+            // One server id belongs to at most one peer's mirror, and it has
+            // just been consumed. Nothing further to look at.
+            break;
+        }
+        // Last, and unconditionally: the count means "this signal has been
+        // fully decided", including the very common decision to do nothing.
+        self.closes_observed.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Decides whether a human dismissal here may become one on the source.
+    ///
+    /// Four independent answers, all of which must be yes, none of which is
+    /// derived from another:
+    ///
+    /// | Question | Answered by |
+    /// | --- | --- |
+    /// | may this peer speak notifications with us at all, and is mirroring on? | the trust store, re-asked here |
+    /// | did a person turn dismissal sync on for **this** peer? | `allow_dismiss_sync`, off by default |
+    /// | will the peer act on a dismiss at all? | its own `DISMISS_TARGET` claim |
+    /// | did we tell it we report dismissals? | this device's announced roles |
+    ///
+    /// The grant is asked *now* rather than reused from the upsert that put
+    /// the notification on screen: a person who revoked the grant a second ago
+    /// has not authorised a message the desktop is about to send.
+    ///
+    /// Nothing is sent from here. The request is queued for the peer's own
+    /// worker, so it cannot overtake a result or a role announcement already
+    /// in flight.
+    async fn maybe_request_dismissal(
+        &self,
+        slot: &Arc<PeerSlot>,
+        id: NotificationId,
+        origin_device_id: String,
+    ) {
+        let policy = self.policy_for(&slot.peer).await;
+        if !policy.may_sync_dismissals() {
+            // The ordinary case, because the setting is off by default. Logged
+            // at debug with a reason class and an opaque prefix, so that "I
+            // dismissed it and my phone kept it" has an answer in the journal.
+            tracing::debug!(
+                peer = %slot.peer.to_display_short(),
+                notification = %redact::id_prefix(&id),
+                reason = "policy",
+                "a human dismissal was not sent to the source"
+            );
+            return;
+        }
+
+        let (peer_ready, we_report) = {
+            let state = slot.state.lock().await;
+            (
+                state.peer_roles.has(Role::DismissTarget),
+                state.local_roles.announced(Role::DismissReporter),
+            )
+        };
+        if !peer_ready || !we_report {
+            tracing::debug!(
+                peer = %slot.peer.to_display_short(),
+                notification = %redact::id_prefix(&id),
+                reason = if peer_ready { "local-role" } else { "peer-role" },
+                "a human dismissal was not sent to the source"
+            );
+            return;
+        }
+
+        slot.queue.offer(Work::Dismiss {
+            id,
+            origin_device_id,
+        });
+        slot.wake();
+    }
+
+    /// Sends one `DismissRequest`, from the peer's own worker.
+    ///
+    /// Two fields and no third. There is no action index, no intent, no reply
+    /// and no free text here **because the message has no field that could
+    /// carry one** — the guarantee is the shape of `DismissRequest`, not a
+    /// check in this function that a later change could invert.
+    ///
+    /// A peer that has disconnected between the dismissal and this call gets
+    /// nothing: a dismiss is dropped, never queued for a later session
+    /// (ADR-0015 §6). By the time the phone is back, its own snapshot is the
+    /// truth about what is in its shade.
+    async fn send_dismiss(
+        &self,
+        slot: &Arc<PeerSlot>,
+        id: &NotificationId,
+        origin_device_id: &str,
+    ) {
+        let Some(outbound) = slot.outbound.read().await.clone() else {
+            tracing::debug!(
+                peer = %slot.peer.to_display_short(),
+                "the session ended before a dismissal could be sent; it is dropped, not queued"
+            );
+            return;
+        };
+
+        let control = pb::NotificationControl {
+            body: Some(pb::notification_control::Body::Dismiss(
+                pb::DismissRequest {
+                    notification_id: id.as_bytes().to_vec(),
+                    origin_device_id: origin_device_id.to_string(),
+                },
+            )),
+        };
+        let message = OutboundMessage {
+            capability_id: CAPABILITY_ID.to_string(),
+            payload: control.encode_to_vec(),
+        };
+
+        match tokio::time::timeout(limits::BACKEND_TIMEOUT, outbound.send(message)).await {
+            Ok(Ok(())) => {
+                slot.state.lock().await.dismissals_sent += 1;
+                tracing::info!(
+                    peer = %slot.peer.to_display_short(),
+                    notification = %redact::id_prefix(id),
+                    "a human dismissed a mirror; asked the source to dismiss it too"
+                );
+            }
+            Ok(Err(_)) => {
+                tracing::debug!("the session ended before the dismissal was queued")
+            }
+            Err(_) => tracing::warn!("timed out queueing a dismissal request"),
         }
     }
 
@@ -1431,6 +1692,36 @@ fn urgency_for(importance: i32) -> Urgency {
         pb::NotificationImportance::Low => Urgency::Low,
         _ => Urgency::Normal,
     }
+}
+
+/// Whether a peer's verdict says a dismissal this desktop asked for did not
+/// happen.
+///
+/// # Why no correlation state is needed
+///
+/// Every `NotificationResult` that reaches this desktop is a verdict on a
+/// `DismissRequest`, because a `DismissRequest` is the **only** answerable
+/// message this device ever sends. It is sink-only: it sends role
+/// announcements (which are not answered), results (answering an answer is
+/// refused on both sides, or two peers would build a loop out of nothing), and
+/// dismissals. So attributing a result needs no table of outstanding ids —
+/// which is exactly the dismiss event journal the design forbids.
+///
+/// Two outcomes are not refusals:
+///
+/// * `REMOVED` — the source dismissed it, which is what was asked;
+/// * `UNKNOWN_NOTIFICATION` — it was already gone there. Both ends converging
+///   on "it is gone" is the correct result, and calling it a refusal would put
+///   a number in front of a user that says their phone said no when it did not.
+///
+/// Everything else is the source declining: its own dismiss-sync policy is
+/// off, the notification is ongoing or not clearable, the grant was withdrawn,
+/// or the request was refused for a reason this build does not know.
+fn is_declined_dismissal(outcome: pb::NotificationOutcome) -> bool {
+    !matches!(
+        outcome,
+        pb::NotificationOutcome::Removed | pb::NotificationOutcome::UnknownNotification
+    )
 }
 
 /// The `notification_id` a control message names, if it names one.

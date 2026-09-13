@@ -860,12 +860,31 @@ fn print_notifications_status(report: &NotificationsStatusReport) {
             "      mirror {}   when locked {}   dismiss-sync {}",
             if peer.allow_mirror { "on " } else { "off" },
             peer.when_locked,
-            if peer.allow_dismiss_sync {
-                "on (inert in this release)"
-            } else {
-                "off"
+            // Truthful about the three ways "on" can still do nothing: the
+            // device may not be connected, it may not claim it can act on a
+            // dismissal, and this desktop may not be able to tell a human
+            // dismissal from a banner timing out. A bare "on" in any of those
+            // states would be the switch lying.
+            match (
+                peer.allow_dismiss_sync,
+                peer.connected,
+                peer.peer_is_dismiss_target,
+                peer.local_reports_dismissals,
+            ) {
+                (false, ..) => "off".to_string(),
+                (true, false, ..) => "on (the device is not connected)".to_string(),
+                (true, true, _, false) => "on (this desktop cannot report dismissals)".to_string(),
+                (true, true, false, true) =>
+                    "on (the device has not said it will act on one)".to_string(),
+                (true, true, true, true) => "on".to_string(),
             }
         );
+        if peer.dismissals_sent > 0 || peer.dismissals_refused > 0 {
+            println!(
+                "      dismissals: {} sent, {} declined by the device",
+                peer.dismissals_sent, peer.dismissals_refused
+            );
+        }
         println!(
             "      showing {} of {} mirrored{}",
             peer.displayed,
@@ -888,6 +907,19 @@ fn print_notifications_status(report: &NotificationsStatusReport) {
                     "claims no source role"
                 },
                 peer.peer_epoch
+            );
+            println!(
+                "      dismissal: this desktop {}; the device {}",
+                if peer.local_reports_dismissals {
+                    "reports human dismissals"
+                } else {
+                    "cannot report human dismissals"
+                },
+                if peer.peer_is_dismiss_target {
+                    "will act on a dismiss request"
+                } else {
+                    "claims no dismiss-target role"
+                }
             );
             if peer.snapshot_open {
                 println!("      a snapshot is in progress");

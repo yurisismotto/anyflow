@@ -11,6 +11,7 @@ import io.github.yurisismotto.anyflow.notifications.NotificationOutboundQueue
 import io.github.yurisismotto.anyflow.notifications.NotificationSecret
 import io.github.yurisismotto.anyflow.notifications.NotificationSource
 import io.github.yurisismotto.anyflow.notifications.PlatformNotification
+import io.github.yurisismotto.anyflow.proto.capabilities.DismissRequest
 import io.github.yurisismotto.anyflow.proto.capabilities.NotificationControl
 import io.github.yurisismotto.anyflow.proto.capabilities.NotificationOutcome
 import io.github.yurisismotto.anyflow.proto.capabilities.NotificationRole
@@ -99,8 +100,36 @@ class NotificationSourceTest {
         var active: List<PlatformNotification>? = emptyList(),
     ) : NotificationSource.ListenerControl {
         var unbinds = 0
+
+        /**
+         * Every key `cancel` was called with, in order.
+         *
+         * The raw platform key is exactly what must never leave the device, so
+         * this list is also what the leak assertions read: a key recorded here
+         * and found nowhere on the wire is the property N4 has to hold.
+         */
+        val cancelled = mutableListOf<String>()
+
+        /** Makes the next cancel fail, as a platform refusal would. */
+        var cancelSucceeds = true
+
         override fun requestUnbind() { unbinds += 1 }
         override fun activeNotifications(): List<PlatformNotification>? = active
+
+        // The keyed lookup the dismissal path uses to re-check clearability
+        // against the live platform rather than a stale wire value.
+        override fun activeNotification(platformKey: String): PlatformNotification? =
+            active?.firstOrNull { it.platformKey == platformKey }
+
+        override fun cancel(platformKey: String): Boolean {
+            cancelled += platformKey
+            if (!cancelSucceeds) return false
+            // The platform removes it and then reports the removal; the fake
+            // does the first half and the test drives the second, so the two
+            // can be ordered and raced deliberately.
+            active = active?.filterNot { it.platformKey == platformKey }
+            return true
+        }
 
         // Names only, exactly as the real service does: the picker asks this
         // and never the one above, so no title or body is materialised for it.
@@ -248,9 +277,13 @@ class NotificationSourceTest {
         harness.source.attachSession(peer, "peer-device", wire.send)
         advanceUntilIdle()
 
-        assertEquals("roles:1@1", wire.bodies().first())
+        assertEquals("roles:2@1", wire.bodies().first())
         assertEquals(
-            listOf(NotificationRole.NOTIFICATION_ROLE_SOURCE),
+            // ADR-0017 §1's v1 assignment for Android, in wire-number order.
+            listOf(
+                NotificationRole.NOTIFICATION_ROLE_SOURCE,
+                NotificationRole.NOTIFICATION_ROLE_DISMISS_TARGET,
+            ),
             wire.roles().first().roles.rolesList,
         )
     }
@@ -716,23 +749,39 @@ class NotificationSourceTest {
         val roles = wire.roles()
         assertEquals(2, roles.size)
         assertEquals(1, roles[0].roles.epoch)
-        assertEquals(1, roles[0].roles.rolesCount)
+        assertEquals(2, roles[0].roles.rolesCount)
         assertEquals(2, roles[1].roles.epoch)
-        assertEquals(0, roles[1].roles.rolesCount)
+        assertEquals(
+            "both roles go together: without a listener there is nothing to " +
+                "observe and nothing to cancel",
+            0,
+            roles[1].roles.rolesCount,
+        )
         // Nothing further was emitted, and no reconnect was needed to say so.
         assertEquals(1, wire.upserts().size)
     }
 
     // -- inbound -------------------------------------------------------------
 
-    /**
-     * N1 is a source and nothing else. A `DismissRequest` is answered
-     * `REJECTED_ROLE` and **nothing happens on the device**: there is no path
-     * from an inbound message to `cancelNotification` in this wave.
-     */
-    @Test
-    fun `a dismiss request is refused and executes nothing`() = runTest {
-        val harness = Harness()
+    // -- N4: dismissal ------------------------------------------------------
+    //
+    // `DismissRequest` is the only message in the capability that travels
+    // sink -> source and causes an effect here, so these are the tests that
+    // decide whether a paired computer can reach into this phone. Most of them
+    // are negative, and the negative ones are the valuable ones: a mistake in
+    // this section does not look like a failure on a laptop, it looks like
+    // somebody's notifications clearing themselves.
+
+    /** A phone with everything switched on, one notification, one peer. */
+    private suspend fun TestScope.dismissable(
+        policy: NotificationPolicy = NotificationPolicy(
+            allowedApps = setOf("example.fixture.app"),
+            allowDismissSync = true,
+        ),
+        notification: PlatformNotification = notification(),
+    ): Triple<Harness, Wire, PlatformNotification> {
+        val harness = Harness(policy = policy)
+        harness.listener.active = listOf(notification)
         val wire = Wire()
         harness.source.start(producerScope())
         harness.source.attachListener(harness.listener)
@@ -740,29 +789,717 @@ class NotificationSourceTest {
         harness.source.attachSession(peer, "peer-device", wire.send)
         harness.source.onInbound(peer, sinkRoles())
         advanceUntilIdle()
+        harness.source.onPosted(notification)
+        advanceUntilIdle()
+        return Triple(harness, wire, notification)
+    }
 
+    private fun dismissFor(
+        notificationId: ByteString,
+        originDeviceId: String = "0123456789abcdef0123456789abcdef",
+    ): NotificationControl =
+        NotificationControl.newBuilder()
+            .setDismiss(
+                DismissRequest.newBuilder()
+                    .setNotificationId(notificationId)
+                    .setOriginDeviceId(originDeviceId),
+            )
+            .build()
+
+    private fun Wire.lastOutcome(): NotificationOutcome = messages.last().result.outcome
+
+    /**
+     * The whole point of the wave: a computer's dismissal clears the original.
+     *
+     * `cancelNotification` is called **exactly once**, with the raw platform
+     * key the source looked up itself, and the peer is told `REMOVED`.
+     */
+    @Test
+    fun `a permitted dismiss request cancels the notification exactly once`() = runTest {
+        val (harness, wire, fixture) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertEquals(listOf(fixture.platformKey), harness.listener.cancelled)
+        assertEquals(NotificationOutcome.NOTIFICATION_OUTCOME_REMOVED, wire.lastOutcome())
+    }
+
+    /**
+     * The default, and the one that matters most: `allowDismissSync` is off
+     * until a person turns it on (ADR-0015 §6), and an off policy cancels
+     * nothing.
+     *
+     * Every other gate here is deliberately open — the peer is granted, the
+     * listener is bound, the id resolves, the notification is clearable — so
+     * the policy is the only thing holding it.
+     */
+    @Test
+    fun `dismiss sync is off by default and cancels nothing`() = runTest {
+        assertFalse(NotificationPolicy().allowDismissSync)
+
+        val (harness, wire, _) = dismissable(
+            policy = NotificationPolicy(allowedApps = setOf("example.fixture.app")),
+        )
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_REJECTED_POLICY,
+            wire.lastOutcome(),
+        )
+    }
+
+    /**
+     * Turning mirroring off makes a stale dismiss flag inert, the same
+     * containment rule the desktop's `may_sync_dismissals` applies.
+     */
+    @Test
+    fun `mirroring off defeats a stale dismiss sync flag`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.policy = NotificationPolicy(
+            allowMirror = false,
+            allowedApps = setOf("example.fixture.app"),
+            allowDismissSync = true,
+        )
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_REJECTED_POLICY,
+            wire.lastOutcome(),
+        )
+    }
+
+    /** An ungranted peer is refused before anything else is consulted. */
+    @Test
+    fun `an ungranted peer cannot dismiss anything`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.policy = NotificationPolicy.DENIED
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_NOT_AUTHORIZED,
+            wire.lastOutcome(),
+        )
+    }
+
+    /**
+     * Revoking the grant mid-session takes effect on the next message.
+     *
+     * The policy is re-read per operation rather than captured when the
+     * session came up, which is what makes a revocation bite on a connection
+     * that is already established.
+     */
+    @Test
+    fun `a grant revoked after the mirror was sent stops the dismissal`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.policyOverride = { NotificationPolicy.DENIED }
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+    }
+
+    /**
+     * One peer cannot dismiss through another's grant.
+     *
+     * The policy is looked up by the **pinned fingerprint** the session was
+     * built on, so a second computer with dismiss sync off is refused even
+     * while the first has it on for the same notification.
+     */
+    @Test
+    fun `enabling dismiss sync for one computer does not enable it for another`() = runTest {
+        val harness = Harness()
         val fixture = notification()
+        harness.listener.active = listOf(fixture)
+        val allowed = Wire()
+        val denied = Wire()
+        harness.policyOverride = { fingerprint ->
+            if (fingerprint == peer) {
+                NotificationPolicy(
+                    allowedApps = setOf("example.fixture.app"),
+                    allowDismissSync = true,
+                )
+            } else {
+                NotificationPolicy(allowedApps = setOf("example.fixture.app"))
+            }
+        }
+        harness.source.start(producerScope())
+        harness.source.attachListener(harness.listener)
+        harness.source.onListenerConnected()
+        harness.source.attachSession(peer, "peer-device", allowed.send)
+        harness.source.attachSession(otherPeer, "other-device", denied.send)
+        harness.source.onInbound(peer, sinkRoles())
+        harness.source.onInbound(otherPeer, sinkRoles())
+        advanceUntilIdle()
         harness.source.onPosted(fixture)
         advanceUntilIdle()
+
+        val id = allowed.upserts().single().upsert.notificationId
+
+        // The computer that was not allowed asks first, and is refused.
+        harness.source.onInbound(otherPeer, dismissFor(id))
+        advanceUntilIdle()
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_REJECTED_POLICY,
+            denied.lastOutcome(),
+        )
+
+        // The one that was, is not.
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+        assertEquals(listOf(fixture.platformKey), harness.listener.cancelled)
+    }
+
+    /**
+     * With no listener bound this phone cannot act on a dismissal, and it has
+     * said so: the same condition that withholds `DISMISS_TARGET` answers
+     * `REJECTED_ROLE` here.
+     */
+    @Test
+    fun `a phone that is not a dismiss target refuses with rejected role`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onListenerDisconnected()
+        advanceUntilIdle()
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_REJECTED_ROLE,
+            wire.lastOutcome(),
+        )
+        // And the peer was told, before it asked, that this would happen.
+        assertEquals(0, wire.roles().last().roles.rolesCount)
+    }
+
+    /**
+     * A `DismissRequest` naming a different device is refused as malformed.
+     *
+     * A peer cannot dismiss a third device's notification through us, and the
+     * refusal is a statement about the *message* rather than about any
+     * notification this phone may or may not hold.
+     */
+    @Test
+    fun `a dismiss request for another device's origin is refused`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onInbound(
+            peer,
+            dismissFor(id, originDeviceId = "ffffffffffffffffffffffffffffffff"),
+        )
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(NotificationOutcome.NOTIFICATION_OUTCOME_INVALID, wire.lastOutcome())
+    }
+
+    /** And one whose origin is not an origin at all. */
+    @Test
+    fun `a malformed origin device id is refused`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        for (bad in listOf("", "short", "0123456789ABCDEF0123456789ABCDEF", "g".repeat(32))) {
+            harness.source.onInbound(peer, dismissFor(id, originDeviceId = bad))
+            advanceUntilIdle()
+            assertEquals(
+                "'$bad' must be refused as malformed",
+                NotificationOutcome.NOTIFICATION_OUTCOME_INVALID,
+                wire.lastOutcome(),
+            )
+        }
+        assertTrue(harness.listener.cancelled.isEmpty())
+    }
+
+    /**
+     * A bad-width identifier is refused **and not answered**: a
+     * `NotificationResult` echoes the id, so a malformed one leaves nothing
+     * coherent to correlate a reply with (ADR-0016 §9).
+     */
+    @Test
+    fun `a bad width notification id in a dismiss is refused and not answered`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val before = wire.messages.size
+
+        for (width in listOf(0, 8, 15, 17, 32)) {
+            harness.source.onInbound(
+                peer,
+                dismissFor(ByteString.copyFrom(ByteArray(width))),
+            )
+        }
+        advanceUntilIdle()
+
+        assertEquals("nothing may be answered", before, wire.messages.size)
+        assertTrue(harness.listener.cancelled.isEmpty())
+    }
+
+    /**
+     * An id this phone never issued converges as unknown.
+     *
+     * Not an error — and deliberately indistinguishable from an id that was
+     * dismissed on the phone a moment ago, so a dismiss cannot be used to ask
+     * whether a notification exists.
+     */
+    @Test
+    fun `an unknown notification id converges rather than failing`() = runTest {
+        val (harness, wire, _) = dismissable()
+
+        harness.source.onInbound(
+            peer,
+            dismissFor(ByteString.copyFrom(ByteArray(16) { 0x5A })),
+        )
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_UNKNOWN_NOTIFICATION,
+            wire.lastOutcome(),
+        )
+    }
+
+    /** Dismissing twice: the first removes, the second converges. */
+    @Test
+    fun `a duplicate dismiss request is idempotent`() = runTest {
+        val (harness, wire, fixture) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+        assertEquals(NotificationOutcome.NOTIFICATION_OUTCOME_REMOVED, wire.lastOutcome())
+
+        // The platform reports the removal, exactly as it would.
+        harness.source.onRemoved(fixture.platformKey, listenerCancelled = true)
+        advanceUntilIdle()
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_UNKNOWN_NOTIFICATION,
+            wire.lastOutcome(),
+        )
+        assertEquals(
+            "the platform must be asked exactly once",
+            listOf(fixture.platformKey),
+            harness.listener.cancelled,
+        )
+    }
+
+    /**
+     * A notification removed on the phone between the mirror appearing and the
+     * dismissal arriving converges as unknown, and cancels nothing.
+     */
+    @Test
+    fun `a notification removed before the request arrives converges`() = runTest {
+        val (harness, wire, fixture) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.listener.active = emptyList()
+        harness.source.onRemoved(fixture.platformKey)
+        advanceUntilIdle()
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_UNKNOWN_NOTIFICATION,
+            wire.lastOutcome(),
+        )
+    }
+
+    /**
+     * A non-clearable notification is refused, and the refusal is read from
+     * the **live** platform rather than from the flag the desktop holds.
+     *
+     * This is the case the re-check exists for: the mirror went out saying
+     * `dismissible = true`, and the app has made the notification ongoing
+     * since. The desktop's copy is stale and the phone does not take its word.
+     */
+    @Test
+    fun `a notification that became ongoing after it was mirrored is refused`() = runTest {
+        val clearable = notification()
+        val (harness, wire, _) = dismissable(notification = clearable)
+        val id = wire.upserts().single().upsert.notificationId
+        assertTrue(
+            "the desktop was told it could be dismissed",
+            wire.upserts().single().upsert.dismissible,
+        )
+
+        // The app re-posts it as an ongoing, non-clearable notification.
+        harness.listener.active = listOf(
+            notification(key = clearable.platformKey, ongoing = true),
+        )
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_NOT_DISMISSIBLE,
+            wire.lastOutcome(),
+        )
+    }
+
+    /** And one that was never dismissible in the first place. */
+    @Test
+    fun `an ongoing notification is never force cancelled`() = runTest {
+        val ongoing = notification(ongoing = true)
+        val harness = Harness(
+            policy = NotificationPolicy(
+                allowedApps = setOf("example.fixture.app"),
+                includeOngoing = true,
+                allowDismissSync = true,
+            ),
+        )
+        harness.listener.active = listOf(ongoing)
+        val wire = Wire()
+        harness.source.start(producerScope())
+        harness.source.attachListener(harness.listener)
+        harness.source.onListenerConnected()
+        harness.source.attachSession(peer, "peer-device", wire.send)
+        harness.source.onInbound(peer, sinkRoles())
+        advanceUntilIdle()
+        harness.source.onPosted(ongoing)
+        advanceUntilIdle()
+
+        val upsert = wire.upserts().single().upsert
+        assertFalse("the desktop is told it cannot be dismissed", upsert.dismissible)
+
+        harness.source.onInbound(peer, dismissFor(upsert.notificationId))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_NOT_DISMISSIBLE,
+            wire.lastOutcome(),
+        )
+    }
+
+    /**
+     * A platform that refuses the cancel is reported honestly, and releases
+     * the echo-suppression entry so a later genuine removal is not swallowed.
+     */
+    @Test
+    fun `a cancel the platform refuses is reported as failed`() = runTest {
+        val (harness, wire, fixture) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+        harness.listener.cancelSucceeds = false
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        assertEquals(NotificationOutcome.NOTIFICATION_OUTCOME_FAILED, wire.lastOutcome())
+
+        // The notification is still there, and a genuine removal still reaches
+        // the peer: the released entry swallowed nothing.
+        harness.listener.active = emptyList()
+        harness.source.onRemoved(fixture.platformKey, listenerCancelled = false)
+        advanceUntilIdle()
+        assertEquals(1, wire.removes().size)
+    }
+
+    // -- echo suppression ---------------------------------------------------
+
+    /**
+     * The critical sequence, whole.
+     *
+     * A computer dismisses, the phone cancels, the platform reports its own
+     * cancellation — and the computer that asked is **not** sent a removal for
+     * a mirror it purged before it ever sent the request.
+     */
+    @Test
+    fun `a dismissal does not echo a removal back to the peer that asked`() = runTest {
+        val (harness, wire, fixture) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+        harness.source.onRemoved(fixture.platformKey, listenerCancelled = true)
+        advanceUntilIdle()
+
+        assertTrue(
+            "the requesting peer must not be told about its own dismissal",
+            wire.removes().isEmpty(),
+        )
+        // And nothing looped: one result, one cancel, and no second message.
+        assertEquals(listOf(fixture.platformKey), harness.listener.cancelled)
+        assertEquals(NotificationOutcome.NOTIFICATION_OUTCOME_REMOVED, wire.lastOutcome())
+    }
+
+    /**
+     * Every *other* granted computer is still told, because for them the
+     * notification really did just disappear.
+     */
+    @Test
+    fun `other peers are still told about a dismissal they did not ask for`() = runTest {
+        val harness = Harness(
+            policy = NotificationPolicy(
+                allowedApps = setOf("example.fixture.app"),
+                allowDismissSync = true,
+            ),
+        )
+        val fixture = notification()
+        harness.listener.active = listOf(fixture)
+        val asking = Wire()
+        val other = Wire()
+        harness.source.start(producerScope())
+        harness.source.attachListener(harness.listener)
+        harness.source.onListenerConnected()
+        harness.source.attachSession(peer, "peer-device", asking.send)
+        harness.source.attachSession(otherPeer, "other-device", other.send)
+        harness.source.onInbound(peer, sinkRoles())
+        harness.source.onInbound(otherPeer, sinkRoles())
+        advanceUntilIdle()
+        harness.source.onPosted(fixture)
+        advanceUntilIdle()
+
+        harness.source.onInbound(peer, dismissFor(asking.upserts().single().upsert.notificationId))
+        advanceUntilIdle()
+        harness.source.onRemoved(fixture.platformKey, listenerCancelled = true)
+        advanceUntilIdle()
+
+        assertTrue(asking.removes().isEmpty())
+        assertEquals(
+            "the other computer's mirror is still on its screen and must come off",
+            1,
+            other.removes().size,
+        )
+    }
+
+    /**
+     * A person swiping the notification away on the phone is **not** a
+     * listener cancel, and reaches every peer — including one that happens to
+     * have a dismissal pending for the same identity.
+     */
+    @Test
+    fun `a removal the user performed on the phone is never suppressed`() = runTest {
+        val (harness, wire, fixture) = dismissable()
+
+        harness.listener.active = emptyList()
+        harness.source.onRemoved(fixture.platformKey, listenerCancelled = false)
+        advanceUntilIdle()
+
+        assertEquals(1, wire.removes().size)
+    }
+
+    /**
+     * Single use: a re-post under the same key after a cancel must not have
+     * its *next*, genuine removal swallowed. That would leave a mirror on a
+     * computer that nothing could ever take off.
+     */
+    @Test
+    fun `echo suppression is consumed once and never swallows a later removal`() = runTest {
+        val (harness, wire, fixture) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+        harness.source.onRemoved(fixture.platformKey, listenerCancelled = true)
+        advanceUntilIdle()
+        assertTrue(wire.removes().isEmpty())
+
+        // The app posts again under the same key, and it is genuinely removed.
+        harness.listener.active = listOf(fixture)
+        harness.source.onPosted(fixture)
+        advanceUntilIdle()
+        harness.listener.active = emptyList()
+        harness.source.onRemoved(fixture.platformKey, listenerCancelled = true)
+        advanceUntilIdle()
+
+        assertEquals(
+            "the entry was single use; the second removal is genuine",
+            1,
+            wire.removes().size,
+        )
+    }
+
+    // -- what must never leave the device -----------------------------------
+
+    /**
+     * NOTIF-SEC: the raw Android key is never transmitted, in any message, on
+     * any path — including the one whose whole job is to consume it.
+     *
+     * The fixture key contains a canary, so a key that reached the wire in any
+     * encoding this test can see would be found. It is asserted against the
+     * *encoded bytes*, not against a field, because a future field added in
+     * the wrong place would still be caught.
+     */
+    @Test
+    fun `the raw platform key never reaches the wire on the dismissal path`() = runTest {
+        val keyed = notification(key = "0|example.fixture.app|1|RAWKEY-CANARY|10123")
+        val (harness, wire, _) = dismissable(notification = keyed)
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+        harness.source.onRemoved(keyed.platformKey, listenerCancelled = true)
+        advanceUntilIdle()
+
+        assertEquals(listOf(keyed.platformKey), harness.listener.cancelled)
+        for (message in wire.messages) {
+            val encoded = String(message.toByteArray(), Charsets.ISO_8859_1)
+            assertFalse(
+                "the raw platform key reached the wire in ${message.bodyCase}",
+                encoded.contains("RAWKEY-CANARY"),
+            )
+            assertFalse(encoded.contains("10123"))
+        }
+    }
+
+    /**
+     * And neither does any notification content, on the dismissal path.
+     *
+     * A `DismissRequest` is answered with an identity and an outcome enum, and
+     * this asserts it against the bytes rather than against the fields.
+     */
+    @Test
+    fun `a dismissal answer carries no notification content`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+        val before = wire.messages.size
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        val answer = wire.messages.drop(before).single()
+        assertEquals(NotificationControl.BodyCase.RESULT, answer.bodyCase)
+        val encoded = String(answer.toByteArray(), Charsets.ISO_8859_1)
+        for (canary in listOf(fixtureTitle, fixtureBody, "example.fixture.app")) {
+            assertFalse("$canary reached a dismissal answer", encoded.contains(canary))
+        }
+        // Two fields: a 16-byte identity and an enum.
+        assertTrue("an answer is tiny", answer.toByteArray().size < 32)
+    }
+
+    /**
+     * A peer cannot name an Android notification by package, id or tag.
+     *
+     * There is no field in `DismissRequest` that could carry one — this test
+     * asserts the consequence: the only handle that works is the derived id
+     * this phone issued, and something that merely *looks* like a platform key
+     * resolves to nothing.
+     */
+    @Test
+    fun `no remote field can identify an android notification directly`() = runTest {
+        val (harness, wire, fixture) = dismissable()
+
+        // The real platform key, padded to the right width. It is 16 bytes of
+        // something, and it maps to nothing, because the map is keyed on HMAC
+        // output and not on anything a peer can construct.
+        val spoofed = fixture.platformKey.toByteArray(Charsets.UTF_8)
+            .copyOf(16)
+        harness.source.onInbound(peer, dismissFor(ByteString.copyFrom(spoofed)))
+        advanceUntilIdle()
+
+        assertTrue(harness.listener.cancelled.isEmpty())
+        assertEquals(
+            NotificationOutcome.NOTIFICATION_OUTCOME_UNKNOWN_NOTIFICATION,
+            wire.lastOutcome(),
+        )
+    }
+
+    /**
+     * A notification this phone never mirrored to anybody cannot be targeted.
+     *
+     * The id map holds only notifications that passed the hard screen, so a
+     * peer guessing an id reaches nothing — and an id for a notification from
+     * a denied app was never issued in the first place.
+     */
+    @Test
+    fun `a notification that was never mirrored cannot be dismissed remotely`() = runTest {
+        val denied = notification(
+            key = "0|example.denied.app|9|null|10999",
+            packageName = deniedApp,
+        )
+        val (harness, wire, _) = dismissable()
+        harness.listener.active = harness.listener.active.orEmpty() + denied
+        harness.source.onPosted(denied)
+        advanceUntilIdle()
+
+        // Nothing about it left the device, so the desktop has no id for it.
+        assertEquals(1, wire.upserts().size)
+
+        // And guessing the id it *would* have had reaches nothing either: the
+        // derivation needs this device's secret.
+        harness.source.onInbound(
+            peer,
+            dismissFor(ByteString.copyFrom(ByteArray(16) { 0x77 })),
+        )
+        advanceUntilIdle()
+        assertTrue(harness.listener.cancelled.isEmpty())
+    }
+
+    /**
+     * The role announcement and the counters a UI reads.
+     *
+     * `DISMISS_TARGET` is announced from the moment the phone can act, the
+     * epoch is monotonic, and the counters are counts with nothing in them
+     * that could name a notification.
+     */
+    @Test
+    fun `the status reports both roles and content free dismissal counters`() = runTest {
+        val (harness, wire, _) = dismissable()
+        val id = wire.upserts().single().upsert.notificationId
+
+        harness.source.onInbound(peer, dismissFor(id))
+        advanceUntilIdle()
+
+        val status = harness.source.status.value.peers.getValue(peer.toHex())
+        assertTrue(status.localIsSource)
+        assertTrue(status.localIsDismissTarget)
+        assertEquals(1, status.dismissRequests)
+        assertEquals(1, status.dismissesPerformed)
+        assertFalse("the computer announced SINK only", status.peerIsDismissReporter)
+        assertFalse(status.toString().contains(fixtureTitle))
+        assertFalse(status.toString().contains(fixtureBody))
+    }
+
+    /** A computer that says it will report dismissals is recorded as such. */
+    @Test
+    fun `a peer claiming dismiss reporter is recorded and grants itself nothing`() = runTest {
+        val (harness, wire, _) = dismissable()
 
         harness.source.onInbound(
             peer,
             NotificationControl.newBuilder()
-                .setDismiss(
-                    io.github.yurisismotto.anyflow.proto.capabilities.DismissRequest.newBuilder()
-                        .setNotificationId(wire.upserts().single().upsert.notificationId)
-                        .setOriginDeviceId(localDeviceId),
+                .setRoles(
+                    NotificationRoles.newBuilder()
+                        .addRoles(NotificationRole.NOTIFICATION_ROLE_SINK)
+                        .addRoles(NotificationRole.NOTIFICATION_ROLE_DISMISS_REPORTER)
+                        .setEpoch(2),
                 )
                 .build(),
         )
         advanceUntilIdle()
 
-        assertEquals(
-            NotificationOutcome.NOTIFICATION_OUTCOME_REJECTED_ROLE,
-            wire.messages.last().result.outcome,
+        assertTrue(
+            harness.source.status.value.peers.getValue(peer.toHex()).peerIsDismissReporter,
         )
-        // The notification is still tracked: nothing cancelled it.
-        assertTrue(wire.removes().isEmpty())
+
+        // And it changes nothing about authorization: with the policy off, the
+        // claim buys the peer no dismissal at all.
+        harness.policy = NotificationPolicy(allowedApps = setOf("example.fixture.app"))
+        harness.source.onInbound(peer, dismissFor(wire.upserts().first().upsert.notificationId))
+        advanceUntilIdle()
+        assertTrue(harness.listener.cancelled.isEmpty())
     }
 
     /** A bad-width identifier is refused and **not answered**. */

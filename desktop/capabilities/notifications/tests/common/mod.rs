@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyflow_capability_notifications::backend::{
-    LockSource, MemoryLock, MemorySink, NotificationSink,
+    CloseReason, LockSource, MemoryLock, MemorySink, NotificationSink,
 };
 use anyflow_capability_notifications::{
     NotificationAuthorizer, NotificationManager, NotificationPolicy, CAPABILITY_ID,
@@ -138,6 +138,27 @@ pub fn marker(sync_id: &[u8], phase: pb::sync_marker::Phase) -> Vec<u8> {
     }))
 }
 
+/// A `DismissRequest`, for the inbound-refusal tests. The desktop is a sink:
+/// it must keep refusing these however much of the dismissal runtime it gains.
+pub fn dismiss(seed: u16) -> Vec<u8> {
+    control(pb::notification_control::Body::Dismiss(
+        pb::DismissRequest {
+            notification_id: id_bytes(seed),
+            origin_device_id: ORIGIN.to_string(),
+        },
+    ))
+}
+
+/// A `NotificationResult`, as a source answering a `DismissRequest`.
+pub fn result(seed: u16, outcome: pb::NotificationOutcome) -> Vec<u8> {
+    control(pb::notification_control::Body::Result(
+        pb::NotificationResult {
+            notification_id: id_bytes(seed),
+            outcome: outcome as i32,
+        },
+    ))
+}
+
 pub fn remove(seed: u16) -> Vec<u8> {
     control(pb::notification_control::Body::Remove(
         pb::NotificationRemove {
@@ -164,6 +185,9 @@ pub struct Harness {
 impl Harness {
     /// A granted peer that has already announced `SOURCE`, which is the state
     /// almost every test wants to start from.
+    ///
+    /// Dismiss sync is **off**, because that is the default and a suite whose
+    /// baseline had it on would never notice it becoming the default.
     pub async fn start() -> Self {
         let mut harness = Self::start_ungranted().await;
         harness
@@ -172,6 +196,105 @@ impl Harness {
             .await;
         harness.announce_source().await;
         harness
+    }
+
+    /// Everything N4 needs: the grant, dismiss sync on, and a peer that has
+    /// announced both `SOURCE` and `DISMISS_TARGET`.
+    pub async fn start_dismissing() -> Self {
+        let mut harness = Self::start_ungranted().await;
+        harness
+            .policies
+            .grant(
+                harness.peer,
+                NotificationPolicy {
+                    allow_dismiss_sync: true,
+                    ..NotificationPolicy::default()
+                },
+            )
+            .await;
+        harness.expect_roles().await;
+        harness
+            .send(&roles(
+                &[
+                    pb::NotificationRole::Source,
+                    pb::NotificationRole::DismissTarget,
+                ],
+                1,
+            ))
+            .await;
+        harness
+    }
+
+    /// Puts one notification on the fake desktop and returns its server id.
+    ///
+    /// The id comes from the fake server rather than from counting calls: the
+    /// two diverge the moment a replacement or a restart is involved, and the
+    /// whole point of storing the returned id is that it is authoritative.
+    pub async fn display(&mut self, seed: u16) -> u32 {
+        self.send_upsert(upsert(seed, "Ana", "lunch?")).await;
+        self.expect_outcome(pb::NotificationOutcome::Displayed)
+            .await;
+        self.sink
+            .last_server_id()
+            .expect("the fake desktop returned an id")
+    }
+
+    /// Brings the peer back on a fresh session, keeping the same channel.
+    ///
+    /// Everything the slot holds — its worker, its queue, its mirrors — is
+    /// deliberately not recreated, because that is exactly what a real
+    /// reconnect does.
+    pub async fn reattach(&self) {
+        self.manager
+            .attach_session(self.peer, self.sender.clone())
+            .await;
+    }
+
+    /// Closes one notification on the fake desktop and **waits until the
+    /// manager has finished deciding what that means**.
+    ///
+    /// Never call `sink.user_closes` directly from a test. The close pump is a
+    /// task of its own, so `user_closes` returns as soon as the signal is
+    /// buffered — before `note_closed` has run. A negative assertion made in
+    /// that window would pass because the thing it was watching for had not
+    /// happened *yet*, which is the most comfortable kind of wrong.
+    pub async fn close(&self, server_id: u32, reason: CloseReason) {
+        let before = self.manager.closes_observed();
+        self.sink.user_closes(server_id, reason).await;
+        self.wait_for("the close signal to be decided", || {
+            self.manager.closes_observed() > before
+        })
+        .await;
+    }
+
+    /// The next `DismissRequest` this device sends, as `(id, origin)`.
+    pub async fn next_dismiss(&mut self) -> (Vec<u8>, String) {
+        match self.next_outbound().await.body {
+            Some(pb::notification_control::Body::Dismiss(d)) => {
+                (d.notification_id, d.origin_device_id)
+            }
+            other => panic!("expected a dismiss request, got {other:?}"),
+        }
+    }
+
+    /// Asserts that no `DismissRequest` was produced, by pushing a message
+    /// through the same ordered path and seeing what comes out first.
+    ///
+    /// One worker drains one queue in order, so if a dismissal had been queued
+    /// before the barrier's removal it would be answered first. This is why it
+    /// is a barrier rather than a sleep: it proves an ordering, not a delay.
+    pub async fn expect_no_dismiss(&mut self) {
+        self.barrier_seed += 1;
+        let seed = self.barrier_seed;
+        self.send(&remove(seed)).await;
+        match self.next_outbound().await.body {
+            Some(pb::notification_control::Body::Result(r)) => assert_eq!(
+                r.notification_id,
+                id_bytes(seed),
+                "something was sent before the barrier's answer"
+            ),
+            other => panic!("a message was sent that should not have been: {other:?}"),
+        }
     }
 
     /// A connected peer with no grant and no announced role.
