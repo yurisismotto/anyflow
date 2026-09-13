@@ -2,6 +2,7 @@ package io.github.yurisismotto.anyflow
 
 import io.github.yurisismotto.anyflow.notifications.LockPolicy
 import io.github.yurisismotto.anyflow.notifications.NotificationPolicy
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -123,14 +124,78 @@ class NotificationPolicyStorageTest {
 
     @Test
     fun `dismiss sync stays false and is not changed by anything else`() {
-        // N4 owns the runtime. Until then the stored default has to survive
-        // every other setting being changed, or a person could end up with it
-        // on without ever having asked for it.
+        // The stored default has to survive every other setting being changed,
+        // or a person could end up with it on without ever having asked for
+        // it. This is the assertion that catches a future edit which reaches
+        // for `copy()` and passes the wrong argument.
         var policy = NotificationPolicy()
         policy = policy.copy(allowedApps = setOf("com.example.chat"))
         policy = policy.copy(whenSourceLocked = LockPolicy.FULL)
         policy = policy.copy(includeOngoing = true, includeWorkProfile = true)
         assertFalse(policy.allowDismissSync)
         assertFalse(NotificationPolicy.fromJson(policy.toJson()).allowDismissSync)
+    }
+
+    /**
+     * And the converse: turning dismiss sync on changes **only** dismiss sync.
+     *
+     * The one control on the screen that lets a computer act on this phone
+     * must not be a control that also changes what is shared with it.
+     */
+    @Test
+    fun `enabling dismiss sync changes nothing else`() {
+        val before = NotificationPolicy(
+            allowedApps = setOf("com.example.chat"),
+            knownApps = setOf("com.example.chat", "com.example.other"),
+            includeOngoing = true,
+            whenSourceLocked = LockPolicy.SUPPRESS,
+        )
+        val after = before.copy(allowDismissSync = true)
+
+        assertTrue(after.allowDismissSync)
+        assertEquals(before.allowMirror, after.allowMirror)
+        assertEquals(before.allowedApps, after.allowedApps)
+        assertEquals(before.knownApps, after.knownApps)
+        assertEquals(before.includeOngoing, after.includeOngoing)
+        assertEquals(before.includeWorkProfile, after.includeWorkProfile)
+        assertEquals(before.whenSourceLocked, after.whenSourceLocked)
+
+        // And it survives a round trip through the stored form.
+        val stored = NotificationPolicy.fromJson(after.toJson())
+        assertEquals(after, stored)
+    }
+
+    /** A stored `true` is honoured. Persistence is what the switch is for. */
+    @Test
+    fun `dismiss sync persists once it is turned on`() {
+        val stored = NotificationPolicy(allowDismissSync = true).toJson()
+        assertTrue(NotificationPolicy.fromJson(stored).allowDismissSync)
+    }
+
+    /**
+     * A trust store written before this field existed reads as **off**.
+     *
+     * Never interpret a missing policy as enabled: an upgrade must not switch
+     * on the one setting that lets another device act on this one.
+     */
+    @Test
+    fun `a stored policy with no dismiss sync field reads as off`() {
+        val old = JSONObject()
+            .put("allowMirror", true)
+            .put("allowedApps", JSONArray(listOf("com.example.chat")))
+        val policy = NotificationPolicy.fromJson(old)
+        assertTrue(policy.allowMirror)
+        assertFalse(policy.allowDismissSync)
+
+        // And an explicitly null one, and an unparseable one.
+        assertFalse(NotificationPolicy.fromJson(JSONObject()).allowDismissSync)
+        assertFalse(NotificationPolicy.fromJson(null).allowDismissSync)
+    }
+
+    /** A revoked peer's policy permits nothing, whatever was stored. */
+    @Test
+    fun `the denied policy never permits a dismissal`() {
+        assertFalse(NotificationPolicy.DENIED.allowDismissSync)
+        assertFalse(NotificationPolicy.DENIED.allowMirror)
     }
 }

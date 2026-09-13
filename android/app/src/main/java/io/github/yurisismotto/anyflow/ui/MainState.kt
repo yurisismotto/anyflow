@@ -68,11 +68,14 @@ data class MainUiState(
         get() = offers.isNotEmpty() || transfers.isNotEmpty() || pendingClips.isNotEmpty()
 
     /**
-     * The three notification gates for one computer, assembled from live state.
+     * The notification gates for one computer, assembled from live state.
      *
      * Assembled here, once, rather than in each screen: the whole point of
      * [NotificationGates] is that a UI cannot accidentally answer two of the
-     * three questions and infer the third.
+     * questions and infer the third. The dismissal half is assembled from the
+     * same place for the same reason — it has two gates of its own, and a
+     * screen that guessed one of them from the mirroring state would be
+     * exactly the collapse the type exists to prevent.
      */
     fun notificationGates(peer: TrustStore.TrustedPeer): NotificationGates {
         val policy = peer.notificationPolicy
@@ -88,6 +91,8 @@ data class MainUiState(
                 notifications.secretAvailable,
             peerConnected = peerStatus != null,
             peerIsSink = peerStatus?.peerIsSink == true,
+            allowDismissSync = policy.allowDismissSync,
+            peerIsDismissReporter = peerStatus?.peerIsDismissReporter == true,
         )
     }
 }

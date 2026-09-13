@@ -41,7 +41,12 @@ object NotificationUiFixtures {
     )
 
     /** A session in which this phone is sourcing and the computer is a sink. */
-    fun sourcingStatus(peerIsSink: Boolean = true): NotificationSource.Status =
+    fun sourcingStatus(
+        peerIsSink: Boolean = true,
+        peerIsDismissReporter: Boolean = true,
+        dismissRequests: Int = 0,
+        dismissesPerformed: Int = 0,
+    ): NotificationSource.Status =
         NotificationSource.Status(
             listenerConnected = true,
             accessGranted = true,
@@ -50,9 +55,13 @@ object NotificationUiFixtures {
             peers = mapOf(
                 PEER_HEX to NotificationSource.PeerStatus(
                     localIsSource = true,
+                    localIsDismissTarget = true,
                     localEpoch = 1,
                     peerIsSink = peerIsSink,
+                    peerIsDismissReporter = peerIsDismissReporter,
                     peerEpoch = 2,
+                    dismissRequests = dismissRequests,
+                    dismissesPerformed = dismissesPerformed,
                 ),
             ),
         )

@@ -26,16 +26,35 @@ import io.github.yurisismotto.anyflow.proto.capabilities.NotificationRoles
  *
  * The grant is checked independently, per message, and no role state feeds it.
  *
- * ## Which roles N1 announces
+ * ## Which roles this phone announces
  *
- * `SOURCE`, and only `SOURCE`. ADR-0017 §1 says Android advertises `SOURCE`
- * *and* `DISMISS_TARGET` in v1, and it will — in **N4**, which implements
- * dismissal. Announcing `DISMISS_TARGET` now would be a claim this wave cannot
- * honour: N1 contains no path from an inbound message to
- * `cancelNotification`, so a peer that believed the claim would send
- * `DismissRequest`s into a device that ignores them. A role is a statement
- * about what is physically possible right now, and the honest answer in N1 is
- * that dismissal is not.
+ * `SOURCE` and `DISMISS_TARGET` together, which is ADR-0017 §1's v1 assignment
+ * for Android, complete as of N4.
+ *
+ * ### Why they are one set and not two switches
+ *
+ * They are announced together because they are true together. Both need the
+ * same three things — a bound listener, the OS notification-access grant, and
+ * a usable notification secret — and *the secret is why*: a `DismissRequest`
+ * names a notification by its derived id, and the only way back to a platform
+ * key is the [SourceIdMap], whose entries are built by deriving ids with that
+ * secret. With no secret the map is empty, so every dismiss would answer
+ * `UNKNOWN_NOTIFICATION` for ever, which is a promise not kept rather than a
+ * capability.
+ *
+ * If a future platform can honour dismissals without being able to source —
+ * or can source without being able to cancel — this set stops being one thing
+ * and the two are announced separately. Nothing in the protocol assumes they
+ * travel together; [SOURCING] is a fact about this adapter.
+ *
+ * ### And why the dismiss-sync *policy* is not an input
+ *
+ * `allowDismissSync` is off by default and per peer, and it is deliberately
+ * **not** consulted here. A role says what this device can physically do; a
+ * policy says whether a particular request is allowed, and it is checked on
+ * every inbound `DismissRequest` (ADR-0017 §6). Folding the policy into the
+ * role would tell a peer "I cannot do this" when the truth is "I will not",
+ * and the desktop's own UI needs to tell those apart to say anything useful.
  *
  * ## The epoch
  *
@@ -94,8 +113,16 @@ class SourceRoleState {
     }
 
     companion object {
-        /** What a phone that can currently observe its own notifications says. */
-        val SOURCING: Set<NotificationRole> = setOf(NotificationRole.NOTIFICATION_ROLE_SOURCE)
+        /**
+         * What a phone that can currently observe its own notifications says.
+         *
+         * Both roles, for the reason above: the listener and the secret that
+         * make sourcing possible are exactly what make a dismissal possible.
+         */
+        val SOURCING: Set<NotificationRole> = setOf(
+            NotificationRole.NOTIFICATION_ROLE_SOURCE,
+            NotificationRole.NOTIFICATION_ROLE_DISMISS_TARGET,
+        )
 
         /**
          * What it says the instant notification access is revoked.
@@ -111,9 +138,16 @@ class SourceRoleState {
  * What a *peer* told us it can do, reduced under the epoch rule.
  *
  * The mirror image of [SourceRoleState], and the Kotlin twin of
- * `anyflow_core::notifications::PeerRoles`. N1 records it and uses it for one
- * decision — do not send upserts to a peer that never claimed `SINK` — and for
- * no other. It is never an authorization input.
+ * `anyflow_core::notifications::PeerRoles`. It is recorded and used for
+ * exactly two decisions — do not send upserts to a peer that never claimed
+ * `SINK`, and report to the UI whether a computer has claimed
+ * `DISMISS_REPORTER` so the dismiss-sync row can be honest about it — and for
+ * no others.
+ *
+ * **It is never an authorization input.** In particular, a peer claiming
+ * `DISMISS_REPORTER` gains nothing: what decides whether this phone acts on a
+ * `DismissRequest` is the pinned identity, the grant and the local policy, and
+ * none of them can be reached from anything a peer says about itself.
  */
 class PeerRoleState {
 

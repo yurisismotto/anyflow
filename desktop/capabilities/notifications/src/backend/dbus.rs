@@ -135,10 +135,26 @@ impl DbusSink {
             .await
             .unwrap_or_else(|_| Vec::new());
 
+        // Subscribed before the capabilities are assembled, because whether
+        // the close signal could be subscribed to *is* one of them.
+        let (closed_rx, availability_rx) = Self::spawn_signal_pumps(&connection).await;
+
         let capabilities = SinkCapabilities {
             body_markup: advertised.iter().any(|c| c == "body-markup"),
             body: advertised.iter().any(|c| c == "body"),
             persistence: advertised.iter().any(|c| c == "persistence"),
+            // NOT read from `GetCapabilities`: the freedesktop specification
+            // has no capability string for "I will tell you why a
+            // notification closed". What decides it is whether this process
+            // actually holds a `NotificationClosed` subscription — the signal
+            // whose `reason` distinguishes 2 (a person dismissed it) from 1
+            // (it expired) and 3 (we closed it ourselves).
+            //
+            // So a session where the match rule could not be installed
+            // announces no `DISMISS_REPORTER` and asks nobody to dismiss
+            // anything, which is the honest degradation: mirroring still
+            // works, dismissal sync says it is unavailable.
+            dismiss_reporting: closed_rx.is_some(),
         };
 
         tracing::info!(
@@ -148,18 +164,17 @@ impl DbusSink {
             spec = %spec,
             body_markup = capabilities.body_markup,
             persistence = capabilities.persistence,
+            dismiss_reporting = capabilities.dismiss_reporting,
             "notification server"
         );
 
-        let sink = Self {
+        Some(Self {
             connection,
             capabilities,
             server: format!("{name} {version} (spec {spec}, {vendor})"),
-            closed_rx: std::sync::Mutex::new(None),
-            availability_rx: std::sync::Mutex::new(None),
-        };
-        sink.spawn_signal_pumps().await;
-        Some(sink)
+            closed_rx: std::sync::Mutex::new(closed_rx),
+            availability_rx: std::sync::Mutex::new(availability_rx),
+        })
     }
 
     /// Subscribes to the two signals this sink acts on.
@@ -167,14 +182,25 @@ impl DbusSink {
     /// Both are event-driven; neither polls. ADR-0014's standing rule applies
     /// to notifications exactly as it applies to the clipboard, and a periodic
     /// "is gnome-shell still there?" probe would be the thing it forbids.
-    async fn spawn_signal_pumps(&self) {
+    ///
+    /// Returns `(closes, availability)`, each `None` when that subscription
+    /// could not be made. **The close receiver being `None` is what makes this
+    /// desktop announce no `DISMISS_REPORTER`**, so it is returned rather than
+    /// swallowed: an earlier shape of this function stored `Some(receiver)`
+    /// unconditionally, which would have let a session with no match rule
+    /// promise dismissal reports it could never send.
+    async fn spawn_signal_pumps(
+        connection: &zbus::Connection,
+    ) -> (Option<mpsc::Receiver<Closed>>, Option<mpsc::Receiver<bool>>) {
         let (closed_tx, closed_rx) = mpsc::channel(64);
         let (availability_tx, availability_rx) = mpsc::channel(16);
+        let mut closes = None;
 
         // `NotificationClosed(id, reason)`.
-        if let Ok(proxy) = zbus::Proxy::new(&self.connection, DEST, PATH, IFACE).await {
+        if let Ok(proxy) = zbus::Proxy::new(connection, DEST, PATH, IFACE).await {
             match proxy.receive_signal("NotificationClosed").await {
                 Ok(mut stream) => {
+                    closes = Some(closed_rx);
                     tokio::spawn(async move {
                         use futures_lite::StreamExt as _;
                         while let Some(message) = stream.next().await {
@@ -194,7 +220,8 @@ impl DbusSink {
                 }
                 Err(e) => tracing::info!(
                     error = %ErrorClass(&e),
-                    "cannot observe notification closes on this session"
+                    "cannot observe notification closes on this session; \
+                     dismissal sync will report itself unavailable"
                 ),
             }
         }
@@ -208,8 +235,9 @@ impl DbusSink {
         // reconnect, no polling, and no persistence to survive the restart —
         // the phone is the thing that knows what is active, and asking it
         // again is free.
+        let mut availability = None;
         let dbus = zbus::Proxy::new(
-            &self.connection,
+            connection,
             "org.freedesktop.DBus",
             "/org/freedesktop/DBus",
             "org.freedesktop.DBus",
@@ -218,6 +246,7 @@ impl DbusSink {
         if let Ok(dbus) = dbus {
             match dbus.receive_signal("NameOwnerChanged").await {
                 Ok(mut stream) => {
+                    availability = Some(availability_rx);
                     tokio::spawn(async move {
                         use futures_lite::StreamExt as _;
                         while let Some(message) = stream.next().await {
@@ -242,12 +271,7 @@ impl DbusSink {
             }
         }
 
-        if let Ok(mut guard) = self.closed_rx.lock() {
-            *guard = Some(closed_rx);
-        }
-        if let Ok(mut guard) = self.availability_rx.lock() {
-            *guard = Some(availability_rx);
-        }
+        (closes, availability)
     }
 
     async fn proxy(&self) -> SinkResult<zbus::Proxy<'_>> {

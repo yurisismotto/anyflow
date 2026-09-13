@@ -384,7 +384,27 @@ pub struct NotificationPeerReport {
     pub local_epoch: u32,
     /// Whether the peer has claimed it can source notifications.
     pub peer_is_source: bool,
+    /// Whether the peer has claimed it will act on a `DismissRequest`.
+    ///
+    /// Separate from `peer_is_source` because the two narrow independently: a
+    /// phone that has stopped sourcing can still honour dismissals for what it
+    /// already sent. It is what makes the dismiss-sync switch able to say
+    /// "this device cannot do that" rather than pretending it can.
+    #[serde(default)]
+    pub peer_is_dismiss_target: bool,
     pub peer_epoch: u32,
+    /// Whether this desktop told the peer it will report human dismissals —
+    /// the `DISMISS_REPORTER` role, which needs a backend that can tell a
+    /// human dismissal from an expiry.
+    #[serde(default)]
+    pub local_reports_dismissals: bool,
+    /// `DismissRequest`s sent to this peer since the daemon started, and how
+    /// many the source declined. Counts only: there is no field here that
+    /// could name a notification, and nothing is persisted.
+    #[serde(default)]
+    pub dismissals_sent: u64,
+    #[serde(default)]
+    pub dismissals_refused: u64,
     pub snapshot_open: bool,
     /// Pending display work, and the counters that make the bounds visible.
     pub queued: usize,

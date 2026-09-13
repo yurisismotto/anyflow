@@ -264,6 +264,22 @@ impl TestServer {
     }
 
     /// This peer's stored clipboard policy, for the isolation assertions.
+    /// The notification policy the trust store actually holds.
+    ///
+    /// Read back from the store rather than from the capability, because the
+    /// property under test is what was *persisted* — a setting the daemon
+    /// accepted and did not write would look identical from the runtime.
+    pub async fn notification_policy(
+        &self,
+        peer: Fingerprint,
+    ) -> anyflow_core::notification_policy::NotificationPolicy {
+        let store = self.state.store.lock().await;
+        store
+            .peer_record(&peer)
+            .map(|r| r.notification_policy)
+            .unwrap_or_default()
+    }
+
     pub async fn clipboard_policy(&self, peer: Fingerprint) -> ClipboardPolicy {
         let store = self.state.store.lock().await;
         store
@@ -1098,6 +1114,18 @@ impl CapturedNotifications {
         match self.next_control(timeout).await.body {
             Some(clip_pb::notification_control::Body::Result(r)) => r,
             other => panic!("expected a NotificationResult, got {other:?}"),
+        }
+    }
+
+    /// The next `DismissRequest` the desktop sends.
+    ///
+    /// The only message that travels desktop → phone and asks the phone to do
+    /// something, so a test that expects one says so by name: a helper that
+    /// accepted any body would let a missing dismissal look like a pass.
+    pub async fn next_dismiss(&self, timeout: Duration) -> clip_pb::DismissRequest {
+        match self.next_control(timeout).await.body {
+            Some(clip_pb::notification_control::Body::Dismiss(d)) => d,
+            other => panic!("expected a DismissRequest, got {other:?}"),
         }
     }
 

@@ -30,22 +30,63 @@ class NotificationRolesTest {
         val state = SourceRoleState()
         val announcement = state.announce(SourceRoleState.SOURCING)!!
         assertEquals(1, announcement.epoch)
-        assertEquals(listOf(NotificationRole.NOTIFICATION_ROLE_SOURCE), announcement.rolesList)
+        assertEquals(
+            // Sorted by wire number, so two runs of the same state produce the
+            // same bytes — which is what makes a cross-language vector work.
+            listOf(
+                NotificationRole.NOTIFICATION_ROLE_SOURCE,
+                NotificationRole.NOTIFICATION_ROLE_DISMISS_TARGET,
+            ),
+            announcement.rolesList,
+        )
     }
 
     /**
-     * N1 announces `SOURCE` and nothing else. ADR-0017 §1 has Android
-     * advertising `DISMISS_TARGET` too in v1, and it will — in N4, which
-     * implements dismissal. Claiming it now would be a claim this wave cannot
-     * honour, and a role is a statement about what is physically possible
-     * right now.
+     * ADR-0017 §1's v1 assignment for Android, complete as of N4: `SOURCE` and
+     * `DISMISS_TARGET`, announced together because they are true together —
+     * both need a bound listener, the OS grant, and a usable notification
+     * secret, and the secret is what makes the id map that a dismissal is
+     * resolved through.
      */
     @Test
-    fun `N1 does not claim to be a dismiss target`() {
-        assertEquals(setOf(NotificationRole.NOTIFICATION_ROLE_SOURCE), SourceRoleState.SOURCING)
-        assertFalse(
-            NotificationRole.NOTIFICATION_ROLE_DISMISS_TARGET in SourceRoleState.SOURCING,
+    fun `a sourcing phone claims both of its v1 roles`() {
+        assertEquals(
+            setOf(
+                NotificationRole.NOTIFICATION_ROLE_SOURCE,
+                NotificationRole.NOTIFICATION_ROLE_DISMISS_TARGET,
+            ),
+            SourceRoleState.SOURCING,
         )
+    }
+
+    /**
+     * And never the sink-side ones. Android displays nobody else's
+     * notifications and reports nothing about them, so claiming either would
+     * be a promise no code here could keep.
+     */
+    @Test
+    fun `a phone never claims a sink side role`() {
+        assertFalse(NotificationRole.NOTIFICATION_ROLE_SINK in SourceRoleState.SOURCING)
+        assertFalse(
+            NotificationRole.NOTIFICATION_ROLE_DISMISS_REPORTER in SourceRoleState.SOURCING,
+        )
+    }
+
+    /**
+     * Revoking notification access takes **both** roles away at once.
+     *
+     * It has to: without a listener there is nothing to observe and nothing to
+     * cancel. A narrowing that dropped `SOURCE` and kept `DISMISS_TARGET`
+     * would leave a computer sending dismissals into a device that answers
+     * `UNKNOWN_NOTIFICATION` for ever.
+     */
+    @Test
+    fun `losing the listener narrows both roles together`() {
+        val state = SourceRoleState()
+        assertEquals(2, state.announce(SourceRoleState.SOURCING)!!.rolesCount)
+        val narrowed = state.announce(SourceRoleState.NONE)!!
+        assertEquals(0, narrowed.rolesCount)
+        assertEquals(2, narrowed.epoch)
     }
 
     /**

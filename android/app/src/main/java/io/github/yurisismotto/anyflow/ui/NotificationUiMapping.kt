@@ -3,6 +3,7 @@ package io.github.yurisismotto.anyflow.ui
 import androidx.annotation.StringRes
 import io.github.yurisismotto.anyflow.R
 import io.github.yurisismotto.anyflow.notifications.LockPolicy
+import io.github.yurisismotto.anyflow.notifications.NotificationDismissReadiness
 import io.github.yurisismotto.anyflow.notifications.NotificationReadiness
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowStatus
 
@@ -64,6 +65,25 @@ object NotificationUiMapping {
         NotificationReadiness.PEER_NOT_RECEIVING,
         NotificationReadiness.UNAVAILABLE,
         -> AnyFlowStatus.Warning
+    }
+
+    /**
+     * What dismissal synchronisation is doing, as a sentence.
+     *
+     * There is no short badge word for this one on purpose: the row is a
+     * switch, and the switch's position already says on or off. What a person
+     * needs beside it is the sentence that says whether "on" is actually doing
+     * anything, and what to do when it is not.
+     */
+    @StringRes
+    fun dismissDetail(readiness: NotificationDismissReadiness): Int = when (readiness) {
+        NotificationDismissReadiness.NEEDS_ANDROID_ACCESS ->
+            R.string.notif_dismiss_state_needs_access
+        NotificationDismissReadiness.OFF -> R.string.notif_dismiss_state_off
+        NotificationDismissReadiness.NOT_CONNECTED -> R.string.notif_dismiss_state_not_connected
+        NotificationDismissReadiness.PEER_CANNOT_REPORT ->
+            R.string.notif_dismiss_state_peer_cannot_report
+        NotificationDismissReadiness.ACTIVE -> R.string.notif_dismiss_state_active
     }
 
     /** The lock-policy option's own name. */

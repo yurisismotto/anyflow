@@ -300,14 +300,20 @@ class NotificationHardwareGateTest {
     }
 
     /**
-     * Roles are announced first, and the announcement is `SOURCE` alone.
+     * Roles are announced first, and a sourcing phone claims both of its v1
+     * roles: `SOURCE` and `DISMISS_TARGET` (ADR-0017 §1).
      *
-     * N1 does not claim `DISMISS_TARGET`: this wave has no path from an
-     * inbound message to `cancelNotification`, and a role is a claim about
-     * what the device can physically do right now.
+     * They travel together because they are true together — both need a bound
+     * listener, the OS grant and a usable notification secret — and the secret
+     * is why: a dismissal is resolved through the id map, whose entries are
+     * built by deriving ids with it.
+     *
+     * What is asserted here that a JVM test cannot: the announcement was
+     * produced by the **real** listener on the real device, from real
+     * notification access.
      */
     @Test
-    fun rolesAreAnnouncedFirstAndClaimOnlySource() {
+    fun rolesAreAnnouncedFirstAndClaimBothSourceSideRoles() {
         attachAndDrain()
 
         val first = captured.firstOrNull()
@@ -321,15 +327,28 @@ class NotificationHardwareGateTest {
             .filter { it.bodyCase == NotificationControl.BodyCase.ROLES }
             .map { it.roles }
 
-        // N1 never claims DISMISS_TARGET, in any announcement: this wave has
-        // no path from an inbound message to `cancelNotification`, and a role
-        // is a claim about what the device can physically do right now.
+        // A non-empty announcement carries both source-side roles, and never a
+        // sink-side one: this device displays nobody else's notifications and
+        // reports nothing about them, so claiming either would be a promise no
+        // code here could keep.
         for (announcement in announcements) {
+            val roles = announcement.rolesList
             assertFalse(
-                "N1 must not claim DISMISS_TARGET",
-                announcement.rolesList.contains(
+                "a phone must never claim SINK",
+                roles.contains(NotificationRole.NOTIFICATION_ROLE_SINK),
+            )
+            assertFalse(
+                "a phone must never claim DISMISS_REPORTER",
+                roles.contains(NotificationRole.NOTIFICATION_ROLE_DISMISS_REPORTER),
+            )
+            if (roles.isEmpty()) continue
+            assertEquals(
+                "SOURCE and DISMISS_TARGET are announced together or not at all",
+                listOf(
+                    NotificationRole.NOTIFICATION_ROLE_SOURCE,
                     NotificationRole.NOTIFICATION_ROLE_DISMISS_TARGET,
                 ),
+                roles,
             )
         }
 
@@ -338,13 +357,17 @@ class NotificationHardwareGateTest {
         val epochs = announcements.map { it.epoch }
         assertEquals(epochs.sorted().distinct(), epochs)
 
-        // And once the listener is actually bound, SOURCE is claimed — which
-        // is the widening ADR-0017 §3 requires to take effect immediately
-        // rather than at the next reconnect. The session attaches before the
-        // bind lands, so the first announcement is legitimately empty.
+        // And once the listener is actually bound, both source-side roles are
+        // claimed — which is the widening ADR-0017 §3 requires to take effect
+        // immediately rather than at the next reconnect. The session attaches
+        // before the bind lands, so the first announcement is legitimately
+        // empty.
         if (app.notifications.status.value.listenerConnected) {
             assertEquals(
-                listOf(NotificationRole.NOTIFICATION_ROLE_SOURCE),
+                listOf(
+                    NotificationRole.NOTIFICATION_ROLE_SOURCE,
+                    NotificationRole.NOTIFICATION_ROLE_DISMISS_TARGET,
+                ),
                 announcements.last().rolesList,
             )
             assertTrue(

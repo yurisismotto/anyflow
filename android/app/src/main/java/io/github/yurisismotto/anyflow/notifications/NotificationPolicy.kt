@@ -138,11 +138,15 @@ data class NotificationPolicy(
     /**
      * Whether a desktop dismissal may cancel the notification here.
      *
-     * **Off by default** (ADR-0015 §6), and **not implemented in N1**: this
-     * wave contains no path from an inbound message to `cancelNotification`,
-     * and Android announces no `DISMISS_TARGET` role. The field is stored so
-     * N4 has somewhere to read the answer from, and so the default it must
-     * respect is already written down.
+     * **Off by default** (ADR-0015 §6), and per computer. It is the only
+     * setting in this type that lets another device change something on *this*
+     * one — everything else decides what leaves — which is why it is asked for
+     * separately even though the action it authorises is small: the boundary
+     * being crossed, not the size of the step, is what a person is agreeing to.
+     *
+     * Read on every inbound `DismissRequest`, never captured at handshake
+     * time, and combined with [allowMirror]: a policy with mirroring off and
+     * this on is contradictory and resolves to "no".
      */
     val allowDismissSync: Boolean = false,
 ) {

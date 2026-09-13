@@ -34,7 +34,23 @@ sealed interface NotificationEvent {
      * banking alert. Android's 23 removal reasons all mean the same thing to a
      * mirror, so none is carried and none is consulted here.
      */
-    class Removed(val platformKey: String) : NotificationEvent
+    class Removed(
+        val platformKey: String,
+        /**
+         * Whether the platform attributed this removal to a listener calling
+         * `cancelNotification` — Android's `REASON_LISTENER_CANCEL`.
+         *
+         * **The one bit of Android's removal reason that is ever consulted,
+         * and it never leaves this device.** All 23 reasons mean the same
+         * thing to a mirror, so none of them is transmitted; this one is used
+         * locally, for echo suppression, and for nothing else. Reducing it to
+         * a boolean here rather than carrying the number is deliberate: a
+         * numeric reason in a portable type is an invitation to branch on
+         * `REASON_PACKAGE_BANNED` or `REASON_CLEAR_DATA`, which are facts
+         * about the user's device that a mirror has no business knowing.
+         */
+        val listenerCancelled: Boolean = false,
+    ) : NotificationEvent
 
     /** The system bound the listener: `getActiveNotifications` is now safe. */
     data object ListenerConnected : NotificationEvent

@@ -117,7 +117,8 @@ impl Readiness {
             Readiness::PeerNotSourcing => {
                 "Connected, and the device has not said it can send notifications. Check \
                  that AnyFlow on the device shares notifications with this computer, and \
-                 that Android has given it notification access."
+                 that Android has given it notification access. If you have just changed \
+                 either, the two may need to reconnect before it takes effect."
             }
             Readiness::Ready => {
                 "Notifications from the apps chosen on the device appear on this desktop."
@@ -139,6 +140,105 @@ impl Readiness {
     /// Whether this desktop is showing this device's notifications right now.
     pub fn is_ready(self) -> bool {
         matches!(self, Readiness::Ready)
+    }
+}
+
+/// What dismissal synchronisation is actually doing for one device.
+///
+/// # Why this is not folded into [`Readiness`]
+///
+/// Mirroring and dismissal sync are two features with four gates between them,
+/// and they fail apart. The commonest real state is `Ready` mirroring beside
+/// unavailable dismissal — a phone running a build that announces `SOURCE` but
+/// not `DISMISS_TARGET`, or a desktop session whose notification server cannot
+/// report closes. Collapsing them into one "Ready" bit would say the wrong
+/// thing about whichever half was worse, and a person would either think their
+/// phone is being cleared when it is not, or think mirroring is broken when it
+/// is not.
+///
+/// So it is a second pure function with its own decision table, and its own
+/// unit test enumerating every variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DismissReadiness {
+    /// The setting is off, which is the default and is not a fault.
+    Off,
+    /// On, and this desktop's notification server cannot tell a human
+    /// dismissal from a banner timing out — so this desktop announces no
+    /// `DISMISS_REPORTER` and asks nothing of anybody.
+    NoReporting,
+    /// On, and there is no session to the device right now.
+    NotConnected,
+    /// On, connected, and the device has not said it will act on a dismissal.
+    PeerCannotDismiss,
+    /// On, and working.
+    Active,
+}
+
+impl DismissReadiness {
+    /// Resolves the state for one device.
+    ///
+    /// The order is the specification. `Off` comes before every capability
+    /// question because when the setting is off there is nothing to fix and
+    /// nothing to warn about — telling somebody their notification server
+    /// cannot report closes, about a feature they have not enabled, is noise.
+    /// Then this machine, then the network, then the far end.
+    pub fn of(peer: &NotificationPeerReport) -> DismissReadiness {
+        if !peer.allow_dismiss_sync || !peer.allow_mirror {
+            // `allow_mirror` off makes the flag inert whatever it says — the
+            // same containment rule `NotificationPolicy::may_sync_dismissals`
+            // applies in the daemon, mirrored here so the two cannot drift.
+            DismissReadiness::Off
+        } else if !peer.local_reports_dismissals {
+            DismissReadiness::NoReporting
+        } else if !peer.connected {
+            DismissReadiness::NotConnected
+        } else if !peer.peer_is_dismiss_target {
+            DismissReadiness::PeerCannotDismiss
+        } else {
+            DismissReadiness::Active
+        }
+    }
+
+    /// The sentence under the switch, which is the part that makes it
+    /// actionable — and, for `Off`, the part that says what turning it on
+    /// would do to the phone.
+    pub fn detail(self) -> &'static str {
+        match self {
+            DismissReadiness::Off => {
+                "Off. When this is on, dismissing a mirrored notification here also \
+                 dismisses the original on the device. Nothing else is sent: AnyFlow \
+                 cannot press a notification's buttons, reply to it, open an app, or \
+                 clear everything at once."
+            }
+            DismissReadiness::NoReporting => {
+                "On, and this desktop cannot act on it. The notification server here \
+                 does not report why a notification closed, so AnyFlow cannot tell a \
+                 dismissal from a banner timing out — and it will never guess."
+            }
+            DismissReadiness::NotConnected => {
+                "On. Dismissals will be sent once the device connects."
+            }
+            DismissReadiness::PeerCannotDismiss => {
+                "On, and the device has not said it will act on a dismissal. Allow it \
+                 on the device as well, under its notification settings for this \
+                 computer. If you have just changed something there, the two may need \
+                 to reconnect before it takes effect."
+            }
+            DismissReadiness::Active => {
+                "On. Dismissing a mirrored notification here dismisses the original on \
+                 the device. Notifications the device marks as ongoing or \
+                 non-dismissible are refused there, and stay."
+            }
+        }
+    }
+
+    /// Whether this state needs the person to do something. `Off` does not:
+    /// it is a choice, not a fault.
+    pub fn needs_attention(self) -> bool {
+        matches!(
+            self,
+            DismissReadiness::NoReporting | DismissReadiness::PeerCannotDismiss
+        )
     }
 }
 
@@ -316,7 +416,8 @@ fn peer_card(peer: &NotificationPeerReport, available: bool, pages: &Pages) -> g
     ));
 
     card.append(&widgets::separator());
-    card.append(&dismiss_sync_row(peer));
+    card.append(&widgets::section_label("Dismissing"));
+    card.append(&dismiss_sync_row(peer, pages));
 
     card.append(&widgets::caption(&format!(
         "{} showing of {} mirrored · this computer announced {} role{} (epoch {}) · the \
@@ -500,32 +601,86 @@ fn lock_choices(peer: &NotificationPeerReport, pages: &Pages) -> gtk::ListBox {
     list
 }
 
-/// Dismissal sync, which does not work yet and says so.
+/// Dismissal sync: the one control on this page that does something to the
+/// phone.
 ///
-/// Rendered as inert text rather than as a switch. A switch would be a promise
-/// the runtime cannot keep: nothing in this release sends a dismissal request,
-/// and a person who turned it on and then dismissed a notification would
-/// reasonably report the phone not clearing as a bug.
-fn dismiss_sync_row(peer: &NotificationPeerReport) -> gtk::Box {
-    let row = widgets::row(SPACING_XS);
+/// A real switch as of N4, and the copy is written accordingly. It names the
+/// effect on the *other* device rather than describing a preference, and it
+/// says what dismissal sync is **not** — because "let this computer dismiss
+/// notifications" is exactly the phrase a person could read as "let this
+/// computer control my phone's notifications", and it is not that.
+///
+/// The state below the switch is [`DismissReadiness`], not a second switch:
+/// when the peer has not announced `DISMISS_TARGET`, or this desktop cannot
+/// report human dismissals, the switch still writes the stored policy — it is
+/// the person's choice and it should persist — and the line underneath says
+/// plainly that nothing will happen yet, and what would change that.
+fn dismiss_sync_row(peer: &NotificationPeerReport, pages: &Pages) -> gtk::Box {
+    const TITLE: &str = "Let this computer dismiss notifications on the device";
+    let state = DismissReadiness::of(peer);
+
+    let row = widgets::row(SPACING_SM);
     let text = widgets::column(0);
-    text.append(&widgets::body_muted("Sync dismissals"));
-    text.append(&widgets::caption(
-        "Not available yet. Dismissing a notification here does not dismiss it on the \
-         device.",
-    ));
+    text.append(&widgets::body(TITLE));
+    text.append(&widgets::caption(state.detail()));
+    if peer.dismissals_sent > 0 || peer.dismissals_refused > 0 {
+        // Counts, and only counts. There is no field on the report that could
+        // name a notification, and no list of dismissals exists anywhere.
+        text.append(&widgets::caption(&format!(
+            "{} dismissal{} sent since this daemon started{}.",
+            peer.dismissals_sent,
+            if peer.dismissals_sent == 1 { "" } else { "s" },
+            if peer.dismissals_refused > 0 {
+                format!(", {} declined by the device", peer.dismissals_refused)
+            } else {
+                String::new()
+            }
+        )));
+    }
     text.set_hexpand(true);
     row.append(&text);
-    debug_assert!(
-        !peer.allow_dismiss_sync,
-        "dismiss sync is stored off and nothing in this release turns it on"
-    );
-    row
+
+    let sw = gtk::Switch::new();
+    sw.set_active(peer.allow_dismiss_sync);
+    sw.set_valign(gtk::Align::Center);
+    sw.update_property(&[gtk::accessible::Property::Label(TITLE)]);
+
+    let device = peer.device_id.clone();
+    let pages = pages.clone();
+    sw.connect_state_set(move |_, wanted| {
+        let pages = pages.clone();
+        client::send(
+            Request::NotificationsPolicy {
+                device: device.clone(),
+                // Exactly one field. This request cannot reach the grant, the
+                // mirror switch or the lock policy — `NotificationSetting` has
+                // a separate variant for each and this one carries a single
+                // boolean.
+                setting: NotificationSetting::DismissSync { enabled: wanted },
+            },
+            move |reply| {
+                if let Ok(Response::Error { message }) = reply {
+                    eprintln!("anyflow-gui: the daemon refused the policy change: {message}");
+                }
+                // Re-read rather than assume: the daemon is the authority.
+                pages.refresh_now();
+            },
+        );
+        gtk::glib::Propagation::Proceed
+    });
+    row.append(&sw);
+
+    let column = widgets::column(SPACING_XS);
+    column.append(&row);
+    if state.needs_attention() {
+        column.append(&widgets::status_badge(Status::Warning));
+    }
+    column
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{render, Readiness, LOCK_POLICIES};
+    use super::{render, DismissReadiness, Readiness, LOCK_POLICIES};
     use crate::{DaemonState, Page};
     use anyflow_control::{NotificationPeerReport, NotificationsStatusReport};
     use gtk::prelude::*;
@@ -550,7 +705,11 @@ mod tests {
             local_roles: 1,
             local_epoch: 1,
             peer_is_source: true,
+            peer_is_dismiss_target: true,
             peer_epoch: 2,
+            local_reports_dismissals: true,
+            dismissals_sent: 0,
+            dismissals_refused: 0,
             snapshot_open: false,
             queued: 0,
             coalesced: 0,
@@ -643,6 +802,103 @@ mod tests {
         ] {
             assert!(!readiness.label().is_empty(), "{readiness:?}");
             assert!(readiness.detail().len() > 20, "{readiness:?}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Dismissal readiness: its own table, because it fails apart from mirroring
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dismiss_sync_is_off_in_the_state_a_fresh_grant_leaves_behind() {
+        // The fixture has every capability gate open and the setting off,
+        // which is exactly what granting `notifications.v1` produces.
+        assert_eq!(DismissReadiness::of(&peer()), DismissReadiness::Off);
+    }
+
+    #[test]
+    fn switching_it_on_with_everything_working_is_active() {
+        let mut p = peer();
+        p.allow_dismiss_sync = true;
+        assert_eq!(DismissReadiness::of(&p), DismissReadiness::Active);
+    }
+
+    /// The state §16 exists for: mirroring is Ready and dismissal is not.
+    /// A single "Ready" bit would have to lie about one of them.
+    #[test]
+    fn mirroring_can_be_ready_while_dismissal_sync_is_not() {
+        let mut p = peer();
+        p.allow_dismiss_sync = true;
+        p.peer_is_dismiss_target = false;
+        assert_eq!(Readiness::of(&p, true), Readiness::Ready);
+        assert_eq!(
+            DismissReadiness::of(&p),
+            DismissReadiness::PeerCannotDismiss
+        );
+        assert!(DismissReadiness::of(&p).needs_attention());
+    }
+
+    #[test]
+    fn a_desktop_that_cannot_report_closes_says_so_rather_than_blaming_the_device() {
+        let mut p = peer();
+        p.allow_dismiss_sync = true;
+        p.local_reports_dismissals = false;
+        // Both are wrong at once here; the machine-wide cause is named first,
+        // because sending somebody to change a setting on their phone for a
+        // fault on this desktop is the wrong instruction.
+        p.peer_is_dismiss_target = false;
+        assert_eq!(DismissReadiness::of(&p), DismissReadiness::NoReporting);
+    }
+
+    #[test]
+    fn an_offline_device_is_not_connected_rather_than_unable() {
+        let mut p = peer();
+        p.allow_dismiss_sync = true;
+        p.connected = false;
+        assert_eq!(DismissReadiness::of(&p), DismissReadiness::NotConnected);
+        assert!(
+            !DismissReadiness::of(&p).needs_attention(),
+            "a device that is merely away needs nothing doing"
+        );
+    }
+
+    #[test]
+    fn turning_mirroring_off_makes_a_stale_dismiss_flag_read_as_off() {
+        // The same containment rule the daemon applies in
+        // `NotificationPolicy::may_sync_dismissals`, mirrored here so the page
+        // cannot claim a dismissal will happen that the daemon will refuse.
+        let mut p = peer();
+        p.allow_dismiss_sync = true;
+        p.allow_mirror = false;
+        assert_eq!(DismissReadiness::of(&p), DismissReadiness::Off);
+    }
+
+    #[test]
+    fn off_is_a_choice_and_never_needs_attention() {
+        assert!(!DismissReadiness::Off.needs_attention());
+        assert!(!DismissReadiness::Active.needs_attention());
+    }
+
+    #[test]
+    fn every_dismiss_state_says_what_it_means_and_what_it_does_to_the_phone() {
+        for state in [
+            DismissReadiness::Off,
+            DismissReadiness::NoReporting,
+            DismissReadiness::NotConnected,
+            DismissReadiness::PeerCannotDismiss,
+            DismissReadiness::Active,
+        ] {
+            assert!(state.detail().len() > 20, "{state:?}");
+        }
+        // The copy must name the effect on the other device, and must not
+        // imply anything wider than one dismissal.
+        let off = DismissReadiness::Off.detail();
+        assert!(off.contains("dismisses the original on the device"));
+        for forbidden in ["reply", "buttons", "open an app", "clear everything"] {
+            assert!(
+                off.contains(forbidden),
+                "the copy must say what this is NOT: {forbidden}"
+            );
         }
     }
 
@@ -749,7 +1005,10 @@ mod tests {
         a_granted_device_is_offered_the_pause_and_the_lock_policy();
         the_lock_policy_is_one_exclusive_choice_with_the_stored_value_selected();
         an_unrecognised_stored_policy_selects_nothing_rather_than_the_first_option();
-        there_is_no_control_for_dismissal_sync();
+        dismissal_sync_is_a_real_switch_that_starts_off();
+        the_dismissal_switch_shows_what_the_daemon_holds();
+        an_unavailable_dismissal_state_is_truthful_rather_than_silent();
+        the_dismissal_switch_is_not_offered_to_an_ungranted_device();
         every_switch_is_announced_as_a_switch_beside_words_that_name_it();
         a_desktop_with_no_notification_server_says_so_once();
         the_page_never_renders_a_notification();
@@ -759,6 +1018,7 @@ mod tests {
         an_unchanged_refresh_leaves_the_control_it_found_alone();
         an_activation_after_many_refreshes_still_reaches_the_handler();
         the_switch_is_still_activatable_from_the_keyboard_after_refreshes();
+        the_dismiss_switch_survives_refreshes_and_still_follows_the_daemon();
         a_real_change_still_redraws_the_page();
         a_change_on_another_page_does_not_disturb_this_one();
     }
@@ -788,7 +1048,11 @@ mod tests {
     fn a_granted_device_is_offered_the_pause_and_the_lock_policy() {
         let container = page(report(vec![peer()], true));
         let sw = switches(&container);
-        assert_eq!(sw.len(), 2, "the grant, and the pause");
+        assert_eq!(
+            sw.len(),
+            3,
+            "the grant, the pause, and — as of N4 — dismissal sync"
+        );
         assert!(sw[1].is_active(), "mirroring is on for this fixture");
 
         let text = labels(&container).join("\n");
@@ -827,17 +1091,54 @@ mod tests {
         assert!(list.selected_row().is_none());
     }
 
-    fn there_is_no_control_for_dismissal_sync() {
-        // N4 owns the runtime. The row is present and says so, and there is
-        // nothing on it a person could switch on.
+    fn dismissal_sync_is_a_real_switch_that_starts_off() {
         let container = page(report(vec![peer()], true));
+        let sw = switches(&container);
+        assert_eq!(sw.len(), 3, "the grant, the pause, and dismissal sync");
+        assert!(
+            !sw[2].is_active(),
+            "dismissal sync must never be drawn on when it is stored off"
+        );
+
         let text = labels(&container).join("\n");
-        assert!(text.contains("Sync dismissals"));
-        assert!(text.contains("Not available yet"));
-        assert_eq!(
-            switches(&container).len(),
-            2,
-            "a third switch would be a promise this release cannot keep"
+        assert!(text.contains("Let this computer dismiss notifications on the device"));
+        // The copy names the effect on the phone, and bounds it.
+        assert!(text.contains("dismisses the original on the device"));
+        assert!(text.contains("cannot press a notification's buttons"));
+    }
+
+    fn the_dismissal_switch_shows_what_the_daemon_holds() {
+        let mut on = peer();
+        on.allow_dismiss_sync = true;
+        assert!(switches(&page(report(vec![on], true)))[2].is_active());
+    }
+
+    fn an_unavailable_dismissal_state_is_truthful_rather_than_silent() {
+        // On, and the device cannot act on it. The switch still reflects the
+        // stored choice — it is the person's — and the line underneath says
+        // plainly that nothing will happen yet, and what would change that.
+        let mut p = peer();
+        p.allow_dismiss_sync = true;
+        p.peer_is_dismiss_target = false;
+        let container = page(report(vec![p], true));
+
+        assert!(
+            switches(&container)[2].is_active(),
+            "a refused capability must not silently rewrite a stored setting"
+        );
+        let text = labels(&container).join("\n");
+        assert!(text.contains("the device has not said it will act on a dismissal"));
+        assert!(text.contains("may need to reconnect"));
+    }
+
+    fn the_dismissal_switch_is_not_offered_to_an_ungranted_device() {
+        let mut p = peer();
+        p.granted = false;
+        let container = page(report(vec![p], true));
+        let text = labels(&container).join("\n");
+        assert!(
+            !text.contains("Let this computer dismiss"),
+            "a control that cannot be honoured must not be on the screen"
         );
     }
 
@@ -933,7 +1234,7 @@ mod tests {
         // What an assistive technology holds after locating the controls.
         let located = switches(&page);
         let located_lists = lists(&page);
-        assert_eq!(located.len(), 2, "the grant, and the pause");
+        assert_eq!(located.len(), 3, "the grant, the pause, and dismissal sync");
         assert_eq!(located_lists.len(), 1, "the lock policy");
 
         refresh_unchanged(&pages, &state, 10);
@@ -1048,6 +1349,47 @@ mod tests {
 
         window.destroy();
         pump(|| false);
+    }
+
+    /// N4's own half of the §32 property, at the shipped `REFRESH_SECS = 2`
+    /// cadence: an unchanged dismiss policy leaves the switch alone, and a
+    /// changed one is shown.
+    ///
+    /// The first half is what a screen reader needs — a switch destroyed and
+    /// rebuilt five times every two seconds is one an AT-SPI activation can
+    /// never land on, which is the N3 defect this page was fixed for. The
+    /// second half is what stops that fix becoming "never redraw", which would
+    /// leave a person looking at a switch that disagrees with the daemon about
+    /// something that dismisses notifications on their phone.
+    fn the_dismiss_switch_survives_refreshes_and_still_follows_the_daemon() {
+        let state = granted_state();
+        let (pages, page, _stack) = live(state.clone());
+
+        let located = switches(&page)[2].clone();
+        assert!(!located.is_active(), "the fixture stores it off");
+
+        refresh_unchanged(&pages, &state, 10);
+        assert!(
+            switches(&page).contains(&located),
+            "an unchanged refresh rebuilt the dismissal switch; AT-SPI would \
+             be holding a widget that is no longer on the page"
+        );
+        assert!(located.parent().is_some());
+
+        // The daemon now says it is on. The page must show that, and the
+        // caption must change with it.
+        let mut changed = peer();
+        changed.allow_dismiss_sync = true;
+        state.borrow_mut().notifications = Some(report(vec![changed], true));
+        pages.render();
+
+        assert!(
+            switches(&page)[2].is_active(),
+            "a real dismiss-policy change did not reach the page"
+        );
+        assert!(labels(&page)
+            .join("\n")
+            .contains("dismisses the original on the device"));
     }
 
     fn a_real_change_still_redraws_the_page() {

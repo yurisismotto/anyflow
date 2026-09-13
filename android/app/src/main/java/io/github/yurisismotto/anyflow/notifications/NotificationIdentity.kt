@@ -190,14 +190,18 @@ object NotificationIdentity {
 /**
  * `notification_id → platform key`, on the source, in memory only.
  *
- * ## Why this exists in N1 at all
+ * ## Why this exists
  *
- * Dismissal (N4) is the only message that travels sink → source and causes an
- * effect here, and it names a notification by its derived id. Mapping back is
- * the one reverse path in the design, and it must exist on the source because
- * the destination must never hold the raw key. N1 builds and tests the
- * primitive; **N1 executes no dismissal** and registers no path from an
- * inbound message to `cancelNotification`.
+ * `DismissRequest` is the only message that travels sink → source and causes
+ * an effect here, and it names a notification by its derived id. **This map is
+ * the one reverse path in the whole design**, and it must live on the source
+ * because the destination must never hold the raw key.
+ *
+ * So it is also the narrowest part of the security boundary: a peer's sixteen
+ * opaque bytes become a platform key here and nowhere else, and only if this
+ * device put them in the map itself. A key that is not in the map cannot be
+ * reached, which is what makes "no remote field can identify an Android
+ * notification" true structurally rather than by a check.
  *
  * ## What it holds, and what it must never hold
  *

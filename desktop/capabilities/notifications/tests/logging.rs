@@ -268,6 +268,114 @@ async fn a_suppressing_lock_policy_logs_no_content() {
     assert_no_canaries(&logs);
 }
 
+/// N4's own path: a human dismissal, the request it produces, and the source's
+/// verdict on it. Three new log lines, none of which may carry content.
+#[tokio::test]
+async fn the_dismissal_path_logs_no_content() {
+    let logs = capture(|| async {
+        let mut h = Harness::start_dismissing().await;
+        h.send_upsert(canary_upsert(1)).await;
+        h.expect_outcome(pb::NotificationOutcome::Displayed).await;
+        let server_id = h.sink.last_server_id().expect("displayed");
+
+        h.close(server_id, CloseReason::Dismissed).await;
+        let (id, _) = h.next_dismiss().await;
+        assert_eq!(id, id_bytes(1));
+
+        // The source's answer, and the removal that follows it.
+        h.send(&result(1, pb::NotificationOutcome::Removed)).await;
+        h.send(&remove(1)).await;
+        h.expect_outcome(pb::NotificationOutcome::UnknownNotification)
+            .await;
+    })
+    .await;
+
+    assert_no_canaries(&logs);
+    assert!(
+        logs.contains("asked the source to dismiss it too"),
+        "the wanted diagnostic is absent, so the assertion above proved nothing"
+    );
+    assert!(logs.contains("peer reported a notification outcome"));
+}
+
+/// The refusal paths log a **reason class** and an opaque identity prefix, and
+/// nothing else. This is the line somebody reads when they turned the setting
+/// on and their phone did not clear, so it has to be present *and* clean.
+#[tokio::test]
+async fn a_refused_dismissal_logs_a_reason_class_and_no_content() {
+    let logs = capture(|| async {
+        // Policy off: the ordinary case, and the one with the most traffic.
+        let mut h = Harness::start_ungranted().await;
+        h.policies
+            .grant(h.peer, NotificationPolicy::default())
+            .await;
+        h.expect_roles().await;
+        h.send(&roles(
+            &[
+                pb::NotificationRole::Source,
+                pb::NotificationRole::DismissTarget,
+            ],
+            1,
+        ))
+        .await;
+
+        h.send_upsert(canary_upsert(1)).await;
+        h.expect_outcome(pb::NotificationOutcome::Displayed).await;
+        let server_id = h.sink.last_server_id().expect("displayed");
+        h.close(server_id, CloseReason::Dismissed).await;
+        h.expect_no_dismiss().await;
+    })
+    .await;
+
+    assert_no_canaries(&logs);
+    assert!(logs.contains("a human dismissal was not sent to the source"));
+    assert!(
+        logs.contains("policy"),
+        "the reason class is what makes the line useful"
+    );
+}
+
+/// A close reason that must never travel still produces a log line, and that
+/// line names the reason and no notification.
+#[tokio::test]
+async fn a_non_human_close_logs_its_reason_and_no_content() {
+    let logs = capture(|| async {
+        let mut h = Harness::start_dismissing().await;
+        h.send_upsert(canary_upsert(1)).await;
+        h.expect_outcome(pb::NotificationOutcome::Displayed).await;
+        let server_id = h.sink.last_server_id().expect("displayed");
+
+        h.close(server_id, CloseReason::Expired).await;
+        h.expect_no_dismiss().await;
+    })
+    .await;
+
+    assert_no_canaries(&logs);
+    assert!(logs.contains("the desktop closed a mirror"));
+    assert!(logs.contains("expired"));
+    assert!(
+        !logs.contains("asked the source to dismiss"),
+        "an expiry must not even look like a dismissal in the journal"
+    );
+}
+
+/// A `DismissRequest` this desktop *receives* is still refused, and refusing
+/// it logs no content either.
+#[tokio::test]
+async fn an_inbound_dismiss_refusal_logs_no_content() {
+    let logs = capture(|| async {
+        let mut h = Harness::start_dismissing().await;
+        h.send_upsert(canary_upsert(1)).await;
+        h.expect_outcome(pb::NotificationOutcome::Displayed).await;
+        h.send(&dismiss(1)).await;
+        h.expect_outcome(pb::NotificationOutcome::RejectedRole)
+            .await;
+    })
+    .await;
+
+    assert_no_canaries(&logs);
+}
+
 #[tokio::test]
 async fn the_mirror_table_rendering_carries_no_content() {
     // The one type that holds a peer-supplied string — the application's

@@ -97,6 +97,69 @@ enum class NotificationReadiness {
 }
 
 /**
+ * What dismissal synchronisation is actually doing for one computer.
+ *
+ * ## Why this is a second type and not another [NotificationReadiness] value
+ *
+ * Mirroring and dismissal sync are two features that fail apart, and §16 of
+ * the wave brief says so for a reason measured in N2: it is entirely ordinary
+ * for mirroring to be `READY` while dismissal sync is unavailable, because the
+ * computer is running a build that announces `SINK` but not
+ * `DISMISS_REPORTER`. One enum with a single "Ready" would have to lie about
+ * whichever half was worse — telling a person their notifications are not
+ * being shared when they are, or that their phone will clear when it will not.
+ *
+ * So it is a second pure function, over the same gates plus two of its own,
+ * and every value is reachable from a real device state.
+ *
+ * ## And why "off" is not a warning
+ *
+ * [OFF] is the default and the overwhelmingly common state. It is a choice
+ * somebody has not made, not a fault, and drawing it as one would train people
+ * to ignore the amber badge that means something *is* wrong.
+ */
+enum class NotificationDismissReadiness {
+    /**
+     * Android has not given AnyFlow notification access, so this phone could
+     * not act on a dismissal even if it were switched on.
+     *
+     * First, because it is the gate that makes every other one moot, and
+     * because the fix is in Settings rather than on this screen.
+     */
+    NEEDS_ANDROID_ACCESS,
+
+    /** Switched off. The default, and not a fault. */
+    OFF,
+
+    /** On, and there is no session to this computer right now. */
+    NOT_CONNECTED,
+
+    /**
+     * On and connected, and the computer has not said it will report a human
+     * dismissal.
+     *
+     * Its notification server may not report why a notification closed, or it
+     * may be running a build older than this feature. Either way it will never
+     * ask, so nothing will happen — and saying so is better than a switch that
+     * looks armed.
+     */
+    PEER_CANNOT_REPORT,
+
+    /** On, and this computer's dismissals will be honoured here. */
+    ACTIVE,
+    ;
+
+    /**
+     * Whether this state needs somebody to do something.
+     *
+     * [OFF] and [NOT_CONNECTED] do not: one is a choice and the other is a
+     * device that is merely elsewhere.
+     */
+    val needsAttention: Boolean
+        get() = this == NEEDS_ANDROID_ACCESS || this == PEER_CANNOT_REPORT
+}
+
+/**
  * What the readiness is computed from.
  *
  * Plain booleans and a count, with no Android type anywhere, so the whole
@@ -121,6 +184,16 @@ data class NotificationGates(
     val peerConnected: Boolean,
     /** The computer has announced it can display notifications. */
     val peerIsSink: Boolean,
+    /**
+     * [NotificationPolicy.allowDismissSync] for this computer.
+     *
+     * Combined with [allowMirror] the way the runtime combines them: a policy
+     * with mirroring off and dismiss sync on is contradictory and resolves to
+     * "off", so the screen cannot promise something the runtime will refuse.
+     */
+    val allowDismissSync: Boolean = false,
+    /** The computer has announced it will report human dismissals. */
+    val peerIsDismissReporter: Boolean = false,
 ) {
 
     /**
@@ -149,5 +222,33 @@ data class NotificationGates(
         !sourceActive -> NotificationReadiness.UNAVAILABLE
         !peerIsSink -> NotificationReadiness.PEER_NOT_RECEIVING
         else -> NotificationReadiness.READY
+    }
+
+    /**
+     * The dismissal state, resolved.
+     *
+     * The order, and why:
+     *
+     * 1. **Android access first.** Without it this phone cannot cancel
+     *    anything for anybody, so however the switch is set, nothing can
+     *    happen — and the fix is somewhere else entirely.
+     * 2. **Then off.** When it is off there is nothing to fix and nothing to
+     *    warn about, and mentioning a computer's capabilities for a feature
+     *    somebody has not enabled is noise.
+     * 3. **Then the network, then the far end**, which is the same shape
+     *    [readiness] uses.
+     *
+     * The app allow-list and the mirroring switch are deliberately *not*
+     * inputs beyond `allowMirror`'s containment role: a dismissal is about a
+     * notification that is already on the computer's screen, so whether a new
+     * one would be shared says nothing about whether an old one may be
+     * cleared.
+     */
+    fun dismissReadiness(): NotificationDismissReadiness = when {
+        !osAccessGranted -> NotificationDismissReadiness.NEEDS_ANDROID_ACCESS
+        !allowMirror || !allowDismissSync -> NotificationDismissReadiness.OFF
+        !peerConnected -> NotificationDismissReadiness.NOT_CONNECTED
+        !peerIsDismissReporter -> NotificationDismissReadiness.PEER_CANNOT_REPORT
+        else -> NotificationDismissReadiness.ACTIVE
     }
 }

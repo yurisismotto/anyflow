@@ -35,14 +35,22 @@ import io.github.yurisismotto.anyflow.proto.capabilities.NotificationControl
  *  * the peer has announced a `SINK` role, and this device has announced
  *    `SOURCE`.
  *
- * ## What N1 does not do
+ * ## The one thing that travels the other way
  *
- * Android announces `SOURCE` and no other role. It does **not** announce
- * `DISMISS_TARGET`, because this wave contains no path from an inbound message
- * to `cancelNotification`: a `DismissRequest` is answered `REJECTED_ROLE` and
- * nothing happens on the device. N4 implements dismissal and widens the role
- * then. There is no `PendingIntent`, no `RemoteInput`, no action execution and
- * no reply anywhere in this capability.
+ * Android announces `SOURCE` **and** `DISMISS_TARGET`, which is ADR-0017 §1's
+ * v1 assignment. `DismissRequest` is the only message that arrives here and
+ * causes an effect on this device, and it maps to exactly one platform call:
+ * `cancelNotification(key)`, with a key this device looked up in its own
+ * in-memory map. Its own gate is
+ * [io.github.yurisismotto.anyflow.notifications.NotificationDismissRules].
+ *
+ * ## What this capability cannot do, at all
+ *
+ * There is no `PendingIntent`, no `RemoteInput`, no `RemoteViews`, no action
+ * execution, no reply, no clear-all and no snooze anywhere in it — and not
+ * because a check refuses them: `notifications_v1.proto` has no field that
+ * could carry any of them, and there is no method on the platform seam that
+ * could invoke one. The guarantee is a shape, not a condition.
  */
 class NotificationsCapability(
     private val source: NotificationSource,

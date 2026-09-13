@@ -7,6 +7,7 @@ import io.github.yurisismotto.anyflow.proto.capabilities.NotificationControl
 import io.github.yurisismotto.anyflow.proto.capabilities.NotificationOutcome
 import io.github.yurisismotto.anyflow.proto.capabilities.NotificationResult
 import io.github.yurisismotto.anyflow.proto.capabilities.NotificationRole
+import io.github.yurisismotto.anyflow.notifications.NotificationDismissRules.DismissRefusal
 import io.github.yurisismotto.anyflow.proto.capabilities.SyncMarker
 import java.security.SecureRandom
 import kotlinx.coroutines.CoroutineScope
@@ -90,6 +91,15 @@ class NotificationSource(
     private val access: AccessControl,
     private val random: SecureRandom = SecureRandom(),
     private val queue: NotificationOutboundQueue = NotificationOutboundQueue(),
+    /**
+     * A monotonic millisecond clock, for echo-suppression expiry.
+     *
+     * `SystemClock.elapsedRealtime` rather than wall time, and injected rather
+     * than called directly, for the two reasons `ClipboardSync`'s suppression
+     * cache gives: a clock change must not steer expiry, and the expiry rule
+     * must be testable without a device.
+     */
+    private val elapsedRealtime: () -> Long = { android.os.SystemClock.elapsedRealtime() },
 ) {
 
     /**
@@ -140,6 +150,37 @@ class NotificationSource(
          * current user, which is what the person sees by picking up the phone.
          */
         fun activeNotifications(): List<PlatformNotification>?
+
+        /**
+         * One notification the platform still holds, or null.
+         *
+         * `getActiveNotifications(String[])` rather than a scan of the whole
+         * shade: it asks the platform about exactly the key in hand, which is
+         * both cheaper and the only form that cannot accidentally read
+         * somebody else's notification into this process.
+         *
+         * Used to **re-check** a notification at the moment a dismissal
+         * arrives, rather than trusting the `dismissible` flag the desktop was
+         * sent — that value was true when the upsert left this device, and an
+         * app can make a notification ongoing in between. The source is the
+         * only place that knows, and this is how it knows *now*.
+         */
+        fun activeNotification(platformKey: String): PlatformNotification?
+
+        /**
+         * Cancel one notification this device sourced.
+         *
+         * **The only method on this seam with an effect outside AnyFlow**, and
+         * the only place a remote message can reach the platform at all. It
+         * takes a raw platform key that the caller looked up in the
+         * [SourceIdMap]; no remote field is ever passed to it, because no
+         * remote field can name an Android notification (ADR-0016 §10).
+         *
+         * Returns false when the platform refused or the listener is gone, so
+         * the caller can release its echo-suppression entry rather than let it
+         * swallow a later, genuine removal.
+         */
+        fun cancel(platformKey: String): Boolean
 
         /**
          * The package names in the shade right now, or null when the listener
@@ -198,6 +239,19 @@ class NotificationSource(
         val sent = LinkedHashMap<String, String>()
 
         /**
+         * How many `DismissRequest`s this peer has sent, and how many actually
+         * cancelled something.
+         *
+         * Counts, on a connection, in memory. **Not a dismiss event journal**:
+         * there is no identity, no time, no application and no outcome list
+         * here, and nothing survives the session. They exist so that "one
+         * physical dismissal produced exactly one cancel" is observable on the
+         * device rather than inferred from a shade.
+         */
+        var dismissRequests = 0
+        var dismissesPerformed = 0
+
+        /**
          * Whether this connection has been given its active-state snapshot.
          *
          * A snapshot can only be sent once the peer has claimed `SINK`, and a
@@ -223,6 +277,15 @@ class NotificationSource(
     private val sessions = LinkedHashMap<String, Session>()
 
     private val idMap = SourceIdMap()
+
+    /**
+     * One pending listener-cancel per notification, so a dismissal does not
+     * echo a removal back to the peer that asked for it.
+     *
+     * Injected clock, so the whole class is a JVM test and a wall-clock change
+     * cannot steer expiry.
+     */
+    private val echo = EchoSuppression(now = elapsedRealtime)
 
     private var listenerControl: ListenerControl? = null
 
@@ -262,16 +325,31 @@ class NotificationSource(
     /**
      * What one connected peer looks like from here.
      *
-     * No field can hold a notification: this is a role claim, two epochs and
-     * a boolean.
+     * No field can hold a notification: these are role claims, two epochs and
+     * some counters.
      */
     data class PeerStatus(
         /** This device has announced it can source, to this peer. */
         val localIsSource: Boolean,
+        /** This device has announced it will act on this peer's dismissals. */
+        val localIsDismissTarget: Boolean,
         val localEpoch: Long,
         /** The peer has announced it can display notifications. */
         val peerIsSink: Boolean,
+        /**
+         * The peer has announced it will tell us when a human dismissed a
+         * mirror it displayed.
+         *
+         * Recorded so the dismiss-sync row can say "that computer cannot do
+         * this" instead of drawing a switch that would never fire. **Never an
+         * authorization input**: what decides whether a `DismissRequest` is
+         * honoured is the pinned identity, the grant and the local policy.
+         */
+        val peerIsDismissReporter: Boolean,
         val peerEpoch: Int,
+        /** `DismissRequest`s this peer has sent, and how many were honoured. */
+        val dismissRequests: Int = 0,
+        val dismissesPerformed: Int = 0,
     )
 
     /**
@@ -353,9 +431,14 @@ class NotificationSource(
         offer(NotificationEvent.Posted(notification))
     }
 
-    /** A notification is gone. Same thread, same rule. */
-    fun onRemoved(platformKey: String) {
-        offer(NotificationEvent.Removed(platformKey))
+    /**
+     * A notification is gone. Same thread, same rule.
+     *
+     * [listenerCancelled] is the one bit of Android's removal reason that is
+     * ever consulted, and it never leaves this device.
+     */
+    fun onRemoved(platformKey: String, listenerCancelled: Boolean = false) {
+        offer(NotificationEvent.Removed(platformKey, listenerCancelled))
     }
 
     /** The system bound the listener. */
@@ -450,13 +533,26 @@ class NotificationSource(
                     announceRoles(session)
                 }
                 idMap.clear()
+                // The ids those entries named can never be mapped again, so a
+                // pending suppression could only ever swallow the wrong thing.
+                echo.clear()
             }
 
-            NotificationEvent.PolicyChanged -> updateBinding()
+            NotificationEvent.PolicyChanged -> {
+                updateBinding()
+                // A grant made or withdrawn, or notification access changed in
+                // Settings, can change what this device can physically do —
+                // and therefore its roles. `announce` returns null for an
+                // unchanged set, so this costs nothing when nothing moved.
+                for (session in sessions.values) {
+                    announceRoles(session)
+                }
+            }
 
             is NotificationEvent.Posted -> handlePosted(event.notification)
 
-            is NotificationEvent.Removed -> handleRemoved(event.platformKey)
+            is NotificationEvent.Removed ->
+                handleRemoved(event.platformKey, event.listenerCancelled)
 
             is NotificationEvent.Inbound -> handleInbound(event.peer, event.control)
         }
@@ -532,7 +628,18 @@ class NotificationSource(
         }
     }
 
-    private suspend fun handleRemoved(platformKey: String) {
+    /**
+     * A notification is gone from this phone's shade.
+     *
+     * @param listenerCancelled whether the platform said this removal was a
+     *   listener calling `cancelNotification` (`REASON_LISTENER_CANCEL`). It is
+     *   a boolean rather than the numeric reason on purpose: **the reason is
+     *   used at the source, locally, and is never transmitted** — all 23 of
+     *   Android's removal reasons mean "it is gone" to a mirror, and shipping
+     *   the number would leak facts about the device. This one bit is the only
+     *   thing any of them is used for.
+     */
+    private suspend fun handleRemoved(platformKey: String, listenerCancelled: Boolean) {
         val notificationId = idMap.notificationId(platformKey)
         idMap.forgetKey(platformKey)
         if (notificationId == null) {
@@ -541,11 +648,26 @@ class NotificationSource(
             return
         }
         val idHex = NotificationRedact.hex(notificationId)
+
+        // Echo suppression, and only for a removal the platform attributes to
+        // a listener cancel. A person swiping this notification away on the
+        // phone itself, in the same ten seconds, is a genuine removal that
+        // every peer must be told about — including one that happens to have a
+        // dismissal pending for the same identity.
+        val asked = if (listenerCancelled) echo.consume(idHex) else null
+
         for (session in sessions.values.toList()) {
             // Only peers that were actually sent this notification are told it
             // is gone. A peer learns nothing about notifications it never
             // received, including that they existed.
             if (session.sent.remove(idHex) == null) continue
+            if (session.peer.toHex() == asked) {
+                // The peer that asked for this cancel already closed its own
+                // mirror before it sent the request, so telling it would be a
+                // message it answers UNKNOWN_NOTIFICATION to — a wasted D-Bus
+                // call on GNOME and a D-Bus error on a spec-literal server.
+                continue
+            }
             emit(session, NotificationWire.remove(notificationId, localDeviceId))
         }
     }
@@ -553,12 +675,15 @@ class NotificationSource(
     /**
      * An inbound `notifications.v1` message.
      *
-     * Android is a source in v1 and nothing else. It records a peer's role
-     * announcement, notes a result, and refuses everything else with
-     * `REJECTED_ROLE` — including `DismissRequest`, because **N1 announces no
-     * `DISMISS_TARGET` role and contains no path to `cancelNotification`**.
+     * Android is a **source** and a **dismiss target** in v1, and nothing
+     * else. It records a peer's role announcement, notes a result, acts on a
+     * `DismissRequest` when every gate agrees, and refuses everything else
+     * with `REJECTED_ROLE` — an upsert, a removal or a snapshot marker names a
+     * notification on the *sender's* device, and this phone displays nobody
+     * else's notifications.
+     *
      * Refusing is not an error and never closes the session: one capability
-     * misbehaving must not cost the user everything else.
+     * misbehaving must not cost the user everything else (ADR-0017 §7).
      */
     private suspend fun handleInbound(peer: Fingerprint, control: NotificationControl) {
         val session = sessions[peer.toHex()] ?: return
@@ -596,7 +721,8 @@ class NotificationSource(
                 )
             }
 
-            NotificationControl.BodyCase.DISMISS,
+            NotificationControl.BodyCase.DISMISS -> handleDismiss(session, control)
+
             NotificationControl.BodyCase.UPSERT,
             NotificationControl.BodyCase.REMOVE,
             NotificationControl.BodyCase.SYNC,
@@ -604,6 +730,133 @@ class NotificationSource(
 
             else -> Unit
         }
+    }
+
+    /**
+     * One inbound `DismissRequest`.
+     *
+     * # The only remote effect in the capability
+     *
+     * This is the single path from a message on a socket to a platform call on
+     * this phone, and the call it reaches is exactly one:
+     * `cancelNotification(key)`. There is no action index to dispatch, no
+     * `PendingIntent` to fire, no `RemoteInput` to fill and no package, id or
+     * tag to cancel by, **because `DismissRequest` has no field that could
+     * carry any of them** — the guarantee is the shape of the message, not a
+     * check in this function.
+     *
+     * # The raw key never leaves this method
+     *
+     * The only handle a peer has is the derived, opaque `notification_id`. It
+     * is looked up in the in-memory [SourceIdMap], which is the sole reverse
+     * path in the design, and the platform key it yields is passed straight to
+     * [ListenerControl.cancel] and referenced nowhere else. It is not logged,
+     * not persisted, not put in an answer and not counted — the outcome the
+     * peer receives says what happened in the schema's own vocabulary and
+     * nothing about this device's state.
+     *
+     * # The order
+     *
+     * The gates that need no platform are [NotificationDismissRules.screen]'s,
+     * and they are ordered so that a peer failing an earlier one never reaches
+     * the id lookup — a `DismissRequest` must not become a way to ask whether
+     * a notification exists. What is left here is what only the live platform
+     * can answer: is it still in the shade, and may it be cleared *now*.
+     */
+    private suspend fun handleDismiss(session: Session, control: NotificationControl) {
+        val request = control.dismiss
+        val policy = policyFor(session.peer)
+
+        when (
+            val verdict = NotificationDismissRules.screen(
+                request = request,
+                localDeviceId = localDeviceId,
+                policy = policy,
+                canDismiss = isSourcing(),
+            )
+        ) {
+            // A bad-width identifier leaves nothing coherent to correlate a
+            // reply with, so it is refused and not answered at all.
+            NotificationDismissRules.Verdict.Unanswerable -> {
+                Log.i(TAG, "dismiss refused: ${DismissRefusal.BAD_ID_WIDTH}; not answered")
+                return
+            }
+
+            is NotificationDismissRules.Verdict.Refuse -> {
+                session.dismissRequests += 1
+                // A reason class and an opaque id prefix. Never a package, a
+                // title, a platform key or an exception message.
+                Log.i(
+                    TAG,
+                    "dismiss refused: ${verdict.reason} for " +
+                        NotificationRedact.idPrefix(request.notificationId.toByteArray()),
+                )
+                answer(session, control, verdict.outcome)
+                return
+            }
+
+            NotificationDismissRules.Verdict.Proceed -> Unit
+        }
+
+        session.dismissRequests += 1
+        val notificationId = request.notificationId.toByteArray()
+        val idHex = NotificationRedact.hex(notificationId)
+
+        // The one reverse path. A peer's 16 opaque bytes become a platform key
+        // only here, and only if this device put them in the map itself.
+        val platformKey = idMap.platformKey(notificationId)
+        if (platformKey == null) {
+            // Not an error. The notification may have been dismissed on the
+            // phone a moment ago, or this device may never have sourced it at
+            // all — and the two are deliberately indistinguishable, so the
+            // message is not a lookup oracle (ADR-0016 §9).
+            answer(session, control, NotificationOutcome.NOTIFICATION_OUTCOME_UNKNOWN_NOTIFICATION)
+            return
+        }
+
+        val control_ = listenerControl
+        if (control_ == null) {
+            answer(session, control, NotificationOutcome.NOTIFICATION_OUTCOME_UNAVAILABLE)
+            return
+        }
+
+        // Re-read from the platform rather than trusting the `dismissible`
+        // value the desktop holds: that was true when the upsert left this
+        // device, and an app can make a notification ongoing in between.
+        val current = runCatching { control_.activeNotification(platformKey) }.getOrNull()
+        val outcome = NotificationDismissRules.decideClearable(current)
+        if (outcome != NotificationOutcome.NOTIFICATION_OUTCOME_REMOVED) {
+            if (outcome == NotificationOutcome.NOTIFICATION_OUTCOME_UNKNOWN_NOTIFICATION) {
+                // Gone from the shade: drop the entry so the map does not hold
+                // a key nothing can ever act on again.
+                idMap.forgetKey(platformKey)
+            }
+            answer(session, control, outcome)
+            return
+        }
+
+        // Armed *before* the cancel, never after: `onNotificationRemoved` can
+        // arrive on the main thread while `cancelNotification` is still
+        // returning, and an entry armed afterwards would lose the race it
+        // exists to win.
+        echo.arm(idHex, session.peer.toHex())
+        val cancelled = runCatching { control_.cancel(platformKey) }.getOrDefault(false)
+        if (!cancelled) {
+            // No callback is coming, so holding the entry could only swallow a
+            // later, genuine removal. The failure class only — a platform
+            // exception message can contain the notification.
+            echo.release(idHex)
+            Log.w(TAG, "cancel refused by the platform for ${NotificationRedact.idPrefix(notificationId)}")
+            answer(session, control, NotificationOutcome.NOTIFICATION_OUTCOME_FAILED)
+            return
+        }
+
+        session.dismissesPerformed += 1
+        Log.i(
+            TAG,
+            "dismissed at a peer's request: ${NotificationRedact.idPrefix(notificationId)}",
+        )
+        answer(session, control, NotificationOutcome.NOTIFICATION_OUTCOME_REMOVED)
     }
 
     /**
@@ -817,10 +1070,16 @@ class NotificationSource(
                 PeerStatus(
                     localIsSource = session.roles.current()
                         ?.contains(NotificationRole.NOTIFICATION_ROLE_SOURCE) == true,
+                    localIsDismissTarget = session.roles.current()
+                        ?.contains(NotificationRole.NOTIFICATION_ROLE_DISMISS_TARGET) == true,
                     localEpoch = session.roles.epoch(),
                     peerIsSink = session.peerRoles
                         .has(NotificationRole.NOTIFICATION_ROLE_SINK),
+                    peerIsDismissReporter = session.peerRoles
+                        .has(NotificationRole.NOTIFICATION_ROLE_DISMISS_REPORTER),
                     peerEpoch = session.peerRoles.epoch(),
+                    dismissRequests = session.dismissRequests,
+                    dismissesPerformed = session.dismissesPerformed,
                 )
             },
         )

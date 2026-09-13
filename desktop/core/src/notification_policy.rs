@@ -90,7 +90,7 @@ impl LockPolicy {
 /// ```text
 /// allow_mirror       true      what the grant was for
 /// when_sink_locked   AppOnly   ADR-0015 §7
-/// allow_dismiss_sync false     ADR-0015 §6 — and N4 owns the runtime
+/// allow_dismiss_sync false     ADR-0015 §6 — the only outbound authority
 /// ```
 ///
 /// `allow_mirror` defaulting on is not a silent widening: reaching this type
@@ -118,10 +118,16 @@ pub struct NotificationPolicy {
     /// Whether a human closing a mirror here may dismiss the notification on
     /// the source device.
     ///
-    /// **Off by default** (ADR-0015 §6), and **not implemented in N2**: this
-    /// wave sends no `DismissRequest` and announces no `DISMISS_REPORTER`
-    /// role. The field is stored so N4 has somewhere to read the answer from,
-    /// and so the default it must respect is already written down.
+    /// **Off by default** (ADR-0015 §6), and per peer. Every other field in
+    /// this type decides what this desktop will *display*; this one is the only
+    /// authority that points outward, and it is the reason it is asked for
+    /// separately even though the action it authorises is small.
+    ///
+    /// It is one of four independent gates on a dismissal, and the other three
+    /// are deliberately not here: the peer's own `DISMISS_TARGET` claim, this
+    /// device's `DISMISS_REPORTER` role, and the source's own
+    /// `allowDismissSync`. A policy cannot manufacture a capability, and a
+    /// capability cannot manufacture a permission.
     #[serde(default)]
     pub allow_dismiss_sync: bool,
 }

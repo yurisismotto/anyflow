@@ -42,8 +42,9 @@ class PlatformNotification(
      * Android's `StatusBarNotification.key`: `userId|pkg|id|tag|uid`.
      *
      * **Never transmitted, never logged.** It is the input to the identity
-     * derivation and the argument `cancelNotification` will take in N4, and it
-     * leaves this device in neither form.
+     * derivation and the argument `cancelNotification` takes, and it leaves
+     * this device in neither form: the only handle a peer ever holds is the
+     * derived, opaque `notification_id`, and the map back is in memory here.
      */
     val platformKey: String,
     /** `sbn.getPackageName()`. Transmitted as `app_id`. */

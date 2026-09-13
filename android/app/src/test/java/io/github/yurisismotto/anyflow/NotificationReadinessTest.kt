@@ -1,6 +1,7 @@
 package io.github.yurisismotto.anyflow
 
 import io.github.yurisismotto.anyflow.notifications.NotificationGates
+import io.github.yurisismotto.anyflow.notifications.NotificationDismissReadiness
 import io.github.yurisismotto.anyflow.notifications.NotificationReadiness
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,6 +28,8 @@ class NotificationReadinessTest {
         sourceActive: Boolean = true,
         peerConnected: Boolean = true,
         peerIsSink: Boolean = true,
+        allowDismissSync: Boolean = false,
+        peerIsDismissReporter: Boolean = true,
     ) = NotificationGates(
         osAccessGranted = osAccessGranted,
         peerGranted = peerGranted,
@@ -35,6 +38,8 @@ class NotificationReadinessTest {
         sourceActive = sourceActive,
         peerConnected = peerConnected,
         peerIsSink = peerIsSink,
+        allowDismissSync = allowDismissSync,
+        peerIsDismissReporter = peerIsDismissReporter,
     )
 
     @Test
@@ -146,6 +151,119 @@ class NotificationReadinessTest {
                 readiness.isReady,
             )
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Dismissal: its own table, because it fails apart from mirroring
+    // -----------------------------------------------------------------------
+
+    /**
+     * The default. Everything else is open, so this is the setting and nothing
+     * else — which is what makes it a choice rather than a fault.
+     */
+    @Test
+    fun `dismiss sync is off by default and that is not a warning`() {
+        assertEquals(
+            NotificationDismissReadiness.OFF,
+            gates().dismissReadiness(),
+        )
+        assertFalse(gates().dismissReadiness().needsAttention)
+    }
+
+    @Test
+    fun `dismiss sync on with everything working is active`() {
+        assertEquals(
+            NotificationDismissReadiness.ACTIVE,
+            gates(allowDismissSync = true).dismissReadiness(),
+        )
+        assertFalse(gates(allowDismissSync = true).dismissReadiness().needsAttention)
+    }
+
+    /**
+     * The state §16 exists for. Mirroring is `READY` and dismissal is not, and
+     * a single "Ready" bit would have to lie about one of them.
+     */
+    @Test
+    fun `mirroring can be ready while dismissal sync is unavailable`() {
+        val g = gates(allowDismissSync = true, peerIsDismissReporter = false)
+        assertEquals(NotificationReadiness.READY, g.readiness())
+        assertEquals(NotificationDismissReadiness.PEER_CANNOT_REPORT, g.dismissReadiness())
+        assertTrue(g.dismissReadiness().needsAttention)
+    }
+
+    /**
+     * No Android notification access means this phone could not cancel
+     * anything for anybody, so that is named first — and the fix is in
+     * Settings rather than on this screen.
+     */
+    @Test
+    fun `no android access outranks every other dismissal state`() {
+        assertEquals(
+            NotificationDismissReadiness.NEEDS_ANDROID_ACCESS,
+            gates(
+                osAccessGranted = false,
+                allowDismissSync = true,
+                peerIsDismissReporter = false,
+            ).dismissReadiness(),
+        )
+        // Even with the setting off: "it is off" is not the useful sentence
+        // when the whole capability is unavailable.
+        assertEquals(
+            NotificationDismissReadiness.NEEDS_ANDROID_ACCESS,
+            gates(osAccessGranted = false).dismissReadiness(),
+        )
+    }
+
+    /**
+     * When it is off, nothing about a computer's capabilities is mentioned.
+     *
+     * Warning about a peer that cannot report dismissals, for a feature
+     * nobody enabled, is noise — and noise is how an amber badge stops meaning
+     * anything.
+     */
+    @Test
+    fun `off says nothing about what the computer can do`() {
+        assertEquals(
+            NotificationDismissReadiness.OFF,
+            gates(peerIsDismissReporter = false).dismissReadiness(),
+        )
+        assertEquals(
+            NotificationDismissReadiness.OFF,
+            gates(peerConnected = false).dismissReadiness(),
+        )
+    }
+
+    /**
+     * Turning mirroring off makes a stale flag read as off, the same
+     * containment rule the runtime applies — so the screen cannot promise
+     * something the runtime will refuse.
+     */
+    @Test
+    fun `mirroring off makes a stale dismiss flag read as off`() {
+        assertEquals(
+            NotificationDismissReadiness.OFF,
+            gates(allowMirror = false, allowDismissSync = true).dismissReadiness(),
+        )
+    }
+
+    /** A device that is merely elsewhere needs nothing doing. */
+    @Test
+    fun `a disconnected computer is not connected rather than unable`() {
+        val g = gates(allowDismissSync = true, peerConnected = false)
+        assertEquals(NotificationDismissReadiness.NOT_CONNECTED, g.dismissReadiness())
+        assertFalse(g.dismissReadiness().needsAttention)
+    }
+
+    @Test
+    fun `every dismissal state is reachable from some real gate combination`() {
+        val reached = setOf(
+            gates(osAccessGranted = false).dismissReadiness(),
+            gates().dismissReadiness(),
+            gates(allowDismissSync = true, peerConnected = false).dismissReadiness(),
+            gates(allowDismissSync = true, peerIsDismissReporter = false).dismissReadiness(),
+            gates(allowDismissSync = true).dismissReadiness(),
+        )
+        assertEquals(NotificationDismissReadiness.entries.toSet(), reached)
     }
 
     @Test

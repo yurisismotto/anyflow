@@ -347,15 +347,36 @@ async fn a_peer_that_stops_being_a_source_has_its_mirrors_closed() {
 }
 
 #[tokio::test]
-async fn this_device_announces_sink_and_only_sink() {
+async fn this_device_announces_the_two_sink_side_roles_and_no_others() {
     let mut h = Harness::start_ungranted().await;
     let announced = h.expect_roles().await;
     assert_eq!(announced.epoch, 1);
-    assert_eq!(announced.roles, vec![pb::NotificationRole::Sink as i32]);
+    // ADR-0017 §1's v1 assignment for Linux, complete as of N4.
+    assert_eq!(
+        announced.roles,
+        vec![
+            pb::NotificationRole::Sink as i32,
+            pb::NotificationRole::DismissReporter as i32
+        ]
+    );
+    assert!(
+        !announced
+            .roles
+            .contains(&(pb::NotificationRole::Source as i32)),
+        "Linux cannot observe other applications' notifications"
+    );
+    assert!(
+        !announced
+            .roles
+            .contains(&(pb::NotificationRole::DismissTarget as i32)),
+        "Linux sources nothing, so there is nothing here to be asked to dismiss"
+    );
 }
 
 #[tokio::test]
 async fn a_dismiss_request_is_refused_because_this_device_sources_nothing() {
+    // Unchanged by N4. Reporting a dismissal and acting on one are two roles
+    // precisely so that gaining the first cannot quietly grant the second.
     let mut h = Harness::start().await;
     h.send(&control(pb::notification_control::Body::Dismiss(
         pb::DismissRequest {
@@ -667,6 +688,7 @@ async fn a_server_without_body_markup_gets_the_text_unescaped() {
         body_markup: false,
         body: true,
         persistence: false,
+        dismiss_reporting: true,
     });
     // The capability set is read once at construction, so a fresh manager is
     // needed for the change to be the one under test. Rather than reaching
@@ -1005,7 +1027,13 @@ async fn an_absent_server_narrows_the_sink_role_without_a_reconnect() {
 
     h.sink.come_back().await;
     let widened = h.next_roles().await;
-    assert_eq!(widened.roles, vec![pb::NotificationRole::Sink as i32]);
+    assert_eq!(
+        widened.roles,
+        vec![
+            pb::NotificationRole::Sink as i32,
+            pb::NotificationRole::DismissReporter as i32
+        ]
+    );
     assert_eq!(widened.epoch, 3);
 }
 
@@ -1026,7 +1054,13 @@ async fn a_notification_server_restart_invalidates_the_stale_ids() {
     assert!(narrowed.roles.is_empty());
     h.sink.come_back().await;
     let widened = h.next_roles().await;
-    assert_eq!(widened.roles, vec![pb::NotificationRole::Sink as i32]);
+    assert_eq!(
+        widened.roles,
+        vec![
+            pb::NotificationRole::Sink as i32,
+            pb::NotificationRole::DismissReporter as i32
+        ]
+    );
     h.barrier().await;
 
     h.send_upsert(upsert(1, "Ana", "still here?")).await;
@@ -1167,9 +1201,16 @@ async fn a_peer_report_counts_rather_than_describes() {
     assert!(report.connected);
     assert_eq!(report.mirrors, 1);
     assert_eq!(report.displayed, 1);
-    assert_eq!(report.local_roles, 1);
+    assert_eq!(report.local_roles, 2, "SINK and DISMISS_REPORTER");
     assert_eq!(report.local_epoch, 1);
+    assert!(report.local_reports_dismissals);
     assert!(report.peer_is_source);
+    assert!(
+        !report.peer_is_dismiss_target,
+        "this harness's peer announces SOURCE alone"
+    );
     assert_eq!(report.peer_epoch, 1);
     assert!(!report.snapshot_open);
+    assert_eq!(report.dismissals_sent, 0);
+    assert_eq!(report.dismissals_refused, 0);
 }

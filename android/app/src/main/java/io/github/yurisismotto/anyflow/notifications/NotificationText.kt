@@ -23,6 +23,16 @@ object NotificationLimits {
     /** SHA-256. Absent or exactly this. */
     const val CONTENT_HASH_LENGTH = 32
 
+    /**
+     * `origin_device_id`: exactly 32 lowercase hex characters.
+     *
+     * The same value as `anyflow_core::notifications::DEVICE_ID_HEX_LEN`, and
+     * for the same reason it is a constant there: it is a **width**, and a
+     * receiver that accepted a different one would be accepting an identifier
+     * the other end cannot have produced.
+     */
+    const val DEVICE_ID_HEX_LENGTH = 32
+
     /** `device_notification_secret`: 32 CSPRNG bytes (ADR-0016 §4). */
     const val SECRET_LENGTH = 32
 

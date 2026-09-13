@@ -74,6 +74,30 @@ class AnyFlowNotificationListener : NotificationListenerService() {
             activeNotifications?.mapNotNull { extract(it) }
         }.getOrNull()
 
+        override fun activeNotification(platformKey: String): PlatformNotification? =
+            runCatching {
+                // The keyed overload, so the platform is asked about exactly
+                // the one notification in hand rather than handing this
+                // process the whole shade to filter.
+                getActiveNotifications(arrayOf(platformKey))
+                    ?.firstOrNull { it.key == platformKey }
+                    ?.let { extract(it) }
+            }.getOrNull()
+
+        override fun cancel(platformKey: String): Boolean = runCatching {
+            // The one call in AnyFlow that a remote message can reach. It
+            // takes a key the source looked up in its own in-memory map; no
+            // field from any peer is passed here, and there is no overload of
+            // this seam that takes a package, an id or a tag.
+            cancelNotification(platformKey)
+            true
+        }.getOrElse { e ->
+            // The exception *type* only. A platform exception message from the
+            // notification manager can name the notification.
+            Log.w(TAG, "cancelNotification refused: ${e.javaClass.simpleName}")
+            false
+        }
+
         override fun activePackages(): List<String>? = runCatching {
             // Names only. Nothing is extracted, so no title or body from the
             // shade is materialised in this process for the picker's sake.
@@ -135,14 +159,25 @@ class AnyFlowNotificationListener : NotificationListenerService() {
     ) {
         val notification = sbn ?: return
         if (notification.packageName == packageName) return
-        // The removal reason is deliberately not carried further. All 23 mean
-        // the same thing to a mirror — it is gone — and there is no reason for
-        // which the correct action is to keep showing it. (N4 will consult it
-        // locally, for echo suppression, and will still not transmit it.)
+        // The removal reason is **never transmitted**. All 23 mean the same
+        // thing to a mirror — it is gone — and shipping the number would leak
+        // facts about the user's device (`REASON_PACKAGE_BANNED`,
+        // `REASON_CLEAR_DATA`) while inviting an implementation to treat some
+        // removals as "soft". There is no reason for which the correct action
+        // is to keep showing it.
+        //
+        // Exactly one bit of it is used, here, locally: whether a listener
+        // cancelled this notification, which is what lets the source suppress
+        // the echo back to the peer whose dismissal caused it. It is reduced
+        // to a boolean at this line so that no portable type ever holds the
+        // number.
         //
         // The `StatusBarNotification` delivered here is explicitly "light" and
         // may be missing heavyweight fields, so nothing but the key is read.
-        source?.onRemoved(notification.key)
+        source?.onRemoved(
+            notification.key,
+            listenerCancelled = reason == REASON_LISTENER_CANCEL,
+        )
     }
 
     /**

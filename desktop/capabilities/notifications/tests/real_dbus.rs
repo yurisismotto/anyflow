@@ -201,3 +201,274 @@ async fn a_low_urgency_notification_is_accepted() {
     let id = sink.display(&quiet, None).await.expect("Notify");
     sink.close(id).await.expect("CloseNotification");
 }
+
+// ---------------------------------------------------------------------------
+// N4 — the human-dismiss gate
+// ---------------------------------------------------------------------------
+
+/// This session can tell a human dismissal from an expiry, and says so.
+///
+/// The single input to the `DISMISS_REPORTER` role, asserted against the real
+/// server rather than against the fake: it is `false` unless the
+/// `NotificationClosed` subscription actually succeeded, and whether it does is
+/// a property of this bus and this session.
+#[tokio::test]
+#[ignore = "talks to the real notification server; run with --ignored --test-threads=1"]
+async fn the_real_session_can_report_human_dismissals() {
+    let sink = connect().await;
+    eprintln!("server: {}", sink.describe());
+    eprintln!("capabilities: {:?}", sink.capabilities());
+    assert!(
+        sink.capabilities().dismiss_reporting,
+        "this session cannot observe NotificationClosed, so AnyFlow will \
+         announce no DISMISS_REPORTER role and dismissal sync will correctly \
+         report itself unavailable"
+    );
+}
+
+/// **The central N4 gate**, and the one that cannot be replaced by a mock.
+///
+/// The product feature is *a human closes the desktop mirror*, so this test
+/// waits for an actual close performed through the desktop's own notification
+/// UI and asserts that the server reported it as reason 2. Nothing here calls
+/// `CloseNotification`, injects a signal, or reaches into a seam: the whole
+/// point is that the path from a person's hand to `CloseReason::Dismissed` is
+/// exercised end to end.
+///
+/// ```console
+/// ANYFLOW_HUMAN_DISMISS=1 cargo test -p anyflow-capability-notifications \
+///     --test real_dbus -- --ignored --test-threads=1 human
+/// ```
+///
+/// Without `ANYFLOW_HUMAN_DISMISS` it skips loudly rather than failing, so an
+/// unattended `--ignored` run of this file does not hang for two minutes
+/// waiting for a person who is not there.
+#[tokio::test]
+#[ignore = "needs a person to dismiss a notification; set ANYFLOW_HUMAN_DISMISS=1"]
+async fn a_human_dismissal_on_this_desktop_is_reported_as_reason_two() {
+    if std::env::var_os("ANYFLOW_HUMAN_DISMISS").is_none() {
+        eprintln!(
+            "SKIPPED: set ANYFLOW_HUMAN_DISMISS=1 to run the human-dismiss gate. \
+             It posts one notification and waits for you to close it."
+        );
+        return;
+    }
+
+    let sink = connect().await;
+    let mut closes = sink
+        .closed_events()
+        .expect("the session can observe closes");
+
+    let id = sink
+        .display(
+            &mirror("Close this notification from the desktop, by hand."),
+            None,
+        )
+        .await
+        .expect("Notify");
+
+    eprintln!(
+        "\n  >>> A notification is on your screen (id {id}).\n  \
+         >>> Dismiss it the way a person would: click its X, or press the\n  \
+         >>> close button in the notification list. Do NOT use gdbus.\n"
+    );
+
+    let closed = tokio::time::timeout(Duration::from_secs(120), closes.recv())
+        .await
+        .expect("a NotificationClosed signal arrived within two minutes")
+        .expect("the stream is open");
+
+    assert_eq!(closed.id, id, "the signal names the notification we posted");
+    eprintln!(
+        "observed: id={} reason={}",
+        closed.id,
+        closed.reason.as_str()
+    );
+    assert_eq!(
+        closed.reason,
+        CloseReason::Dismissed,
+        "this desktop reported a human dismissal as something else; N4's only \
+         permitted trigger would never fire, or would fire for the wrong thing"
+    );
+    assert!(closed.reason.is_human_dismissal());
+}
+
+/// The same gate, but through the **whole capability**: a real D-Bus sink, a
+/// real `NotificationManager`, a real granted peer with dismiss sync on, and a
+/// real person closing the notification.
+///
+/// What it proves that the test above does not: that one physical dismissal
+/// produces **exactly one** `DismissRequest`, that the request names the
+/// identity and origin the source sent, and that nothing else goes out.
+///
+/// ```console
+/// ANYFLOW_HUMAN_DISMISS=1 cargo test -p anyflow-capability-notifications \
+///     --test real_dbus -- --ignored --test-threads=1 end_to_end
+/// ```
+#[tokio::test]
+#[ignore = "needs a person to dismiss a notification; set ANYFLOW_HUMAN_DISMISS=1"]
+async fn a_human_dismissal_end_to_end_produces_exactly_one_dismiss_request() {
+    use anyflow_capability_notifications::backend::{LockSource, UnknownLock};
+    use anyflow_capability_notifications::{
+        NotificationAuthorizer, NotificationManager, NotificationPolicy,
+    };
+    use anyflow_core::Fingerprint;
+    use anyflow_proto::v1::capabilities as pb;
+    use anyflow_proto::Message as _;
+    use std::sync::Arc;
+
+    if std::env::var_os("ANYFLOW_HUMAN_DISMISS").is_none() {
+        eprintln!("SKIPPED: set ANYFLOW_HUMAN_DISMISS=1 to run the end-to-end human gate.");
+        return;
+    }
+
+    struct AlwaysGranted;
+    #[async_trait::async_trait]
+    impl NotificationAuthorizer for AlwaysGranted {
+        async fn policy_for(&self, _peer: &Fingerprint) -> NotificationPolicy {
+            NotificationPolicy {
+                allow_dismiss_sync: true,
+                // `Full`, and the lock source below reports locked — so this
+                // gate exercises the display path rather than the reduction.
+                when_sink_locked: anyflow_capability_notifications::LockPolicy::Full,
+                ..NotificationPolicy::default()
+            }
+        }
+    }
+
+    let sink: Arc<dyn NotificationSink> = Arc::new(connect().await);
+    let manager =
+        NotificationManager::new(sink, Arc::new(UnknownLock) as Arc<dyn LockSource>).await;
+    manager
+        .set_authorizer(Arc::new(AlwaysGranted) as Arc<dyn NotificationAuthorizer>)
+        .await;
+    manager.spawn_platform_pumps();
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let peer = Fingerprint::from_hex(&"ab".repeat(32)).expect("fingerprint");
+    manager.attach_session(peer, tx).await;
+
+    // The role announcement this desktop makes first. It must include
+    // DISMISS_REPORTER on a session with a working notification server.
+    let announced = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("announced")
+        .expect("a message");
+    let control = pb::NotificationControl::decode(announced.payload.as_slice()).expect("decodes");
+    match control.body {
+        Some(pb::notification_control::Body::Roles(r)) => {
+            eprintln!("announced roles: {:?} epoch {}", r.roles, r.epoch);
+            assert!(r
+                .roles
+                .contains(&(pb::NotificationRole::DismissReporter as i32)));
+        }
+        other => panic!("expected roles, got {other:?}"),
+    }
+
+    // The phone claims both of its v1 roles.
+    let origin = "0123456789abcdef0123456789abcdef";
+    manager
+        .handle_control(
+            peer,
+            &pb::NotificationControl {
+                body: Some(pb::notification_control::Body::Roles(
+                    pb::NotificationRoles {
+                        roles: vec![
+                            pb::NotificationRole::Source as i32,
+                            pb::NotificationRole::DismissTarget as i32,
+                        ],
+                        epoch: 1,
+                    },
+                )),
+            }
+            .encode_to_vec(),
+        )
+        .await
+        .expect("roles");
+
+    // One mirrored notification, exactly as a phone would send it.
+    let notification_id = vec![0x4eu8; 16];
+    manager
+        .handle_control(
+            peer,
+            &pb::NotificationControl {
+                body: Some(pb::notification_control::Body::Upsert(
+                    pb::NotificationUpsert {
+                        notification_id: notification_id.clone(),
+                        origin_device_id: origin.to_string(),
+                        app_id: "example.anyflow.n4fixture".to_string(),
+                        app_label: FIXTURE_APP.to_string(),
+                        title: FIXTURE_SUMMARY.to_string(),
+                        body: "Close this from the desktop, by hand.".to_string(),
+                        importance: pb::NotificationImportance::Normal as i32,
+                        privacy: pb::NotificationPrivacy::Private as i32,
+                        dismissible: true,
+                        ..pb::NotificationUpsert::default()
+                    },
+                )),
+            }
+            .encode_to_vec(),
+        )
+        .await
+        .expect("upsert");
+
+    let displayed = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .expect("answered")
+        .expect("a message");
+    let control = pb::NotificationControl::decode(displayed.payload.as_slice()).expect("decodes");
+    match control.body {
+        Some(pb::notification_control::Body::Result(r)) => assert_eq!(
+            r.outcome,
+            pb::NotificationOutcome::Displayed as i32,
+            "the mirror must be on the screen before anybody can dismiss it"
+        ),
+        other => panic!("expected a result, got {other:?}"),
+    }
+
+    eprintln!(
+        "\n  >>> A mirrored notification is on your screen.\n  \
+         >>> Dismiss it by hand, the way a person would.\n"
+    );
+
+    let dismissed = tokio::time::timeout(Duration::from_secs(120), rx.recv())
+        .await
+        .expect("a dismiss request within two minutes")
+        .expect("a message");
+    let control = pb::NotificationControl::decode(dismissed.payload.as_slice()).expect("decodes");
+    match control.body {
+        Some(pb::notification_control::Body::Dismiss(d)) => {
+            assert_eq!(d.notification_id, notification_id);
+            assert_eq!(d.origin_device_id, origin);
+            eprintln!(
+                "DismissRequest: {} bytes on the wire",
+                dismissed.payload.len()
+            );
+        }
+        other => panic!("expected a dismiss request, got {other:?}"),
+    }
+
+    // Exactly one. Anything else arriving in the next two seconds — a second
+    // dismissal, a re-display, a role churn — fails the gate.
+    match tokio::time::timeout(Duration::from_secs(2), rx.recv()).await {
+        Err(_) => {}
+        Ok(Some(extra)) => {
+            let control =
+                pb::NotificationControl::decode(extra.payload.as_slice()).expect("decodes");
+            panic!("one physical dismissal produced a second message: {control:?}");
+        }
+        Ok(None) => {}
+    }
+
+    let report = manager
+        .peer_reports()
+        .await
+        .into_iter()
+        .find(|r| r.peer == peer)
+        .expect("a report");
+    assert_eq!(report.dismissals_sent, 1);
+    assert_eq!(
+        report.mirrors, 0,
+        "the mirror was purged before the request"
+    );
+}
