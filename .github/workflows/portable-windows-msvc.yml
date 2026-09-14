@@ -176,16 +176,24 @@ jobs:
           }
 
       # The same discipline for the notifications capability, whose test set
-      # is split three ways: `dismiss`, `sink` and `logging` are portable and compile
-      # everywhere, while `real_dbus` and `real_lock` are whole-file
-      # `#![cfg(feature = "linux-dbus")]` and compile to empty binaries with
-      # the feature off. That is why they need no exclusion below — but a *new*
-      # target must be classified deliberately rather than discovered when this
-      # job goes red.
+      # is split three ways: `dismiss`, `sink`, `logging` and `hardening` are
+      # portable and compile everywhere, while `real_dbus` and `real_lock` are
+      # whole-file `#![cfg(feature = "linux-dbus")]` and compile to empty
+      # binaries with the feature off. That is why they need no exclusion
+      # below — but a *new* target must be classified deliberately rather than
+      # discovered when this job goes red.
+      #
+      # `hardening.rs` (N5) is **portable**, deliberately: everything it
+      # exercises — the reconnect grace, the queue and mirror ceilings, role
+      # epochs, backend loss, lock transitions and every injected failure —
+      # runs against the `MemorySink`/`MemoryLock` pair, which is the whole
+      # reason the `NotificationSink` seam exists. A Windows sink will want
+      # every one of those assertions unchanged.
       - name: Notification test files unchanged (classification guard)
         run: |
           $expected = @(
             'dismiss.rs',
+            'hardening.rs',
             'logging.rs',
             'real_dbus.rs',
             'real_lock.rs',

@@ -1322,3 +1322,637 @@ async fn the_status_the_desktop_ui_reads_carries_no_notification_content() {
         .expect("a report for the connected peer");
     assert_eq!(peer.mirrors, 1);
 }
+
+// ---------------------------------------------------------------------------
+// N5 — mid-session grant convergence
+// ---------------------------------------------------------------------------
+//
+// The defect these pin was seen twice on hardware, in N3 §G4 and again in N4
+// §17: two devices already connected, the user enables `notifications.v1` on
+// both ends, everything in both trust stores is correct — and nothing happens
+// until somebody presses Disconnect and Connect on the phone.
+//
+// The cause is one frozen vector. `Established::negotiated_capabilities` is
+// computed once during `HELLO` as *what both sides implement* intersected with
+// *what this peer is granted*, and it is then the authority for the rest of
+// the session: it decides which capabilities get `on_peer_connected` — which
+// is the only thing that makes the desktop announce a `SINK` role at all —
+// and it is the per-message filter that answers `UNSUPPORTED_CAPABILITY` to
+// everything it does not name. A grant added afterwards cannot enter it.
+//
+// ADR-0017 §3 already says a grant needs a reconnect to widen. What was
+// missing is that nothing ever asked for one.
+
+/// What the **desktop** negotiated for this peer's live session.
+///
+/// Deliberately not `ConnectedSession::negotiated_capabilities`, which is the
+/// dialling side's view and is the plain intersection of the two advertised
+/// sets. The grant filter lives on the answering side — it is the desktop that
+/// decides what this peer is allowed to do — so the desktop's vector is the
+/// one every test here is about. Reading the client's instead would have made
+/// the whole suite pass against no fix at all.
+async fn desktop_negotiated(server: &TestServer, peer: anyflow_core::Fingerprint) -> Vec<String> {
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    loop {
+        if let Some(handle) = server.state.session_for(&peer).await {
+            return handle.negotiated_capabilities().to_vec();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the desktop never registered a session for this peer"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// The id of the desktop's session for this peer. Not the client's: the two
+/// are different objects with different ids, minted from the same counter.
+async fn desktop_session_id(
+    server: &TestServer,
+    peer: anyflow_core::Fingerprint,
+) -> anyflow_core::session::SessionId {
+    server
+        .state
+        .session_for(&peer)
+        .await
+        .expect("the desktop has a session for this peer")
+        .id()
+}
+
+/// Pairs and connects **without** granting `notifications.v1`.
+///
+/// This is the state a real user is in: pairing grants nothing, because the
+/// capability is deliberately absent from `auto_grant`.
+async fn connected_but_not_granted() -> (TestServer, TestClient, ConnectedSession) {
+    let server = TestServer::start().await;
+    let client = TestClient::new("phone");
+
+    let token = server.open_pairing(Duration::from_secs(30)).await;
+    let session = client
+        .connect(server.addr, server.fingerprint, Some(&token))
+        .await
+        .expect("pairing");
+
+    assert!(
+        !desktop_negotiated(&server, client.fingerprint)
+            .await
+            .contains(&CAPABILITY_ID.to_string()),
+        "the premise of every test below: this session cannot use the \
+         capability, because it was not granted when the session was built"
+    );
+    (server, client, session)
+}
+
+/// Waits for a session task to finish, and says so rather than hanging.
+async fn assert_session_ends(session: ConnectedSession, what: &str) {
+    let ended = tokio::time::timeout(TIMEOUT, session.task).await;
+    assert!(ended.is_ok(), "the session was not ended: {what}");
+}
+
+/// **The N5 primary item.** Granting mid-session ends the session that cannot
+/// use the grant, so the peer reconnects and negotiates it.
+///
+/// Nothing here dials, retries or schedules: ending the session is the whole
+/// mechanism. On a real phone the peer's own `ConnectionCoordinator` treats a
+/// session that ended as proof the endpoint works, resets its ladder, and
+/// redials about two seconds later.
+#[tokio::test]
+async fn granting_mid_session_ends_the_session_that_cannot_use_the_grant() {
+    let (server, client, session) = connected_but_not_granted().await;
+    let session_id = desktop_session_id(&server, client.fingerprint).await;
+
+    let response = anyflow_runtime::server::do_grant(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        CAPABILITY_ID,
+        true,
+    )
+    .await;
+
+    match response {
+        anyflow_runtime::control::Response::Ok { message } => assert!(
+            message.contains("reconnecting"),
+            "the operator is told the device is being reconnected: {message}"
+        ),
+        other => panic!("the grant was refused: {other:?}"),
+    }
+
+    assert_session_ends(session, "a grant widened past what it negotiated").await;
+
+    // And the peer's next connection — the one its coordinator makes on its
+    // own — negotiates the capability and gets the roles announcement that
+    // the frozen session could never have produced.
+    let reconnected = client
+        .connect(server.addr, server.fingerprint, None)
+        .await
+        .expect("reconnect");
+    assert!(
+        desktop_negotiated(&server, client.fingerprint)
+            .await
+            .contains(&CAPABILITY_ID.to_string()),
+        "the reconnect is the point: the new session must be able to use it"
+    );
+    assert_ne!(
+        desktop_session_id(&server, client.fingerprint).await,
+        session_id,
+        "a genuinely new session, not the old one re-reported"
+    );
+    reconnected.close().await;
+}
+
+/// The reconnect actually produces a working notification session.
+///
+/// The test above proves the session was rebuilt. This one proves the rebuild
+/// was worth doing: the desktop announces `SINK` and `DISMISS_REPORTER` on the
+/// new session and then displays a notification — which is the user-visible
+/// outcome the whole item exists for.
+#[tokio::test]
+async fn the_session_the_reconnect_builds_can_actually_mirror() {
+    let server = TestServer::start().await;
+    let (client, captured) = TestClient::new_raw_notifications("phone");
+
+    let token = server.open_pairing(Duration::from_secs(30)).await;
+    let session = client
+        .connect(server.addr, server.fingerprint, Some(&token))
+        .await
+        .expect("pairing");
+    assert!(!desktop_negotiated(&server, client.fingerprint)
+        .await
+        .contains(&CAPABILITY_ID.to_string()));
+
+    // Nothing has been announced, because nothing was negotiated.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        captured.drain().await.is_empty(),
+        "a session that never negotiated the capability must announce nothing"
+    );
+
+    anyflow_runtime::server::do_grant(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        CAPABILITY_ID,
+        true,
+    )
+    .await;
+    assert_session_ends(session, "the grant widened").await;
+
+    let session = client
+        .connect(server.addr, server.fingerprint, None)
+        .await
+        .expect("reconnect");
+
+    let announced = captured.next_roles(TIMEOUT).await;
+    assert_eq!(announced.epoch, 1, "a new session starts its epochs again");
+    assert_eq!(
+        announced.roles,
+        vec![
+            clip_pb::NotificationRole::Sink as i32,
+            clip_pb::NotificationRole::DismissReporter as i32,
+        ]
+    );
+
+    assert!(
+        send_notification_control(
+            &session,
+            roles_body(&[clip_pb::NotificationRole::Source], 1)
+        )
+        .await
+    );
+    assert!(
+        send_notification_control(
+            &session,
+            clip_pb::notification_control::Body::Upsert(upsert(1, "Ana", "lunch?"))
+        )
+        .await
+    );
+    assert_eq!(
+        captured.next_result(TIMEOUT).await.outcome,
+        clip_pb::NotificationOutcome::Displayed as i32,
+        "the user's grant took effect without anybody pressing Disconnect"
+    );
+    assert_eq!(server.notification_sink.live_count(), 1);
+    session.close().await;
+}
+
+/// **Brief §4 B / G.** A burst of writes produces one reconnect, and the
+/// policy writes in it produce none.
+///
+/// This is the realistic sequence a person generates in the GUI: switch the
+/// capability on, then set the three notification settings beside it. Only the
+/// first is a permission, and only the first may cost a session.
+#[tokio::test]
+async fn a_burst_of_settings_after_the_grant_causes_no_further_reconnect() {
+    use anyflow_runtime::control::NotificationSetting;
+
+    let (server, client, session) = connected_but_not_granted().await;
+    let device = client.fingerprint.to_hex();
+
+    anyflow_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
+    assert_session_ends(session, "the grant widened").await;
+
+    let session = client
+        .connect(server.addr, server.fingerprint, None)
+        .await
+        .expect("reconnect");
+    let id = desktop_session_id(&server, client.fingerprint).await;
+
+    // Everything the consent card writes next. None of it is a grant.
+    for setting in [
+        NotificationSetting::Mirror { enabled: true },
+        NotificationSetting::WhenLocked {
+            policy: "full".into(),
+        },
+        NotificationSetting::DismissSync { enabled: true },
+    ] {
+        anyflow_runtime::server::do_notifications_policy(&server.state, &device, setting).await;
+    }
+    // And the grant written again, as a GUI that echoes its own switch would.
+    anyflow_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let live = server
+        .state
+        .session_for(&client.fingerprint)
+        .await
+        .expect("the session survived the settings burst");
+    assert_eq!(
+        live.id(),
+        id,
+        "a settings burst after the grant rebuilt the session"
+    );
+    session.close().await;
+}
+
+/// **Brief §4 E.** Revocation narrows immediately and never reconnects.
+///
+/// A reconnect here would be exactly backwards: it would take a permission
+/// away and hand the peer a brand new session in the same breath.
+#[tokio::test]
+async fn withdrawing_a_grant_never_rebuilds_the_session() {
+    let (server, client, session) = connected_but_not_granted().await;
+    let device = client.fingerprint.to_hex();
+
+    anyflow_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
+    assert_session_ends(session, "the grant widened").await;
+
+    let session = client
+        .connect(server.addr, server.fingerprint, None)
+        .await
+        .expect("reconnect");
+    let id = desktop_session_id(&server, client.fingerprint).await;
+
+    let response =
+        anyflow_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, false).await;
+    match response {
+        anyflow_runtime::control::Response::Ok { message } => assert!(
+            !message.contains("reconnecting"),
+            "a withdrawal must not announce a reconnect: {message}"
+        ),
+        other => panic!("{other:?}"),
+    }
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        server
+            .state
+            .session_for(&client.fingerprint)
+            .await
+            .expect("the session survived the withdrawal")
+            .id(),
+        id,
+        "withdrawing a grant tore down a session it had no reason to"
+    );
+    session.close().await;
+}
+
+/// **Brief §4 G.** Another capability's grant does not restart a session that
+/// can already use it.
+///
+/// `battery.v1` is in `auto_grant`, so a session negotiates it from the first
+/// handshake. Re-asserting it must be inert.
+#[tokio::test]
+async fn regranting_a_capability_the_session_already_has_is_inert() {
+    let (server, client, session) = connected_but_not_granted().await;
+    let id = desktop_session_id(&server, client.fingerprint).await;
+    assert!(
+        desktop_negotiated(&server, client.fingerprint)
+            .await
+            .contains(&"battery.v1".to_string()),
+        "battery.v1 is auto-granted at pairing, so this session already has it"
+    );
+
+    let response = anyflow_runtime::server::do_grant(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        "battery.v1",
+        true,
+    )
+    .await;
+    match response {
+        anyflow_runtime::control::Response::Ok { message } => assert!(
+            !message.contains("reconnecting"),
+            "nothing needed rebuilding: {message}"
+        ),
+        other => panic!("{other:?}"),
+    }
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        server
+            .state
+            .session_for(&client.fingerprint)
+            .await
+            .expect("session")
+            .id(),
+        id
+    );
+    session.close().await;
+}
+
+/// The correction is capability-agnostic, and that is deliberate.
+///
+/// `notifications.v1` is where the freeze was observed, but `clipboard.v1` and
+/// `files.v1` froze in exactly the same way and for exactly the same reason —
+/// neither is in `auto_grant` either. Naming notifications in the fix would
+/// have fixed one instance of a defect in the capability model.
+#[tokio::test]
+async fn the_convergence_is_not_specific_to_notifications() {
+    for capability in ["clipboard.v1", "files.v1"] {
+        let (server, client, session) = connected_but_not_granted().await;
+        assert!(
+            !desktop_negotiated(&server, client.fingerprint)
+                .await
+                .contains(&capability.to_string()),
+            "{capability} should not be granted by pairing alone"
+        );
+
+        anyflow_runtime::server::do_grant(
+            &server.state,
+            &client.fingerprint.to_hex(),
+            capability,
+            true,
+        )
+        .await;
+        assert_session_ends(session, capability).await;
+
+        let reconnected = client
+            .connect(server.addr, server.fingerprint, None)
+            .await
+            .expect("reconnect");
+        assert!(
+            desktop_negotiated(&server, client.fingerprint)
+                .await
+                .contains(&capability.to_string()),
+            "{capability} did not converge"
+        );
+        reconnected.close().await;
+    }
+}
+
+/// **Brief §4 D.** A grant made while the peer is away asks for nothing.
+///
+/// There is no session to rebuild and no dialling to do: the peer's next
+/// handshake reads the trust store as it finds it. Asserted because a fix that
+/// started dialling from the desktop would pass every other test here.
+#[tokio::test]
+async fn granting_while_the_peer_is_away_converges_on_its_own() {
+    let (server, client, session) = connected_but_not_granted().await;
+    session.close().await;
+    wait_until(TIMEOUT, || async {
+        server
+            .state
+            .session_for(&client.fingerprint)
+            .await
+            .is_none()
+    })
+    .await;
+
+    let response = anyflow_runtime::server::do_grant(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        CAPABILITY_ID,
+        true,
+    )
+    .await;
+    match response {
+        anyflow_runtime::control::Response::Ok { message } => assert!(
+            !message.contains("reconnecting"),
+            "there was nothing to reconnect: {message}"
+        ),
+        other => panic!("{other:?}"),
+    }
+
+    // Nothing dialled the phone. The phone dialled.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        server
+            .state
+            .session_for(&client.fingerprint)
+            .await
+            .is_none(),
+        "the desktop must never initiate a connection to a phone"
+    );
+
+    let session = client
+        .connect(server.addr, server.fingerprint, None)
+        .await
+        .expect("the phone reconnects on its own");
+    assert!(desktop_negotiated(&server, client.fingerprint)
+        .await
+        .contains(&CAPABILITY_ID.to_string()));
+    session.close().await;
+}
+
+/// The reconnect costs the pairing nothing, and costs no other capability
+/// anything either.
+#[tokio::test]
+async fn the_reconnect_keeps_the_pairing_and_every_other_capability() {
+    let (server, client, session) = connected_but_not_granted().await;
+    let before = server.granted_capabilities(client.fingerprint).await;
+
+    anyflow_runtime::server::do_grant(
+        &server.state,
+        &client.fingerprint.to_hex(),
+        CAPABILITY_ID,
+        true,
+    )
+    .await;
+    assert_session_ends(session, "the grant widened").await;
+
+    assert!(
+        server.is_paired(client.fingerprint).await,
+        "a reconnect is not an unpairing"
+    );
+    let after = server.granted_capabilities(client.fingerprint).await;
+    for capability in &before {
+        assert!(
+            after.contains(capability),
+            "{capability} was lost by the reconnect"
+        );
+    }
+
+    let session = client
+        .connect(server.addr, server.fingerprint, None)
+        .await
+        .expect("reconnect");
+    let negotiated = desktop_negotiated(&server, client.fingerprint).await;
+    for capability in &before {
+        assert!(
+            negotiated.contains(capability),
+            "{capability} did not come back on the new session"
+        );
+    }
+    session.close().await;
+}
+
+/// **NOTIF-SEC-25, extended to the N5 convergence path.**
+///
+/// The mid-session grant correction added log lines on a path that runs while
+/// a notification is on the screen: the grant handler, the renegotiation
+/// decision, the session shutdown, the reattach and the reconnect snapshot.
+/// None of them may carry a title, a body, an application label or an
+/// application id — and "may not" is proved here rather than grepped, at
+/// `TRACE`, because `RUST_LOG=trace` is exactly what somebody runs when
+/// something is wrong and exactly the worst moment to spill a stranger's
+/// message into a file they are about to attach to a bug report.
+#[tokio::test]
+async fn the_mid_session_convergence_path_logs_no_notification_content() {
+    use std::io;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt::MakeWriter;
+
+    const TITLE: &str = "CANARY-N5-CONVERGE-TITLE-9b2f";
+    const BODY: &str = "CANARY-N5-CONVERGE-BODY-4e71";
+    const APP_LABEL: &str = "CANARY-N5-CONVERGE-APPLABEL-0a5c";
+    const APP_ID: &str = "canary.n5.converge.d31f";
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+    impl io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().expect("not poisoned").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    impl<'a> MakeWriter<'a> for Captured {
+        type Writer = Captured;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    let captured = Captured::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(captured.clone())
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .finish();
+
+    {
+        // Scoped rather than global: `set_global_default` may be called only
+        // once per process and the rest of this suite must stay unaffected.
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let server = TestServer::start().await;
+        let (client, notifications) = TestClient::new_raw_notifications("phone");
+        let token = server.open_pairing(Duration::from_secs(30)).await;
+        let session = client
+            .connect(server.addr, server.fingerprint, Some(&token))
+            .await
+            .expect("pairing");
+
+        // Grant first, reconnect, and put a canary on the screen.
+        // Waited for, so the grant genuinely lands on a live session rather
+        // than on a registry that has not caught up — otherwise the decision
+        // would be `no-session` and this would canary the wrong path.
+        let negotiated = desktop_negotiated(&server, client.fingerprint).await;
+        assert!(!negotiated.contains(&CAPABILITY_ID.to_string()));
+
+        let response = anyflow_runtime::server::do_grant(
+            &server.state,
+            &client.fingerprint.to_hex(),
+            CAPABILITY_ID,
+            true,
+        )
+        .await;
+        match response {
+            anyflow_runtime::control::Response::Ok { message } => assert!(
+                message.contains("reconnecting"),
+                "the convergence path was not taken, so this canaries nothing"
+            ),
+            other => panic!("{other:?}"),
+        }
+        let _ = tokio::time::timeout(TIMEOUT, session.task).await;
+
+        let session = client
+            .connect(server.addr, server.fingerprint, None)
+            .await
+            .expect("reconnect");
+        notifications.next_roles(TIMEOUT).await;
+        assert!(
+            send_notification_control(
+                &session,
+                roles_body(&[clip_pb::NotificationRole::Source], 1)
+            )
+            .await
+        );
+
+        let mut message = upsert(1, TITLE, BODY);
+        message.app_label = APP_LABEL.to_string();
+        message.app_id = APP_ID.to_string();
+        assert!(
+            send_notification_control(
+                &session,
+                clip_pb::notification_control::Body::Upsert(message)
+            )
+            .await
+        );
+        assert_eq!(
+            notifications.next_result(TIMEOUT).await.outcome,
+            clip_pb::NotificationOutcome::Displayed as i32
+        );
+
+        // Now withdraw and re-grant with that notification live, so the
+        // revocation, the mirror close and a second renegotiation decision
+        // all run while there is content to leak.
+        anyflow_runtime::server::do_grant(
+            &server.state,
+            &client.fingerprint.to_hex(),
+            CAPABILITY_ID,
+            false,
+        )
+        .await;
+        anyflow_runtime::server::do_grant(
+            &server.state,
+            &client.fingerprint.to_hex(),
+            CAPABILITY_ID,
+            true,
+        )
+        .await;
+        let _ = tokio::time::timeout(TIMEOUT, session.task).await;
+    }
+
+    let text = String::from_utf8_lossy(&captured.0.lock().expect("not poisoned")).into_owned();
+    assert!(
+        !text.is_empty(),
+        "nothing was captured, so this test proves nothing"
+    );
+    // Coverage is proved two ways, because either alone can lie. The
+    // response above proves the convergence path actually ran; this proves
+    // the subscriber was attached to the daemon's own events while it did,
+    // rather than to an empty session that would make every assertion below
+    // vacuously true.
+    assert!(
+        text.contains("anyflow_"),
+        "no daemon event reached the capture, so this test proves nothing:\n{text}"
+    );
+    for canary in [TITLE, BODY, APP_LABEL, APP_ID] {
+        assert!(
+            !text.contains(canary),
+            "the convergence path logged {canary}:\n{text}"
+        );
+    }
+}

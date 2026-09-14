@@ -1,6 +1,7 @@
 # `notifications.v1`
 
-**Status after N0: protocol only. Nothing mirrors a notification yet.**
+**Status after N5: implemented on Android and Linux, hardened, awaiting N6
+final certification.**
 
 This document describes the whole design and marks, in every section, what
 exists today and what is future work. It summarises rather than restates the
@@ -10,29 +11,27 @@ access contract [ADR-0015](../adr/ADR-0015-notification-access.md), for naming
 [ADR-0016](../adr/ADR-0016-notification-identity.md), and for roles
 [ADR-0017](../adr/ADR-0017-capability-roles.md).
 
-## What exists after N0
+## What exists after N5
 
-| Thing | State |
-| --- | --- |
-| `protocol/proto/anyflow/v1/capabilities/notifications_v1.proto` | **Exists.** Compiled by both toolchains |
-| `anyflow_core::notifications` — limits, validation, roles, snapshot framing | **Exists.** Portable, pure functions of decoded messages |
-| Capability id `notifications.v1` | **Defined**, registered by nobody |
-| Android `NotificationListenerService` | **Does not exist.** The manifest is unchanged |
-| Linux notification sink, D-Bus code | **Does not exist** |
-| `NotificationSink` trait | **Does not exist** — deliberately, see below |
-| Settings UI, app picker, permission flow | **Does not exist** |
-| Grants, policy, filtering, lock policy | **Does not exist** |
-| Any runtime that mirrors or dismisses anything | **Does not exist** |
-
-Because nothing registers the capability, `notifications.v1` never appears in a
-`HELLO`, is never negotiated, and is invisible to every peer. `battery.v1`,
-`files.v1` and `clipboard.v1` behave exactly as they did.
+| Thing | State | Wave |
+| --- | --- | --- |
+| `protocol/proto/anyflow/v1/capabilities/notifications_v1.proto` | **Exists.** Compiled by both toolchains, and **unchanged since N0** | N0 |
+| `anyflow_core::notifications` — limits, validation, roles, snapshot framing | **Exists.** Portable, pure functions of decoded messages | N0 |
+| Capability id `notifications.v1` | **Registered unconditionally** on both ends | N1, N2 |
+| Android `NotificationListenerService` | **Exists.** Bound only while a granted peer is connected | N1 |
+| Linux notification sink, D-Bus code, `NotificationSink` trait | **Exists** | N2 |
+| Settings UI, app picker, permission flow | **Exists** on both ends | N3 |
+| Grants, policy, filtering, lock policy | **Exists**, deny by default | N3 |
+| Dismissal synchronisation and echo suppression | **Exists**, opt-in per peer | N4 |
+| Reconnect grace, snapshot resync, queue and mirror ceilings | **Exists** | N2, N5 |
+| Mid-session grant convergence | **Exists** — see *Grant convergence* below | N5 |
+| Hardware certification | **N6** | — |
 
 ## The shape, end to end
 
 ```text
    ┌─────────────────────────────── Android phone ───────────────────────────────┐
-   │  NotificationListenerService            (N1 — does not exist yet)           │
+   │  NotificationListenerService                               (N1)            │
    │        │  onNotificationPosted / Removed / ListenerConnected                │
    │        ▼                                                                    │
    │  filter · lock policy · SECRET drop · own-package drop     (N1, N3)         │
@@ -53,7 +52,7 @@ Because nothing registers the capability, `notifications.v1` never appears in a
             ▼
    ┌─────────────────────────────── Fedora desktop ──────────────────────────────┐
    │  anyflow-capability-notifications — decode, validate       (N2)             │
-   │        │      uses anyflow_core::notifications             (exists now)     │
+   │        │      uses anyflow_core::notifications             (N0)             │
    │        ▼                                                                    │
    │  grant check · policy · dedup · MirrorTable                (N2, N3)         │
    │        │                                                                    │
@@ -155,6 +154,60 @@ user revokes notification access in Android Settings
 * **A role is not an authorization input.** Platform capability, peer grant and
   role are three different questions; ADR-0017 §6 tabulates why collapsing any
   two would be a consent failure.
+
+## Grant convergence — what happens when a grant arrives mid-session
+
+A role narrows and widens on a live session. A **grant** does not, and the
+difference is deliberate: a role is a peer's claim about what it can physically
+do, while a grant is an authorization, and widening an authorization without a
+fresh handshake is the one direction that has to be re-derived rather than
+patched ([ADR-0017 §3](../adr/ADR-0017-capability-roles.md)).
+
+`HELLO` computes one vector — *what both sides implement*, intersected with
+*what this peer is granted* — and that vector then decides, for the life of the
+session, which capabilities get `on_peer_connected` and which inbound messages
+are accepted. A grant added afterwards cannot enter it.
+
+ADR-0017 already said such a grant needs a reconnect. What was missing until N5
+is that **nothing ever asked for one**, so a person who enabled
+`notifications.v1` on a phone that was already connected got a session that
+could neither announce a `SINK` role nor accept the phone's `SOURCE`
+announcement — and the only way out was pressing Disconnect and Connect by
+hand. Observed on hardware twice (N3 §G4, N4 §17).
+
+```text
+  user grants notifications.v1 to a connected peer
+              │
+              ▼
+  does the peer's live session already have it?  ── yes ──▶ nothing to do
+              │ no
+              ▼
+  has this session already been asked to reconnect? ── yes ──▶ nothing to do
+              │ no
+              ▼
+  end that session   ──▶  the peer's own connection coordinator
+                          redials on its ordinary backoff (~2 s)
+                          ──▶ HELLO ──▶ new intersection ──▶ roles announce
+```
+
+Four things this deliberately is not:
+
+* **not a wire message.** Nothing was added to any schema, and the reconnect is
+  a local lifecycle decision that the peer experiences as an ordinary
+  disconnect;
+* **not a retry loop.** Reconnection is owned by exactly one component on the
+  phone and stays there — the desktop never dials a phone;
+* **not capability-specific.** `files.v1` and `clipboard.v1` froze in exactly
+  the same way, for exactly the same reason, and the correction names no
+  capability;
+* **not a path a withdrawal takes.** Narrowing is immediate through the
+  per-message authorizer; rebuilding a session at the moment a permission is
+  taken away would be precisely backwards.
+
+The bound is **one request per session**, which needs no clock: a session can
+be asked to end once, and the session that replaces it exists because a
+reconnect already happened. Implementation:
+`desktop/runtime/src/renegotiate.rs`.
 
 ## Privacy boundary
 
@@ -323,17 +376,15 @@ per peer, default off ([ADR-0015 §6](../adr/ADR-0015-notification-access.md)).
 
 ## The platform seams
 
-### `NotificationSink` — **N2 owns this, and N0 deliberately did not create it**
+### `NotificationSink` — created by N2, as N0 planned
 
 Wave 0 declined to create a `NotificationSink` before a real capability required
 one, on the grounds that AnyFlow implemented no notifications anywhere and there
-was nothing to abstract. That is no longer true, but the seam still does not
-belong in N0: **an abstraction with no implementation on either side of it is a
-guess about a shape**, and the shape is exactly what writing the first D-Bus
-sink will teach.
+was nothing to abstract — **an abstraction with no implementation on either side
+of it is a guess about a shape**, and the shape is exactly what writing the
+first D-Bus sink taught.
 
-The implementation plan places it with that first implementation. Its future
-location, fixed now so N2 does not have to rediscover it:
+It exists now, where N0 said it would:
 
 ```text
 desktop/capabilities/notifications/src/backend/mod.rs   ← the trait
@@ -352,9 +403,12 @@ trait NotificationSink {
 }
 ```
 
-When it is created it must be a pure portable abstraction: no D-Bus, no GTK, no
-`target_os`, and it must keep `desktop/core/tests/portable_boundary.rs` green
-with the new crate listed among the portable ones.
+It is a pure portable abstraction: no D-Bus, no GTK, no `target_os`, and
+`desktop/core/tests/portable_boundary.rs` is green with the crate listed among
+the portable ones. Its three test suites — `sink.rs`, `dismiss.rs` and N5's
+`hardening.rs` — are portable for the same reason and are classified as such in
+the Windows MSVC gate; `real_dbus.rs` and `real_lock.rs` are whole-file
+`#![cfg(feature = "linux-dbus")]`.
 
 ### The portable half that N0 *did* create
 
@@ -384,11 +438,11 @@ type or enum value that drifted on one side fails a test rather than a user.
 | Wave | Adds | State |
 | --- | --- | --- |
 | **N0** | Schema, portable contract, ADR-0016, ADR-0017, this document, tests | **Done** |
-| **N1** | Android `NotificationListenerService`, extraction, identity derivation, filter, the manifest service | Future |
-| **N2** | Linux sink crate, `NotificationSink` seam, D-Bus display, lock source | Future |
-| **N3** | Grants, per-app filter, privacy UI on both ends, CLI | Future |
-| **N4** | Dismissal synchronisation and echo suppression | Future |
-| **N5** | Reconnect, snapshot runtime, rate limiting, hardening | Future |
+| **N1** | Android `NotificationListenerService`, extraction, identity derivation, filter, the manifest service | **Done** |
+| **N2** | Linux sink crate, `NotificationSink` seam, D-Bus display, lock source | **Done** |
+| **N3** | Grants, per-app filter, privacy UI on both ends, CLI | **Done** |
+| **N4** | Dismissal synchronisation and echo suppression | **Done** |
+| **N5** | Mid-session grant convergence, reconnect grace, queue and mirror bounds, failure injection, the test fixture app | **Done** |
 | **N6** | Hardware certification on SM-X620 ↔ Fedora 44 | Future |
 
 N1 and N2 are independent after N0 and share only the `.proto`. N3 needs both,

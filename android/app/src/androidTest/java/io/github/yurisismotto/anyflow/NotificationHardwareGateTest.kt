@@ -63,7 +63,33 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class NotificationHardwareGateTest {
 
-    private val fixturePackage = "com.android.shell"
+    /**
+     * The package whose notifications this gate looks for.
+     *
+     * **N5 moved this off `com.android.shell`**, which is what N1 had to use
+     * and what N3 debt 3 and N4 debt 2 are both about. `cmd notification post`
+     * can create a clearable notification and nothing else: no cancel, no
+     * ongoing, no group, no tag control — and `com.android.shell` has no
+     * launcher entry, so AnyFlow's own app picker cannot offer it until it is
+     * *already* notifying, which needs the listener bound, which needs a
+     * granted peer connected.
+     *
+     * `android/fixture/` is a test-only module that fixes all of that. It is
+     * never part of the AnyFlow APK — nothing depends on it — and it is
+     * installed by hand for a certification run:
+     *
+     * ```console
+     * ./gradlew :fixture:assembleDebug
+     * adb install -r fixture/build/outputs/apk/debug/fixture-debug.apk
+     * adb shell pm grant io.github.yurisismotto.anyflow.fixture \
+     *     android.permission.POST_NOTIFICATIONS
+     * adb shell "am start -n io.github.yurisismotto.anyflow.fixture/.FixtureActivity \
+     *     --es op post --es id 1 --es tag gate --es title 'ANYFLOW-N1-FIXTURE-TITLE'"
+     * ```
+     *
+     * See `android/fixture/README.md`.
+     */
+    private val fixturePackage = "io.github.yurisismotto.anyflow.fixture"
     private val fixtureTitle = "ANYFLOW-N1-FIXTURE-TITLE"
 
     /**

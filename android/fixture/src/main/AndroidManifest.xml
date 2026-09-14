@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AnyFlow notification fixture — TEST ONLY.
+
+  Deliberately absent, and the absence is the point:
+
+    INTERNET · ACCESS_NETWORK_STATE · READ/WRITE_EXTERNAL_STORAGE ·
+    READ_MEDIA_* · READ_CONTACTS · ACCESS_*_LOCATION · CAMERA ·
+    RECORD_AUDIO · QUERY_ALL_PACKAGES · BIND_NOTIFICATION_LISTENER_SERVICE ·
+    SYSTEM_ALERT_WINDOW · FOREGROUND_SERVICE · RECEIVE_BOOT_COMPLETED
+
+  This app can post its own notifications and nothing else. It cannot reach
+  the network, so there is nowhere for anything it is told to display to go.
+
+  POST_NOTIFICATIONS is the one permission it holds and the one thing it is
+  for. On API 33+ it is a runtime permission; the certification script grants
+  it with `pm grant`, exactly as it does for AnyFlow itself.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@android:drawable/ic_dialog_info"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!--
+          One activity, two jobs.
+
+          Launched from the launcher, it shows what it can do and does
+          nothing. Launched with an `op` extra, it performs one operation and
+          finishes without drawing.
+
+          It is `exported` because `adb shell am start` runs as the shell user
+          and cannot reach a component that is not. That is a real surface and
+          it is stated rather than hidden: any app on the device can make this
+          fixture post a notification with text of its choosing. What it
+          cannot do is make it post as anybody else, reach the network, or
+          read anything — so the surface is equivalent to the caller posting
+          its own notification, which needs no help from here. On
+          certification hardware the fixture is installed for the run and
+          uninstalled after it.
+
+          The launcher entry is not decoration: AnyFlow's app picker can only
+          offer apps a person can open from their home screen, plus apps that
+          happen to be notifying right now. Without it this fixture would be
+          invisible in the picker until it was already notifying — which is
+          precisely the ordering problem `com.android.shell` has.
+        -->
+        <activity
+            android:name=".FixtureActivity"
+            android:exported="true"
+            android:excludeFromRecents="false"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

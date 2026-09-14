@@ -117,8 +117,8 @@ impl Readiness {
             Readiness::PeerNotSourcing => {
                 "Connected, and the device has not said it can send notifications. Check \
                  that AnyFlow on the device shares notifications with this computer, and \
-                 that Android has given it notification access. If you have just changed \
-                 either, the two may need to reconnect before it takes effect."
+                 that Android has given it notification access. A change to either takes \
+                 effect on its own — reconnecting by hand is not needed."
             }
             Readiness::Ready => {
                 "Notifications from the apps chosen on the device appear on this desktop."
@@ -221,8 +221,8 @@ impl DismissReadiness {
             DismissReadiness::PeerCannotDismiss => {
                 "On, and the device has not said it will act on a dismissal. Allow it \
                  on the device as well, under its notification settings for this \
-                 computer. If you have just changed something there, the two may need \
-                 to reconnect before it takes effect."
+                 computer. A change there takes effect on its own — reconnecting by \
+                 hand is not needed."
             }
             DismissReadiness::Active => {
                 "On. Dismissing a mirrored notification here dismisses the original on \
@@ -1128,7 +1128,7 @@ mod tests {
         );
         let text = labels(&container).join("\n");
         assert!(text.contains("the device has not said it will act on a dismissal"));
-        assert!(text.contains("may need to reconnect"));
+        assert!(text.contains("reconnecting by hand is not needed"));
     }
 
     fn the_dismissal_switch_is_not_offered_to_an_ungranted_device() {

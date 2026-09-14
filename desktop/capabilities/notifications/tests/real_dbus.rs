@@ -472,3 +472,425 @@ async fn a_human_dismissal_end_to_end_produces_exactly_one_dismiss_request() {
         "the mirror was purged before the request"
     );
 }
+
+// ---------------------------------------------------------------------------
+// N5 §11 — the soak
+// ---------------------------------------------------------------------------
+
+/// A long, realistic session against the **real** notification server and the
+/// **real** logind lock source.
+///
+/// What a soak is for is the class of defect a short test cannot reach: a
+/// counter that only grows, a mirror that is replaced by a duplicate one time
+/// in a thousand, a role that widens because a re-announcement raced a
+/// narrowing, a worker that stops draining after some number of items. None of
+/// those is visible in a test that runs for a second.
+///
+/// Every item of §11's activity list that does not need a person is driven on
+/// a cycle: post, update, remove, dismiss a mirror, a brief disconnect and
+/// reconnect (a Wi-Fi blip, minus the Wi-Fi), a lock and an unlock, a policy
+/// toggle, and an allow-list change. The two that do need a person — pressing
+/// a physical lock button, and pulling a real network — are called out in the
+/// report rather than simulated and claimed.
+///
+/// ```console
+/// ANYFLOW_SOAK=1 cargo test -p anyflow-capability-notifications \
+///     --test real_dbus -- --ignored --test-threads=1 soak
+///
+/// # a shorter or longer run
+/// ANYFLOW_SOAK=1 ANYFLOW_SOAK_SECS=3600 cargo test … soak
+/// ```
+///
+/// **It closes everything it posts.** A soak that left an hour of
+/// notifications in somebody's shade would be worse than no soak.
+#[tokio::test]
+#[ignore = "runs for 30 minutes against the real notification server; set ANYFLOW_SOAK=1"]
+async fn a_thirty_minute_soak_stays_bounded_and_converges() {
+    use anyflow_capability_notifications::backend::{logind::LogindLock, LockSource, UnknownLock};
+    use anyflow_capability_notifications::{
+        NotificationAuthorizer, NotificationManager, NotificationPolicy,
+    };
+    use anyflow_core::Fingerprint;
+    use anyflow_proto::v1::capabilities as pb;
+    use anyflow_proto::Message as _;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    if std::env::var_os("ANYFLOW_SOAK").is_none() {
+        eprintln!("SKIPPED: set ANYFLOW_SOAK=1 to run the N5 soak.");
+        return;
+    }
+    let seconds: u64 = std::env::var("ANYFLOW_SOAK_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30 * 60);
+
+    /// A trust store a soak can edit, exactly as a person toggling switches
+    /// would.
+    struct Switches(RwLock<NotificationPolicy>);
+    #[async_trait::async_trait]
+    impl NotificationAuthorizer for Switches {
+        async fn policy_for(&self, _peer: &Fingerprint) -> NotificationPolicy {
+            *self.0.read().await
+        }
+    }
+
+    const APP_A: &str = "soak.app.alpha";
+    const APP_B: &str = "soak.app.beta";
+    const TITLE: &str = "ANYFLOW-N5-SOAK-TITLE";
+    const BODY: &str = "ANYFLOW-N5-SOAK-BODY";
+
+    let switches = Arc::new(Switches(RwLock::new(NotificationPolicy {
+        allow_dismiss_sync: true,
+        when_sink_locked: anyflow_capability_notifications::LockPolicy::AppOnly,
+        ..NotificationPolicy::default()
+    })));
+
+    let sink: Arc<dyn NotificationSink> = Arc::new(connect().await);
+    // The real lock source where there is one. A soak that ran against
+    // `UnknownLock` would spend its whole length on the reduction path.
+    let lock: Arc<dyn LockSource> = match LogindLock::connect().await {
+        Some(l) => Arc::new(l),
+        None => Arc::new(UnknownLock),
+    };
+    eprintln!("soak: sink={} lock={}", sink.describe(), lock.describe());
+
+    let manager = NotificationManager::new(Arc::clone(&sink), lock).await;
+    manager
+        .set_authorizer(Arc::clone(&switches) as Arc<dyn NotificationAuthorizer>)
+        .await;
+    manager.spawn_platform_pumps();
+
+    let peer = Fingerprint::from_hex(&"5a".repeat(32)).expect("fingerprint");
+    let origin = "0123456789abcdef0123456789abcdef";
+    let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+    manager.attach_session(peer, tx.clone()).await;
+
+    // Drain everything the desktop sends, counting it by kind. A soak that
+    // did not read its own outbound channel would fill it and then be
+    // measuring backpressure rather than the sink.
+    let counts = Arc::new(std::sync::Mutex::new((0u64, 0u64, 0u64))); // roles, results, dismisses
+    let epochs = Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
+    let drain_counts = Arc::clone(&counts);
+    let drain_epochs = Arc::clone(&epochs);
+    let drain = tokio::spawn(async move {
+        while let Some(message) = rx.recv().await {
+            let control =
+                pb::NotificationControl::decode(message.payload.as_slice()).expect("decodes");
+            let mut c = drain_counts.lock().expect("not poisoned");
+            match control.body {
+                Some(pb::notification_control::Body::Roles(r)) => {
+                    c.0 += 1;
+                    drain_epochs.lock().expect("not poisoned").push(r.epoch);
+                }
+                Some(pb::notification_control::Body::Result(_)) => c.1 += 1,
+                Some(pb::notification_control::Body::Dismiss(_)) => c.2 += 1,
+                _ => {}
+            }
+        }
+    });
+
+    let roles = |epoch: u32| pb::NotificationControl {
+        body: Some(pb::notification_control::Body::Roles(
+            pb::NotificationRoles {
+                roles: vec![
+                    pb::NotificationRole::Source as i32,
+                    pb::NotificationRole::DismissTarget as i32,
+                ],
+                epoch,
+            },
+        )),
+    };
+    manager
+        .handle_control(peer, &roles(1).encode_to_vec())
+        .await
+        .expect("roles");
+
+    let upsert = |seed: u16, app: &str, body: &str| {
+        let mut id = vec![0u8; 16];
+        id[0] = (seed >> 8) as u8;
+        id[1] = (seed & 0xff) as u8;
+        pb::NotificationControl {
+            body: Some(pb::notification_control::Body::Upsert(
+                pb::NotificationUpsert {
+                    notification_id: id,
+                    origin_device_id: origin.to_string(),
+                    app_id: app.to_string(),
+                    app_label: app.to_string(),
+                    title: TITLE.to_string(),
+                    body: body.to_string(),
+                    posted_at_unix_ms: 1_700_000_000_000,
+                    importance: pb::NotificationImportance::Normal as i32,
+                    privacy: pb::NotificationPrivacy::Private as i32,
+                    category: pb::NotificationCategory::Message as i32,
+                    ..pb::NotificationUpsert::default()
+                },
+            )),
+        }
+    };
+    let remove = |seed: u16| {
+        let mut id = vec![0u8; 16];
+        id[0] = (seed >> 8) as u8;
+        id[1] = (seed & 0xff) as u8;
+        pb::NotificationControl {
+            body: Some(pb::notification_control::Body::Remove(
+                pb::NotificationRemove {
+                    notification_id: id,
+                    origin_device_id: origin.to_string(),
+                },
+            )),
+        }
+    };
+
+    let started = std::time::Instant::now();
+    let deadline = started + Duration::from_secs(seconds);
+    let mut cycle: u64 = 0;
+    let mut peak_mirrors = 0usize;
+    let mut peak_queue = 0usize;
+    let mut role_epoch: u32 = 1;
+
+    eprintln!("soak: running for {seconds}s");
+    while std::time::Instant::now() < deadline {
+        cycle += 1;
+        let seed = (cycle % 40) as u16 + 1;
+        let app = if cycle % 3 == 0 { APP_B } else { APP_A };
+
+        // post, then update the same identity twice
+        manager
+            .handle_control(peer, &upsert(seed, app, BODY).encode_to_vec())
+            .await
+            .expect("upsert");
+        manager
+            .handle_control(
+                peer,
+                &upsert(seed, app, &format!("{BODY}-{cycle}")).encode_to_vec(),
+            )
+            .await
+            .expect("update");
+
+        // a removal every other cycle, so the mirror set churns rather than
+        // only growing
+        if cycle % 2 == 0 {
+            manager
+                .handle_control(peer, &remove(seed).encode_to_vec())
+                .await
+                .expect("remove");
+        }
+
+        // **No phantom dismiss.** Nobody is closing anything by hand during
+        // this run, so the desktop must not produce a single `DismissRequest`
+        // across the whole of it — not from a mirror being replaced, not from
+        // one being evicted at the ceiling, not from a reconnect, and not
+        // from the server's own close signals. Checked every cycle rather
+        // than only at the end, so the cycle that produced one is named.
+        assert_eq!(
+            counts.lock().expect("not poisoned").2,
+            0,
+            "cycle {cycle}: a dismissal was sent although nobody dismissed \
+             anything"
+        );
+
+        // a policy toggle, and an allow-list change
+        if cycle % 7 == 0 {
+            let mut policy = switches.0.write().await;
+            policy.allow_mirror = !policy.allow_mirror;
+            let restored = policy.allow_mirror;
+            drop(policy);
+            if !restored {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                switches.0.write().await.allow_mirror = true;
+            }
+        }
+        if cycle % 11 == 0 {
+            let mut policy = switches.0.write().await;
+            policy.when_sink_locked = match policy.when_sink_locked {
+                anyflow_capability_notifications::LockPolicy::Full => {
+                    anyflow_capability_notifications::LockPolicy::AppOnly
+                }
+                _ => anyflow_capability_notifications::LockPolicy::Full,
+            };
+        }
+
+        // a brief disconnect and reconnect — a Wi-Fi blip, minus the Wi-Fi
+        if cycle % 13 == 0 {
+            manager.detach_session(&peer).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            manager.attach_session(peer, tx.clone()).await;
+            role_epoch += 1;
+            manager
+                .handle_control(peer, &roles(role_epoch).encode_to_vec())
+                .await
+                .expect("roles");
+        }
+
+        // a snapshot, which is what a real reconnect would carry
+        if cycle % 17 == 0 {
+            let sync = vec![(cycle % 251) as u8; 16];
+            manager
+                .handle_control(
+                    peer,
+                    &pb::NotificationControl {
+                        body: Some(pb::notification_control::Body::Sync(pb::SyncMarker {
+                            sync_id: sync.clone(),
+                            phase: pb::sync_marker::Phase::Begin as i32,
+                        })),
+                    }
+                    .encode_to_vec(),
+                )
+                .await
+                .expect("begin");
+            manager
+                .handle_control(peer, &upsert(seed, app, BODY).encode_to_vec())
+                .await
+                .expect("snapshot item");
+            manager
+                .handle_control(
+                    peer,
+                    &pb::NotificationControl {
+                        body: Some(pb::notification_control::Body::Sync(pb::SyncMarker {
+                            sync_id: sync,
+                            phase: pb::sync_marker::Phase::End as i32,
+                        })),
+                    }
+                    .encode_to_vec(),
+                )
+                .await
+                .expect("end");
+        }
+
+        let report = manager
+            .peer_reports()
+            .await
+            .into_iter()
+            .find(|r| r.peer == peer)
+            .expect("a report");
+        peak_mirrors = peak_mirrors.max(report.mirrors);
+        peak_queue = peak_queue.max(report.queue.high_water);
+
+        assert!(
+            report.mirrors <= 200,
+            "cycle {cycle}: the mirror ceiling was exceeded ({})",
+            report.mirrors
+        );
+        assert!(
+            report.queue.high_water <= 256,
+            "cycle {cycle}: the work queue exceeded its bound ({})",
+            report.queue.high_water
+        );
+
+        if cycle % 200 == 0 {
+            eprintln!(
+                "soak: {}s cycle={cycle} mirrors={} queue_high_water={} \
+                 coalesced={} evicted={} dropped_terminal={}",
+                started.elapsed().as_secs(),
+                report.mirrors,
+                report.queue.high_water,
+                report.queue.coalesced,
+                report.queue.evicted,
+                report.queue.dropped_terminal
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
+
+    // Converge: an empty snapshot takes everything this soak put on the
+    // screen back off it.
+    let sync = vec![0xEEu8; 16];
+    for phase in [pb::sync_marker::Phase::Begin, pb::sync_marker::Phase::End] {
+        manager
+            .handle_control(
+                peer,
+                &pb::NotificationControl {
+                    body: Some(pb::notification_control::Body::Sync(pb::SyncMarker {
+                        sync_id: sync.clone(),
+                        phase: phase as i32,
+                    })),
+                }
+                .encode_to_vec(),
+            )
+            .await
+            .expect("marker");
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let final_report = manager
+        .peer_reports()
+        .await
+        .into_iter()
+        .find(|r| r.peer == peer)
+        .expect("a report");
+    let (announced_roles, results, dismisses) = *counts.lock().expect("not poisoned");
+    let epoch_list = epochs.lock().expect("not poisoned").clone();
+
+    eprintln!(
+        "\nsoak finished after {}s, {cycle} cycles\n  \
+         peak mirrors        {peak_mirrors}\n  \
+         peak queue depth    {peak_queue}\n  \
+         final mirrors       {}\n  \
+         coalesced           {}\n  \
+         queue evictions     {}\n  \
+         dropped terminal    {}\n  \
+         mirror evictions    {}\n  \
+         role announcements  {announced_roles}\n  \
+         results sent        {results}\n  \
+         dismiss requests    {dismisses}\n  \
+         local role epochs   {epoch_list:?}",
+        started.elapsed().as_secs(),
+        final_report.mirrors,
+        final_report.queue.coalesced,
+        final_report.queue.evicted,
+        final_report.queue.dropped_terminal,
+        final_report.evicted,
+    );
+
+    assert_eq!(
+        final_report.mirrors, 0,
+        "the converging snapshot did not clear the screen"
+    );
+    assert_eq!(
+        final_report.queue.dropped_terminal, 0,
+        "a terminal item was dropped during the soak; each one is a \
+         notification that could have been left on a screen for ever"
+    );
+    // **Epochs are strictly increasing within a connection, and restart at 1
+    // across one** (ADR-0017 §4). Both halves matter and they are opposite
+    // assertions, so the sequence is split at each `1` — which is the
+    // observable mark of a new session — and each run checked on its own.
+    // Asserting global monotonicity here would have failed a correct reset,
+    // and asserting nothing would have missed a replayed announcement.
+    assert!(
+        !epoch_list.is_empty(),
+        "no role announcement was observed, so this proves nothing"
+    );
+    assert_eq!(epoch_list[0], 1, "the first announcement must be epoch 1");
+    let mut segments = 0;
+    for run in epoch_list.split(|e| *e == 1) {
+        segments += 1;
+        assert!(
+            run.windows(2).all(|w| w[1] > w[0]),
+            "epochs did not strictly increase within one connection: \
+             {epoch_list:?}"
+        );
+        assert!(
+            run.iter().all(|e| *e > 1),
+            "an epoch of 0 or a repeated 1 appeared inside a connection: \
+             {epoch_list:?}"
+        );
+    }
+    assert!(segments >= 2, "the soak never reconnected");
+    assert_eq!(
+        dismisses, 0,
+        "the soak sent {dismisses} dismissals although nobody dismissed \
+         anything"
+    );
+    assert!(
+        results > 0 && announced_roles > 0,
+        "the capture is empty, so every assertion above is vacuous"
+    );
+    // And nothing this soak displayed is still on the screen.
+    assert!(!final_report.snapshot_open);
+
+    drop(tx);
+    let _ = tokio::time::timeout(Duration::from_secs(5), drain).await;
+}

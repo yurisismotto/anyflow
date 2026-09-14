@@ -297,9 +297,71 @@ impl Harness {
         }
     }
 
+    /// Reads everything the peer has been sent until nothing more arrives.
+    ///
+    /// Needed by the burst tests and by nothing else. The outbound channel is
+    /// bounded, so a test that queues five hundred upserts and never reads
+    /// their answers wedges the worker against a full channel — and then
+    /// [`barrier`](Self::barrier) reads the *first* backed-up answer rather
+    /// than its own, which looks like an ordering bug and is not one.
+    ///
+    /// Returns how many messages were drained, so a test can say what it saw
+    /// rather than merely that it waited.
+    pub async fn drain_outbound(&mut self) -> usize {
+        let mut seen = 0;
+        while tokio::time::timeout(Duration::from_millis(250), self.outbound.recv())
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            seen += 1;
+        }
+        seen
+    }
+
+    /// Disconnects the peer, arming the reconnect grace.
+    ///
+    /// The mirrors deliberately stay: closing them here is what the grace
+    /// exists to postpone.
+    pub async fn detach(&self) {
+        self.manager.detach_session(&self.peer).await;
+    }
+
+    /// How many items are queued for this peer right now.
+    pub async fn pending_work(&self) -> usize {
+        self.manager
+            .peer_reports()
+            .await
+            .into_iter()
+            .find(|r| r.peer == self.peer)
+            .map(|r| r.queue.pending)
+            .unwrap_or(0)
+    }
+
+    /// How deep this peer's work queue has ever been.
+    pub async fn queue_high_water(&self) -> usize {
+        self.manager
+            .peer_reports()
+            .await
+            .into_iter()
+            .find(|r| r.peer == self.peer)
+            .map(|r| r.queue.high_water)
+            .unwrap_or(0)
+    }
+
     /// A connected peer with no grant and no announced role.
     pub async fn start_ungranted() -> Self {
-        let sink = Arc::new(MemorySink::new());
+        Self::start_with(MemorySink::new()).await
+    }
+
+    /// The same, over a sink a test has already configured.
+    ///
+    /// Needed for the failures that have to be in place *before* the manager
+    /// is built: `closed_events` is taken once, at construction, so a sink
+    /// that refuses to hand it over has to refuse from the start.
+    pub async fn start_with(sink: MemorySink) -> Self {
+        let sink = Arc::new(sink);
         let lock = Arc::new(MemoryLock::new());
         let policies = Policies::new();
 
