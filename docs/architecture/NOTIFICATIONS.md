@@ -1,7 +1,7 @@
 # `notifications.v1`
 
-**Status after N5: implemented on Android and Linux, hardened, awaiting N6
-final certification.**
+**Status after N6: implemented on Android and Linux, hardened, and certified
+on SM-X620 (Android 16 / One UI 8) against Fedora 44 / GNOME Shell 50.4.**
 
 This document describes the whole design and marks, in every section, what
 exists today and what is future work. It summarises rather than restates the
@@ -11,7 +11,7 @@ access contract [ADR-0015](../adr/ADR-0015-notification-access.md), for naming
 [ADR-0016](../adr/ADR-0016-notification-identity.md), and for roles
 [ADR-0017](../adr/ADR-0017-capability-roles.md).
 
-## What exists after N5
+## What exists after N6
 
 | Thing | State | Wave |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ access contract [ADR-0015](../adr/ADR-0015-notification-access.md), for naming
 | Dismissal synchronisation and echo suppression | **Exists**, opt-in per peer | N4 |
 | Reconnect grace, snapshot resync, queue and mirror ceilings | **Exists** | N2, N5 |
 | Mid-session grant convergence | **Exists** — see *Grant convergence* below | N5 |
-| Hardware certification | **N6** | — |
+| Hardware certification | **Done** — see [the N6 report](../../NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md) | N6 |
 
 ## The shape, end to end
 
@@ -443,7 +443,7 @@ type or enum value that drifted on one side fails a test rather than a user.
 | **N3** | Grants, per-app filter, privacy UI on both ends, CLI | **Done** |
 | **N4** | Dismissal synchronisation and echo suppression | **Done** |
 | **N5** | Mid-session grant convergence, reconnect grace, queue and mirror bounds, failure injection, the test fixture app | **Done** |
-| **N6** | Hardware certification on SM-X620 ↔ Fedora 44 | Future |
+| **N6** | Final certification: full audit, hardware certification on SM-X620 ↔ Fedora 44 | **Done** |
 
 N1 and N2 are independent after N0 and share only the `.proto`. N3 needs both,
 because the consent surface has two ends. N4 needs N3, because dismissal
