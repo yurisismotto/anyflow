@@ -177,6 +177,7 @@ struct QueueState {
     coalesced: u64,
     evicted: u64,
     dropped_terminal: u64,
+    high_water: usize,
 }
 
 /// Counters, for `anyflow notifications status` and for a log line. No
@@ -187,6 +188,15 @@ pub struct QueueStats {
     pub coalesced: u64,
     pub evicted: u64,
     pub dropped_terminal: u64,
+    /// The deepest this queue has ever been.
+    ///
+    /// `pending` is a sample, and sampling a queue that one task is filling
+    /// while another drains it measures the scheduler rather than the bound.
+    /// This is the measurement: it can only rise, so a burst that peaked
+    /// between two reads cannot hide from it — which is what makes "the bound
+    /// held" a statement about the run rather than about when the test
+    /// happened to look.
+    pub high_water: usize,
 }
 
 impl WorkQueue {
@@ -205,6 +215,7 @@ impl WorkQueue {
             coalesced: state.coalesced,
             evicted: state.evicted,
             dropped_terminal: state.dropped_terminal,
+            high_water: state.high_water,
         }
     }
 
@@ -262,6 +273,7 @@ impl WorkQueue {
         }
 
         state.items.push_back(work);
+        state.high_water = state.high_water.max(state.items.len());
         if evicted {
             Offered::Evicted
         } else {

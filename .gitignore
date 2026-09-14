@@ -6,7 +6,9 @@
 /android/.gradle/
 /android/.kotlin/
 /android/build/
-/android/app/build/
+# Every module's build output, not just `:app`'s — N5 added `:fixture` and the
+# next module should not have to remember this line.
+/android/*/build/
 /android/local.properties
 /android/.idea/
 *.apk

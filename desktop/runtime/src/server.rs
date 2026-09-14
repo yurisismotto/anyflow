@@ -347,6 +347,10 @@ async fn do_unpair(state: &Arc<DaemonState>, device: &str) -> Response {
                 handle.shutdown().await;
             }
             state.drop_session(&fingerprint).await;
+            // Any outstanding reconnect request dies with the pairing: there
+            // is nothing left to converge, and the peer must not be counted
+            // as mid-reconnect if it is ever paired again.
+            state.clear_renegotiation(&fingerprint).await;
             // `clipboard.v1` has no second connection to tear down, so
             // stopping it means the watcher must re-read who wants
             // auto-send. Without this a revoked device would keep being
@@ -486,12 +490,31 @@ pub async fn do_grant(
         state.notify_notifications_revoked(&fingerprint).await;
     }
 
+    // A grant that *widens* is the other half of the same rule, and it is the
+    // one nothing implemented until now. The session's capability set was
+    // fixed at `HELLO`, so a capability granted afterwards has no negotiated
+    // channel to announce itself on — ADR-0017 §3 says such a grant needs a
+    // reconnect to take effect, and this is the daemon finally asking for one
+    // instead of leaving it to the user to press Disconnect and Connect.
+    //
+    // Capability-agnostic on purpose: `notifications.v1` is where the defect
+    // was observed, but `files.v1` and `clipboard.v1` froze in exactly the
+    // same way, and naming one here would have fixed one.
+    let renegotiation = state
+        .renegotiate_after_grant(&fingerprint, capability, granted)
+        .await;
+
     Response::Ok {
         message: format!(
-            "{} {} for {}",
+            "{} {} for {}{}",
             if granted { "granted" } else { "withdrew" },
             capability,
-            fingerprint.to_display_short()
+            fingerprint.to_display_short(),
+            if renegotiation.is_reconnect() {
+                " (reconnecting the device so it takes effect now)"
+            } else {
+                ""
+            }
         ),
     }
 }

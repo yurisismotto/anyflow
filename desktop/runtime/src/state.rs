@@ -18,6 +18,8 @@ use anyflow_core::Fingerprint;
 use anyflow_proto::v1;
 use tokio::sync::{oneshot, Mutex, RwLock};
 
+use crate::renegotiate::{Decision, LiveSession, Renegotiation};
+
 /// A pending "is this device you?" question waiting on a human.
 pub struct ConfirmRequest {
     pub device: v1::DeviceInfo,
@@ -48,6 +50,10 @@ pub struct DaemonState {
     confirm_tx: Mutex<Option<tokio::sync::mpsc::Sender<ConfirmRequest>>>,
 
     sessions: RwLock<HashMap<Fingerprint, SessionHandle>>,
+
+    /// Which peers have been asked to reconnect because a grant widened past
+    /// what their live session negotiated. See [`crate::renegotiate`].
+    renegotiation: Renegotiation,
 
     /// When each peer's last session ended, for reporting a device as
     /// disconnected-since rather than merely absent. In memory only: it is
@@ -82,6 +88,7 @@ impl DaemonState {
             pairing: Mutex::new(None),
             confirm_tx: Mutex::new(None),
             sessions: RwLock::new(HashMap::new()),
+            renegotiation: Renegotiation::new(),
             last_seen: RwLock::new(HashMap::new()),
             device_info,
             listen_port: std::sync::atomic::AtomicU16::new(0),
@@ -221,6 +228,10 @@ impl DaemonState {
     /// The older one is shut down here rather than left to time out, so the
     /// daemon never holds two sessions with one device.
     pub async fn register_session(&self, handle: SessionHandle) {
+        // Whatever reconnect was asked for on this peer's behalf, it is over:
+        // a session has come up, and it is this one that any further grant
+        // change will be judged against.
+        self.renegotiation.clear(&handle.peer()).await;
         let displaced = {
             let mut sessions = self.sessions.write().await;
             sessions.insert(handle.peer(), handle)
@@ -280,6 +291,74 @@ impl DaemonState {
 
     pub async fn session_for(&self, peer: &Fingerprint) -> Option<SessionHandle> {
         self.sessions.read().await.get(peer).cloned()
+    }
+
+    /// Converges a live session on a grant that was made after its handshake.
+    ///
+    /// A session's capability set is fixed at `HELLO`, so a capability granted
+    /// afterwards has no negotiated channel to announce a role on and no way
+    /// to accept the peer's — which is exactly the state a person reached by
+    /// enabling `notifications.v1` on a phone that was already connected, and
+    /// could only leave by pressing Disconnect and Connect by hand (N3 §G4,
+    /// N4 §17).
+    ///
+    /// The correction is to end that session. The peer's own connection
+    /// coordinator redials on its ordinary transient backoff — nothing here
+    /// retries, schedules or waits — and the new handshake reads the grant
+    /// that now exists.
+    ///
+    /// Returns the decision so the caller can log why nothing happened, which
+    /// is the more common and more confusing case.
+    pub async fn renegotiate_after_grant(
+        &self,
+        peer: &Fingerprint,
+        capability: &str,
+        granted: bool,
+    ) -> Decision {
+        let handle = self.session_for(peer).await;
+        let negotiated = handle
+            .as_ref()
+            .map(|h| h.negotiated_capabilities().to_vec())
+            .unwrap_or_default();
+        let session = handle.as_ref().map(|h| LiveSession {
+            id: h.id(),
+            negotiated: &negotiated,
+        });
+
+        let decision = self
+            .renegotiation
+            .on_grant_changed(peer, capability, granted, session)
+            .await;
+
+        if decision.is_reconnect() {
+            if let Some(handle) = handle {
+                tracing::info!(
+                    peer = %peer.to_display_short(),
+                    session = handle.id(),
+                    capability,
+                    "granted a capability this session cannot use; ending it so \
+                     the device reconnects and negotiates again"
+                );
+                // Not awaited inline for the same reason `register_session`
+                // does not await a displaced session's shutdown: the session
+                // may be taking the locks this caller holds on its way out.
+                tokio::spawn(async move { handle.shutdown().await });
+            }
+        } else {
+            tracing::debug!(
+                peer = %peer.to_display_short(),
+                capability,
+                decision = decision.as_str(),
+                "no session renegotiation needed"
+            );
+        }
+
+        decision
+    }
+
+    /// Forgets any outstanding reconnect request for a peer.
+    pub async fn clear_renegotiation(&self, peer: &Fingerprint) {
+        self.renegotiation.clear(peer).await;
     }
 
     pub fn device_info(&self) -> v1::DeviceInfo {

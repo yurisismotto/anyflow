@@ -99,6 +99,7 @@ pub mod text;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{mpsc, Mutex, Notify, RwLock};
 use tokio::time::Instant;
@@ -267,6 +268,34 @@ struct PeerState {
     /// Reported because it is the honest answer to "I turned this on and my
     /// phone is not clearing": the desktop asked, and the phone said no.
     dismissals_refused: u64,
+    /// How many detaches belong to sessions that have already been replaced.
+    ///
+    /// A phone that reconnects before this desktop noticed the old socket had
+    /// died produces two sessions for one peer. The daemon resolves that by
+    /// keeping the newer and shutting the older down — but the *order* the
+    /// capability sees is the other way round: `on_peer_connected` for the new
+    /// session runs before the displaced one's loop has finished, so the
+    /// displaced session's `on_peer_disconnected` arrives **after** the live
+    /// session has already attached.
+    ///
+    /// Without this counter that late detach looked like the live session
+    /// ending: it cleared the outbound sender, set `connected = false` and
+    /// armed a grace timer carrying the *new* generation — so the generation
+    /// check could not catch it, and sixty seconds later every mirror the live
+    /// session was showing was closed with `reason="grace expired"` while the
+    /// session was up and healthy. Observed on hardware during the N5 §8 gate,
+    /// after a Wi-Fi outage:
+    ///
+    /// ```text
+    /// session established … (a newer session)
+    /// replaced by a newer session; closing the old one   session=2
+    /// closed every mirror for a peer  closed=4  reason="grace expired"
+    /// ```
+    ///
+    /// So an attach that finds the slot already connected records that exactly
+    /// one detach is owed to a session that is already over, and the next
+    /// detach is spent against it rather than against the live one.
+    superseded_sessions: u32,
 }
 
 impl PeerState {
@@ -281,6 +310,7 @@ impl PeerState {
             locked: false,
             dismissals_sent: 0,
             dismissals_refused: 0,
+            superseded_sessions: 0,
         }
     }
 }
@@ -376,6 +406,33 @@ pub struct NotificationManager {
     /// It is a number. It names no notification, no peer and no reason, it is
     /// not persisted, and it is not in any report a peer can see.
     closes_observed: AtomicU64,
+    /// How long a disconnected peer's mirrors stay on screen, in
+    /// milliseconds.
+    ///
+    /// A field rather than the constant read directly, so that the grace can
+    /// be *exercised* rather than reasoned about. Its value is
+    /// [`limits::RECONNECT_GRACE`] unless a test shortens it, and shortening
+    /// it is the only way to run the "disconnect longer than the grace" and
+    /// "peer never returns" cases without a suite that takes a minute per
+    /// assertion. Sixty seconds of real waiting is not a better test than one
+    /// that moves the boundary and crosses it in both directions.
+    reconnect_grace_ms: AtomicU64,
+    /// A backend claimed it could report dismissals and then handed over no
+    /// close stream.
+    ///
+    /// `SinkCapabilities::dismiss_reporting` is the backend's claim;
+    /// `closed_events()` returning `Some` is the claim being true. The Linux
+    /// sink derives one from the other and cannot disagree with itself, but a
+    /// role is a statement about what this device can *physically do right
+    /// now* (ADR-0017 §6), and announcing `DISMISS_REPORTER` with no stream
+    /// to observe would be a claim this desktop cannot keep — the phone would
+    /// offer its dismiss-sync switch, the person would turn it on, and
+    /// nothing would ever happen. So the announcement is gated on what
+    /// actually arrived rather than on what was advertised.
+    ///
+    /// Set only by [`spawn_platform_pumps`](Self::spawn_platform_pumps), so a
+    /// manager whose pumps were never started behaves exactly as before.
+    close_stream_missing: AtomicBool,
 }
 
 impl NotificationManager {
@@ -408,6 +465,8 @@ impl NotificationManager {
             available: AtomicBool::new(available),
             locked: AtomicBool::new(locked),
             closes_observed: AtomicU64::new(0),
+            reconnect_grace_ms: AtomicU64::new(limits::RECONNECT_GRACE.as_millis() as u64),
+            close_stream_missing: AtomicBool::new(false),
         })
     }
 
@@ -449,7 +508,7 @@ impl NotificationManager {
     /// as the other sink capabilities are. It is a property of the platform,
     /// not of a peer and not of a policy.
     pub fn reports_dismissals(&self) -> bool {
-        self.capabilities.dismiss_reporting
+        self.capabilities.dismiss_reporting && !self.close_stream_missing.load(Ordering::Acquire)
     }
 
     /// How many desktop close signals have been fully processed.
@@ -459,6 +518,28 @@ impl NotificationManager {
     /// has demonstrably been handled, rather than after an arbitrary delay.
     pub fn closes_observed(&self) -> u64 {
         self.closes_observed.load(Ordering::Acquire)
+    }
+
+    /// How long a disconnected peer's mirrors stay on screen.
+    pub fn reconnect_grace(&self) -> Duration {
+        Duration::from_millis(self.reconnect_grace_ms.load(Ordering::Acquire))
+    }
+
+    /// Moves the reconnect grace, for tests that need to cross it.
+    ///
+    /// Not a tunable and not on any control surface: nothing in the daemon
+    /// calls this. It exists because the grace's two interesting behaviours
+    /// are on opposite sides of a sixty-second boundary, and a suite that
+    /// proved only the near side would be proving half the rule. Zero is
+    /// rejected — a grace of zero is the duplicate-and-clear churn the grace
+    /// exists to prevent, and it must not be reachable even from a test.
+    pub fn set_reconnect_grace(&self, grace: Duration) {
+        assert!(
+            !grace.is_zero(),
+            "the reconnect grace is normatively greater than zero"
+        );
+        self.reconnect_grace_ms
+            .store(grace.as_millis() as u64, Ordering::Release);
     }
 
     async fn policy_for(&self, peer: &Fingerprint) -> NotificationPolicy {
@@ -514,6 +595,18 @@ impl NotificationManager {
 
         {
             let mut state = slot.state.lock().await;
+            // Attaching over a slot that still believes it is connected means
+            // this session is replacing one the daemon has not finished
+            // tearing down. Its `on_peer_disconnected` is still to come, and
+            // it must not be read as this session ending.
+            if state.connected {
+                state.superseded_sessions = state.superseded_sessions.saturating_add(1);
+                tracing::debug!(
+                    peer = %peer.to_display_short(),
+                    "attached over a session that has not finished closing; \
+                     its detach will be ignored"
+                );
+            }
             state.connected = true;
             // A fresh connection: the peer has accepted no epoch from us and
             // we have accepted none from it. Both sides start again at 1.
@@ -536,6 +629,22 @@ impl NotificationManager {
         let Some(slot) = self.peers.read().await.get(peer).cloned() else {
             return;
         };
+        {
+            // Spend a superseded session's detach here, before anything is
+            // torn down: the live session's outbound sender, its roles and its
+            // mirrors all belong to a session that is still running.
+            let mut state = slot.state.lock().await;
+            if state.superseded_sessions > 0 {
+                state.superseded_sessions -= 1;
+                tracing::debug!(
+                    peer = %peer.to_display_short(),
+                    "ignored the detach of a session that had already been \
+                     replaced"
+                );
+                return;
+            }
+        }
+
         *slot.outbound.write().await = None;
         let generation = slot.generation.load(Ordering::Acquire);
         {
@@ -545,12 +654,28 @@ impl NotificationManager {
             // gone, so it can never be completed either.
             state.snapshot.abandon();
             state.snapshot_deadline = None;
+            // Role state is **per connection** (ADR-0017 §4) and the session
+            // it described is over, so it is dropped here rather than only
+            // being replaced by the next `attach_session`.
+            //
+            // Replacing it on attach alone was almost enough, and the gap is
+            // the one N5 exists to close: a session that is rebuilt *without*
+            // this capability negotiated never calls `attach_session` at all,
+            // so the previous session's roles survived it — and `anyflow
+            // notifications status` went on reporting "the device can source
+            // notifications (epoch 2)" for a peer whose current session has
+            // no channel to say so on. Nothing could flow, because the grant
+            // is re-checked per message; what it cost was the truth of the
+            // one screen somebody reads when they are trying to work out why
+            // their notifications stopped.
+            state.local_roles.reset();
+            state.peer_roles = PeerRoles::none();
         }
 
         let manager = Arc::clone(self);
         let armed = Arc::clone(&slot);
         tokio::spawn(async move {
-            tokio::time::sleep(limits::RECONNECT_GRACE).await;
+            tokio::time::sleep(manager.reconnect_grace()).await;
             // The generation check is the whole point: a reconnect during the
             // grace makes this timer's peer a previous session, and closing
             // the live session's mirrors because an old one expired would be
@@ -1756,13 +1881,30 @@ impl NotificationManager {
     pub fn spawn_platform_pumps(self: &Arc<Self>) -> Vec<tokio::task::JoinHandle<()>> {
         let mut handles = Vec::new();
 
-        if let Some(mut closes) = self.sink.closed_events() {
-            let manager = Arc::clone(self);
-            handles.push(tokio::spawn(async move {
-                while let Some(closed) = closes.recv().await {
-                    manager.note_closed(closed).await;
+        match self.sink.closed_events() {
+            Some(mut closes) => {
+                self.close_stream_missing.store(false, Ordering::Release);
+                let manager = Arc::clone(self);
+                handles.push(tokio::spawn(async move {
+                    while let Some(closed) = closes.recv().await {
+                        manager.note_closed(closed).await;
+                    }
+                }));
+            }
+            None => {
+                // Only interesting when the backend said it could: a backend
+                // that never claimed the capability is simply a sink, and
+                // that is an ordinary, documented configuration.
+                if self.capabilities.dismiss_reporting {
+                    tracing::warn!(
+                        backend = %self.sink.id(),
+                        "the notification server advertises close reporting \
+                         but handed over no close stream; this desktop will \
+                         not announce DISMISS_REPORTER"
+                    );
+                    self.close_stream_missing.store(true, Ordering::Release);
                 }
-            }));
+            }
         }
 
         if let Some(mut availability) = self.sink.availability_events() {

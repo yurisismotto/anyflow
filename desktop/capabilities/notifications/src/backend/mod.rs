@@ -412,8 +412,19 @@ struct MemorySinkState {
     /// The id the last successful `display` returned.
     last_id: Option<ServerId>,
     failure: Option<SinkError>,
+    /// Fails only `display`, leaving `close` working. A server that refuses
+    /// new notifications but still closes the ones it holds is a real state
+    /// and a different one from "the server is gone".
+    display_failure: Option<SinkError>,
+    /// Fails only `close`. This is the dangerous direction: a mirror that
+    /// cannot be closed is a mirror that could be left on a screen for ever.
+    close_failure: Option<SinkError>,
     capabilities: SinkCapabilities,
     available: bool,
+    /// The `NotificationClosed` subscription is unavailable — the signal
+    /// match failed, or the bus refused it. A sink that cannot observe closes
+    /// must not claim it reports dismissals.
+    withhold_closed_events: bool,
 }
 
 impl Default for MemorySink {
@@ -491,6 +502,30 @@ impl MemorySink {
         self.lock().failure = failure;
     }
 
+    /// Makes only `display` fail. `close` keeps working.
+    pub fn set_display_failure(&self, failure: Option<SinkError>) {
+        self.lock().display_failure = failure;
+    }
+
+    /// Makes only `close` fail. `display` keeps working.
+    ///
+    /// The asymmetric case worth testing on its own: a display that fails
+    /// shows nothing, which is visible and safe, while a close that fails
+    /// leaves something on a screen, which is neither.
+    pub fn set_close_failure(&self, failure: Option<SinkError>) {
+        self.lock().close_failure = failure;
+    }
+
+    /// Refuses to hand out the `NotificationClosed` stream.
+    ///
+    /// Must be set before the manager is built, because the stream is taken
+    /// once. A sink whose closes cannot be observed can never positively
+    /// identify a human dismissal, so it must not announce `DISMISS_REPORTER`
+    /// and must never produce a `DismissRequest`.
+    pub fn withhold_closed_events(&self) {
+        self.lock().withhold_closed_events = true;
+    }
+
     pub fn set_capabilities(&self, capabilities: SinkCapabilities) {
         self.lock().capabilities = capabilities;
     }
@@ -561,7 +596,7 @@ impl NotificationSink for MemorySink {
 
     async fn display(&self, mirror: &Mirror, replaces: Option<ServerId>) -> SinkResult<ServerId> {
         let mut state = self.lock();
-        if let Some(f) = &state.failure {
+        if let Some(f) = state.failure.as_ref().or(state.display_failure.as_ref()) {
             return Err(f.clone());
         }
         state.displays.push((replaces, mirror.clone()));
@@ -584,7 +619,7 @@ impl NotificationSink for MemorySink {
 
     async fn close(&self, id: ServerId) -> SinkResult<()> {
         let mut state = self.lock();
-        if let Some(f) = &state.failure {
+        if let Some(f) = state.failure.as_ref().or(state.close_failure.as_ref()) {
             return Err(f.clone());
         }
         state.closes.push(id);
@@ -595,6 +630,9 @@ impl NotificationSink for MemorySink {
     }
 
     fn closed_events(&self) -> Option<mpsc::Receiver<Closed>> {
+        if self.lock().withhold_closed_events {
+            return None;
+        }
         self.closed_rx.lock().ok()?.take()
     }
 
