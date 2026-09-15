@@ -86,7 +86,7 @@ connection.
 ## Handshake
 
 ```
-Phone                                        Fedora
+Phone                                        Desktop
   │                                             │
   │──── TCP + TLS 1.3 (mutual, ALPN anyflow/1) ─│
   │     phone pins the desktop SPKI             │

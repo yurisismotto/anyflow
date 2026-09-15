@@ -1,12 +1,12 @@
 # `clipboard.v1`
 
-Text clipboard sharing between a Fedora desktop and an Android device.
+Text clipboard sharing between a Linux desktop and an Android device.
 
 ## What this is, stated accurately
 
 ```text
-Automatic  Fedora  → Android   clipboard sync   (opt-in, per device)
-Manual     Android → Fedora    clipboard send   (a person taps a button)
+Automatic  desktop → Android   clipboard sync   (opt-in, per device)
+Manual     Android → desktop   clipboard send   (a person taps a button)
 ```
 
 It is **not** "automatic bidirectional clipboard", and saying so would be
@@ -250,7 +250,7 @@ The dangerous half is the one that is immediate.
 The loop that must not happen:
 
 ```text
-  Fedora clipboard changes
+  desktop clipboard changes
        │
        ▼  watcher  ──────────► CLIPBOARD_UPDATE ──────► Android
                                                             │
@@ -260,7 +260,7 @@ The loop that must not happen:
                                                             │
        ◄─────────────────── CLIPBOARD_UPDATE ◄──────────────┘
        │
-  write to Fedora clipboard  →  watcher fires again  →  for ever
+  write to desktop clipboard →  watcher fires again  →  for ever
 ```
 
 Two independent mechanisms break it, and both are needed.
@@ -351,7 +351,7 @@ This is enforced by three things rather than by discipline:
   is wrong, and that is the worst moment to spill a password into a file they
   are about to attach to a bug report.
 
-## The Fedora clipboard backend
+## The Linux clipboard backend
 
 ```text
 ClipboardBackend
@@ -403,9 +403,49 @@ never appears in an `argv`, so there is no quoting to get wrong, nothing for a
 `$(…)` in a clipboard to expand into, and no clipboard content in
 `/proc/<pid>/cmdline` where any process on the machine could read it.
 
-**Dependency:** `wl-clipboard` (Fedora: `sudo dnf install wl-clipboard`). Its
-absence is detected once at startup and reported by `anyflow clipboard status`
-with that exact command, rather than failing at the first use.
+**Dependency:** the `wl-clipboard` package, which is what it is called on
+Fedora, Ubuntu and Debian alike. Its absence is detected once at startup and
+reported by `anyflow clipboard status`, rather than failing at the first use.
+The runtime message names the missing binaries and the package and stops
+there: AnyFlow does not know which package manager the machine has, and a
+wrong guess is worse than none. Per-distribution install commands live in
+[the README](../../README.md#running-on-linux), where they can be correct.
+
+### Sensitive marking is a separate capability from the clipboard itself
+
+`wl-copy --sensitive` asks clipboard managers to keep a clip out of their
+history. It is a **distinct capability** from having a working clipboard, and
+the difference is not hypothetical:
+
+| Distribution | `wl-clipboard` | ordinary clipboard | `--sensitive` |
+| --- | --- | --- | --- |
+| Fedora 44 | `2.2.1^git20251124` | yes | **yes** — a post-2.2.1 snapshot carrying the flag |
+| Ubuntu 24.04 LTS | `2.2.1-1build1` | yes | **no** |
+| Ubuntu 26.04 LTS | `2.2.1-2build1` | yes | **no** |
+| Debian 13 trixie | `2.2.1-2` | yes | **no** |
+
+Note the second column: all four print the identical string `wl-clipboard
+2.2.1`, and they do not behave identically. **That is why AnyFlow probes
+`wl-copy --help` for the option rather than parsing `--version`** — a `>= 2.3`
+version test would reject Fedora's working build and accept the three that
+cannot do it. The version number is offered to users as guidance for choosing
+a build; it is never the test.
+
+Where the capability is absent, a clip the phone marked sensitive is
+**refused** rather than written unmarked (PLAT-DEC-013): an unmarked password
+persisted in a clipboard-history manager without the user being told is worse
+than a visible failure. Ordinary clipboard sharing is untouched. Because the
+refusal only happens at the moment somebody copies a password — the worst
+possible moment to learn about it — the state is reported up front and
+separately from the backend's own availability, by both
+`anyflow clipboard status` and the GUI's clipboard page:
+
+```text
+  ordinary clipboard   available
+  sensitive clipboard  unavailable
+                       this system's wl-copy does not support sensitive
+                       clipboard marking. …
+```
 
 ### Watching: XFIXES, because GNOME has no data-control
 
@@ -477,8 +517,8 @@ So there is no supported way to observe the clipboard in the background, and
 the app says so instead of offering a toggle that would quietly do nothing.
 
 **Writing is not restricted the same way.** `setPrimaryClip` has no focus
-requirement, which is precisely what makes automatic Fedora → Android sync
-possible while automatic Android → Fedora sync is not.
+requirement, which is precisely what makes automatic desktop → Android sync
+possible while automatic Android → desktop sync is not.
 
 ### Where a read happens
 
@@ -524,7 +564,7 @@ it lands on their clipboard.
 
 ## Sensitive clipboards
 
-Android → Fedora already requires a deliberate tap. When the platform marks a
+Android → desktop already requires a deliberate tap. When the platform marks a
 clip `EXTRA_IS_SENSITIVE`, AnyFlow asks **again**, naming the destination:
 
 ```text
@@ -539,7 +579,7 @@ The dialog shows the size and the destination, never a preview: rendering the
 text would put a password on a screen that is also visible over the shoulder,
 and it buys nothing, since the person just copied it.
 
-**Fedora has no equivalent signal.** Wayland offers no reliable way to ask
+**The desktop has no equivalent signal.** Wayland offers no reliable way to ask
 whether a clip is sensitive, and inventing a heuristic password detector would
 be a guess dressed up as a security control. So:
 

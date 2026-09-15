@@ -454,31 +454,60 @@ fn print_clipboard_status(report: &ClipboardStatusReport) {
     }
 
     println!("Clipboard");
-    println!("  backend     {}", report.backend);
-    println!("  detail      {}", report.backend_detail);
+    println!("  backend              {}", report.backend);
+    println!("  detail               {}", report.backend_detail);
+    // Three capabilities, named separately and in the order they stop
+    // working. A desktop can have the first and neither of the others, which
+    // is exactly what every current Ubuntu LTS and Debian Stable is, and one
+    // collapsed "clipboard: available" line would be false on all three.
     println!(
-        "  auto-send   {}",
+        "  ordinary clipboard   {}",
+        if report.backend_available {
+            "available"
+        } else {
+            "unavailable"
+        }
+    );
+    if !report.backend_available {
+        println!("                       {}", report.backend_detail);
+    }
+    println!(
+        "  sensitive clipboard  {}",
+        if report.sensitive_available {
+            "available"
+        } else {
+            "unavailable"
+        }
+    );
+    if !report.sensitive_available {
+        // Said here rather than only in the failure text, which is the whole
+        // point: before this, a person learned that a password would not
+        // arrive at the moment a password did not arrive.
+        println!("                       {}", report.sensitive_detail);
+        println!(
+            "                       A clip arriving with sensitive_hint set will be \
+             REFUSED rather"
+        );
+        println!(
+            "                       than written unmarked. Ordinary clipboard sharing is \
+             unaffected."
+        );
+    }
+    // Kept apart from the two above, because it fails for a third reason:
+    // auto-send needs a *compositor* that reports changes, sensitive marking
+    // needs a `wl-copy` that has the flag, and neither implies the other.
+    println!(
+        "  auto-send            {}",
         if report.watch_available {
             "supported on this session"
         } else {
             "NOT supported here — this session cannot detect clipboard changes"
         }
     );
-    // Kept separate from `auto-send`, because they fail for different
-    // reasons: auto-send needs a *compositor* that reports changes, and
-    // sensitive marking needs a `wl-copy` new enough to have the flag. A
-    // session can have one and not the other.
-    if report.sensitive_available {
-        println!("  sensitive   clips can be marked sensitive");
-    } else {
-        println!("  sensitive   NOT supported here — a clip arriving with sensitive_hint");
-        println!("              set will be REFUSED rather than written unmarked.");
-        println!("              {}", report.sensitive_detail);
-    }
     // Printed so the bounded-growth property is observable rather than merely
     // documented. Neither cache holds content.
     println!(
-        "  caches      {} event id(s), {} suppression entr(ies)",
+        "  caches               {} event id(s), {} suppression entr(ies)",
         report.event_cache_entries, report.suppression_cache_entries
     );
 

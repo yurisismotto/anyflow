@@ -679,7 +679,7 @@ fn dismiss_sync_row(peer: &NotificationPeerReport, pages: &Pages) -> gtk::Box {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::views) mod tests {
     use super::{render, DismissReadiness, Readiness, LOCK_POLICIES};
     use crate::{DaemonState, Page};
     use anyflow_control::{NotificationPeerReport, NotificationsStatusReport};
@@ -997,9 +997,13 @@ mod tests {
     /// each `#[test]` a thread of its own. Splitting them would mean nine
     /// processes or nine skipped tests; this way each section still fails with
     /// its own name and message.
-    #[test]
-    #[ignore = "needs a display: cargo test -p anyflow-gui -- --ignored"]
-    fn the_notifications_page_widget_tree() {
+    //
+    // It is no longer a `#[test]` of its own: GTK is initialised once per
+    // *process* and binds to the thread that did it, and libtest hands every
+    // `#[test]` a thread. A second display test anywhere in this crate would
+    // therefore panic inside GTK rather than fail on an assertion. All of
+    // them are called from the single gate in `views::display_gate` instead.
+    pub(in crate::views) fn the_notifications_page_widget_tree() {
         an_ungranted_device_is_offered_the_grant_and_nothing_else();
         the_grant_switch_shows_what_the_daemon_holds();
         a_granted_device_is_offered_the_pause_and_the_lock_policy();

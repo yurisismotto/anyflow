@@ -3,7 +3,7 @@
 ## Shape of the system
 
 ```
-        Fedora                                    Android
+     Linux desktop                                Android
 ┌───────────────────────┐                 ┌───────────────────────┐
 │  anyflow (CLI)        │                 │  Compose UI           │
 │        │              │                 │        │              │
