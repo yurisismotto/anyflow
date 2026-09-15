@@ -39,6 +39,24 @@ anyflow-control = { version = "0.1.0", path = "../control" }
 # The Linux control endpoint. A desktop UI is a platform application; it is
 # the *portable* crates that must not name a platform.
 anyflow-linux = { version = "0.1.0", path = "../platform-linux" }
+# The native GUI floors. Both are enforced at build time by `system-deps`
+# reading the distribution's own pkg-config metadata, so they are a hard gate
+# rather than a hope — and neither is a conservative pin. Each was measured by
+# lowering it one step and recompiling (U0 §14.2):
+#
+#   v4_12  `gtk::CssProvider::load_from_string` (src/lib.rs) is
+#          `#[cfg(feature = "v4_12")]`. At v4_10 the theme installer does not
+#          compile. `load_from_data(&str)` is the ungated predecessor if this
+#          floor ever has to come down, but no supported target needs it.
+#   v1_5   `adw::Dialog` (views/pairing.rs) and `adw::AlertDialog`
+#          (views/peers.rs) do not exist at v1_4.
+#
+# Ubuntu 24.04 LTS ships libadwaita **exactly 1.5.0** and is supported to
+# 2029, so this floor has no margin at all on the LTS most users have. The
+# 24.04 row of `.github/workflows/linux-distro-compat.yml` compiles this crate
+# against that distribution's own libadwaita for precisely that reason: reach
+# for an `AdwSpinner` (1.6) or an `AdwBottomSheet` (1.7) and that row goes
+# red, rather than the loss being discovered by a user.
 gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
 adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "sync"] }

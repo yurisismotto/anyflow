@@ -1,0 +1,365 @@
+# CI-002 — the Linux distribution build-compatibility gate.
+#
+# What this proves, and what it does not
+# --------------------------------------
+# It proves **BUILD COMPATIBILITY**: that `anyflowd`, `anyflow` and
+# `anyflow-gui` compile on Ubuntu 24.04 LTS, Ubuntu 26.04 LTS and Debian 13
+# trixie, against **those distributions' own** GTK, libadwaita, glib and C
+# toolchain, from the committed `Cargo.lock`.
+#
+# It is **NOT DESKTOP RUNTIME CERTIFICATION**. A container has no compositor,
+# no session bus, no logind session, no notification server and no link-local
+# network. Nothing here may be cited as evidence about the Wayland clipboard,
+# desktop notifications, screen-lock detection, GUI rendering or mDNS: those
+# need a real graphical session and are gated separately
+# (LINUX-UBUNTU-DEBIAN-COMPAT-U0.md §21.3). A green tick on this workflow
+# means the code builds on those distributions, and that is all it means.
+#
+# The two things this gate is actually for
+# ----------------------------------------
+# 1. **The libadwaita floor.** Ubuntu 24.04 LTS ships libadwaita exactly
+#    1.5.0 against a declared floor of 1.5, is supported to 2029, and is the
+#    LTS most users have. The development host has 1.9.x, so the day somebody
+#    reaches for an `AdwSpinner` (1.6) or an `AdwBottomSheet` (1.7) nothing
+#    local would notice. The `ubuntu-24.04` row is the only place that floor
+#    is exercised, which makes it the load-bearing row here (U0 U-3).
+# 2. **The MSRV.** The declared `rust-version` was 1.82 while the committed
+#    lockfile needed 1.88 — found by a Debian user's toolchain failing, not by
+#    CI (U0 U-4). The `msrv` job below pins *exactly* the declared number so
+#    the next dependency bump cannot raise the real floor silently.
+#
+# Native libraries vs the Rust toolchain — a distinction this file depends on
+# --------------------------------------------------------------------------
+# Each distro row installs that distribution's **own** GTK and libadwaita from
+# its **own** archive: no PPA, no third-party repository, no backport, no
+# Flatpak SDK, no bundled newer copy. That is the whole point of the row.
+#
+# The **Rust toolchain** is installed separately, pinned to AnyFlow's declared
+# MSRV. That is deliberate and is not a contradiction: whether a given
+# distribution's default `rustc` package is new enough is a *packaging and
+# documentation* question, already answered per distribution in README.md, and
+# it is not what this workflow measures. Ubuntu 24.04's stock rustc is 1.75
+# and cannot build the lockfile; the distribution nevertheless carries
+# `rustc-1.91` in its own archive. Conflating the two would make this job go
+# red for a reason that has nothing to do with AnyFlow's source.
+
+name: Linux distro compatibility · build only
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/linux-distro-compat.yml'
+  # Deliberately NOT `feature/**`: a feature branch that also has an open PR
+  # would otherwise run this whole matrix twice for one push. Same discipline
+  # as portable-windows-msvc.yml.
+  push:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/linux-distro-compat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-distro-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  DEBIAN_FRONTEND: noninteractive
+  # The declared floor, in one place. `desktop/Cargo.toml` carries the same
+  # number and the `msrv` job asserts the two agree, so this cannot drift into
+  # testing a version nothing claims.
+  ANYFLOW_MSRV: '1.88.0'
+
+jobs:
+  # ---------------------------------------------------------------------- 1 --
+  # The MSRV regression gate. Exactly the declared toolchain, the committed
+  # lockfile, and the three Linux product binaries.
+  msrv:
+    name: MSRV · rustc 1.88, --locked
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the GTK stack (GUI only) and a C toolchain (ring)
+        run: |
+          set -eux
+          sudo apt-get update
+          # Exactly what U0 §6 measured as necessary, and nothing else. In
+          # particular: no libssl-dev (transport is rustls/ring), no
+          # libdbus-1-dev (zbus 5 is pure Rust), no libx11-dev/libxcb1-dev
+          # (x11rb uses its own connection), no libavahi (mdns-sd is a
+          # responder of its own) and no protobuf-compiler (protox compiles
+          # the schema in-process).
+          sudo apt-get install -y --no-install-recommends \
+            gcc libc6-dev pkg-config libgtk-4-dev libadwaita-1-dev
+
+      - name: The declared MSRV is what this job pins
+        working-directory: desktop
+        run: |
+          set -eu
+          declared=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
+          echo "desktop/Cargo.toml declares: ${declared}"
+          echo "this job pins:              ${ANYFLOW_MSRV}"
+          # `1.88` and `1.88.0` name the same toolchain, so both are reduced
+          # to major.minor before comparing and the manifest need not carry a
+          # patch level it does not mean.
+          minor() { echo "$1" | awk -F. '{ printf "%s.%s", $1, $2 }'; }
+          if [ "$(minor "${declared}")" != "$(minor "${ANYFLOW_MSRV}")" ]; then
+            echo "::error::rust-version is '${declared}' but this gate pins '${ANYFLOW_MSRV}'."
+            echo "::error::Raising the declared MSRV must be a deliberate edit in both places,"
+            echo "::error::with the dependency that moved the floor named in the commit."
+            exit 1
+          fi
+
+      - name: Toolchain identity
+        run: |
+          set -eux
+          rustup toolchain install "${ANYFLOW_MSRV}" --profile minimal
+          rustup run "${ANYFLOW_MSRV}" rustc -Vv
+          rustup run "${ANYFLOW_MSRV}" cargo -V
+
+      # THE GATE. If this goes red, a dependency update has raised the real
+      # compiler floor above the declared one. The fix is NOT to bump
+      # `rust-version` until the crate that did it has been identified and the
+      # cost of following it has been weighed — that is exactly how the 1.82
+      # claim became false.
+      - name: Lockfile resolves on the declared MSRV
+        working-directory: desktop
+        run: rustup run "${ANYFLOW_MSRV}" cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: cargo check · daemon, CLI, GUI
+        working-directory: desktop
+        run: |
+          rustup run "${ANYFLOW_MSRV}" cargo check --locked \
+            -p anyflow-daemon -p anyflow-cli -p anyflow-gui
+
+      - name: cargo check · the whole desktop workspace, tests included
+        working-directory: desktop
+        run: rustup run "${ANYFLOW_MSRV}" cargo check --locked --workspace --all-targets
+
+  # ---------------------------------------------------------------------- 2 --
+  # The distro matrix. Every row is mandatory; none may be allowed to fail.
+  distro:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: ${{ matrix.image }}
+
+    strategy:
+      # `fail-fast: false` so one red row does not hide the state of the
+      # others. It does NOT soften the result: every row still gates the job.
+      # There is no `continue-on-error` anywhere in this file, and no row is
+      # optional — Ubuntu 24.04, Ubuntu 26.04 and Debian 13 are all V1
+      # targets, so a failure on any of them is a failure.
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 24.04 LTS · native GTK 4.14 / libadwaita 1.5
+            image: ubuntu:24.04
+            # The zero-margin row (U0 U-3). The guard below fails if this
+            # image stops supplying a 1.5.x libadwaita, because at that point
+            # the row would still be green while no longer testing the floor
+            # it exists to test.
+            libadwaita_must_start_with: '1.5.'
+          - name: Ubuntu 26.04 LTS · native GTK 4.22 / libadwaita 1.9
+            image: ubuntu:26.04
+            libadwaita_must_start_with: ''
+          - name: Debian 13 trixie · native GTK 4.18 / libadwaita 1.7
+            image: debian:trixie
+            libadwaita_must_start_with: ''
+
+    steps:
+      # The container runs as root, so there is no `sudo` here and none is
+      # installed in these images.
+      - name: Distribution identity
+        run: |
+          set -eux
+          cat /etc/os-release
+          uname -m
+
+      - name: Native build dependencies, from this distribution's own archive
+        run: |
+          set -eux
+          apt-get update
+          # No PPA is added, no third-party repository is enabled, no backport
+          # is pulled in, and nothing here upgrades GTK or libadwaita past
+          # what this release ships. That is the property the row is for.
+          #
+          # The list is U0 §6's measured minimum:
+          #   gcc, libc6-dev   ring compiles C and assembly
+          #   pkg-config       how system-deps finds the GTK stack
+          #   libgtk-4-dev     GUI only
+          #   libadwaita-1-dev GUI only
+          #   ca-certificates, curl   to fetch the Rust toolchain below
+          #
+          # `git` is here for actions/checkout, which runs next and would
+          # otherwise fall back to a tarball download. It is a CI tool, not a
+          # build dependency of AnyFlow, and the distinction matters: nothing
+          # in this list may be read as a package the product needs.
+          apt-get install -y --no-install-recommends \
+            gcc libc6-dev pkg-config libgtk-4-dev libadwaita-1-dev \
+            ca-certificates curl git
+
+      - uses: actions/checkout@v5
+
+      - name: Native library versions — the evidence this row exists to produce
+        run: |
+          set -eu
+          gtk=$(pkg-config --modversion gtk4)
+          adw=$(pkg-config --modversion libadwaita-1)
+          glib=$(pkg-config --modversion glib-2.0)
+          echo "gtk4          ${gtk}"
+          echo "libadwaita-1  ${adw}"
+          echo "glib-2.0      ${glib}"
+
+          # `glib-compile-resources` is a build-time *binary* the GUI's
+          # build.rs runs. U0 measured that `libgtk-4-dev` alone pulls it in
+          # on these distributions (via libgio-2.0-dev-bin), so no separate
+          # libglib2.0-dev is installed. If that ever stops being true, this
+          # says so plainly instead of failing later inside a build script.
+          if ! command -v glib-compile-resources > /dev/null; then
+            echo "::error::glib-compile-resources is absent after installing libgtk-4-dev."
+            echo "::error::U0 §6 measured it as included. Add the package that now carries it."
+            exit 1
+          fi
+          command -v glib-compile-resources
+
+          # The floor guard, on the row that has no margin.
+          expected='${{ matrix.libadwaita_must_start_with }}'
+          if [ -n "${expected}" ]; then
+            case "${adw}" in
+              ${expected}*) echo "libadwaita ${adw} — the 1.5 floor is genuinely exercised here." ;;
+              *)
+                echo "::error::This row exists to compile against libadwaita ${expected}x,"
+                echo "::error::and the image now supplies ${adw}. The regression gate for the"
+                echo "::error::libadwaita 1.5 floor has stopped being a gate. Decide"
+                echo "::error::deliberately: move the guard, or pin the row's image."
+                exit 1
+                ;;
+            esac
+          fi
+
+      # The Rust toolchain, separately and deliberately — see the header. It
+      # is pinned to the declared MSRV, so these rows prove the stronger
+      # statement: this distribution's native GTK stack *and* the lowest
+      # toolchain AnyFlow claims to support, together.
+      - name: Rust toolchain · pinned to the declared MSRV
+        run: |
+          set -eux
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain "${ANYFLOW_MSRV}"
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          # `desktop/rust-toolchain.toml` pins `channel = "stable"`, which is
+          # right for a developer and wrong here: rustup honours that file over
+          # its own default, so without this every command below would silently
+          # run on current stable and this matrix would prove nothing about the
+          # MSRV. Measured, not guessed — the first local container probe of
+          # this workflow ran on 1.98.1 while reporting that it had installed
+          # 1.88.0. `RUSTUP_TOOLCHAIN` outranks the file.
+          echo "RUSTUP_TOOLCHAIN=${ANYFLOW_MSRV}" >> "${GITHUB_ENV}"
+
+      - name: Toolchain identity — and that the pin actually took
+        run: |
+          set -eux
+          rustc -Vv
+          cargo -V
+          case "$(rustc -V)" in
+            *"${ANYFLOW_MSRV}"*) echo "pinned to ${ANYFLOW_MSRV} as intended" ;;
+            *)
+              echo "::error::expected rustc ${ANYFLOW_MSRV}, got: $(rustc -V)"
+              echo "::error::Something is overriding the toolchain — check rust-toolchain.toml."
+              exit 1
+              ;;
+          esac
+
+      - name: cargo metadata · the committed lockfile resolves here
+        working-directory: desktop
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: cargo check · anyflow-daemon
+        working-directory: desktop
+        run: cargo check --locked -p anyflow-daemon
+
+      - name: cargo check · anyflow-cli
+        working-directory: desktop
+        run: cargo check --locked -p anyflow-cli
+
+      # Mandatory on every row. The GUI is the only thing here that touches
+      # the distribution's GTK stack, so a matrix that skipped it would prove
+      # nothing this workflow claims.
+      - name: cargo check · anyflow-gui, against THIS distribution's GTK and libadwaita
+        working-directory: desktop
+        run: cargo check --locked -p anyflow-gui
+
+      - name: cargo check · the whole desktop workspace
+        working-directory: desktop
+        run: cargo check --locked --workspace
+
+      # Portable and Linux-generic behaviour only. Deliberately *not* the
+      # whole suite: the daemon and runtime suites bind sockets and drive
+      # sessions, and a headless container is the wrong place to judge them —
+      # the Fedora host runs those, and the real-session gates certify the
+      # rest. What is here is the decision logic that a distribution can
+      # actually change, above all the clipboard capability probe, which is
+      # the one place these three distributions differ from the certified host.
+      # A container job runs as **root**, and root has CAP_DAC_OVERRIDE: a
+      # directory chmod'd to 0000 is still readable. Four `anyflow-core` tests
+      # are built on exactly that being impossible — they assert that an
+      # unreachable key reads back as `PermissionDenied` rather than as
+      # "absent", which is the Wave 0 defect they exist to prevent. As root
+      # they fail for a reason that has nothing to do with the distribution.
+      #
+      # They are excluded by name below rather than by a loose pattern, and
+      # this step fails if the set of tests that reach for mode 0000 changes,
+      # so a *fifth* one cannot be silently skipped — it will stop this job
+      # and be classified deliberately. Same discipline as the file-set guards
+      # in portable-windows-msvc.yml.
+      - name: Root-defeated permission tests — the exclusion list is still complete
+        working-directory: desktop
+        run: |
+          set -eu
+          found=$(grep -rln 'from_mode(0o000)' --include='*.rs' core/ | sort | tr '\n' ' ')
+          count=$(grep -rc 'from_mode(0o000)' --include='*.rs' core/ | awk -F: '{ n += $2 } END { print n }')
+          echo "files reaching for mode 0000: ${found}"
+          echo "occurrences: ${count}"
+          if [ "${count}" != "4" ]; then
+            echo "::error::${count} tests now chmod to 0000; the exclusion list below covers 4."
+            echo "::error::Classify the new one: does it need an unprivileged process to be meaningful?"
+            echo "::error::If so add it to the --skip list; if not, find out why it passes as root."
+            exit 1
+          fi
+
+      - name: cargo test · portable and Linux-generic suites
+        working-directory: desktop
+        run: |
+          cargo test --locked \
+            -p anyflow-capability-clipboard \
+            -p anyflow-capability-files \
+            -p anyflow-capability-battery \
+            -p anyflow-core \
+            -p anyflow-control \
+            -p anyflow-proto \
+            -- \
+            --skip an_unreadable_secret_is_permission_denied_and_never_absence \
+            --skip an_unreadable_state_file_is_permission_denied_and_never_absence \
+            --skip an_unreadable_key_refuses_to_start_and_never_regenerates \
+            --skip a_non_traversable_data_directory_refuses_to_start_and_never_regenerates
+
+      - name: What this row proved
+        run: |
+          echo "BUILD COMPATIBILITY on $(. /etc/os-release && echo "${PRETTY_NAME}")"
+          echo "  gtk4 $(pkg-config --modversion gtk4) · libadwaita-1 $(pkg-config --modversion libadwaita-1) · $(rustc -V)"
+          echo
+          echo "This is NOT desktop runtime certification. No compositor, no session bus,"
+          echo "no logind session, no notification server and no link-local network took"
+          echo "part in it. Clipboard, notifications, lock detection, GUI rendering and"
+          echo "mDNS are certified in a real GNOME session or not at all."

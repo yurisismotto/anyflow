@@ -23,8 +23,8 @@ keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 > [ADR-0015](docs/adr/ADR-0015-notification-access.md) and specified in
 > [docs/research/notifications-v1/](docs/research/notifications-v1/).
 >
-> Clipboard sharing is, precisely: **automatic Fedora → Android sync**
-> (opt-in, per device) and **manual Android → Fedora send**. It is not
+> Clipboard sharing is, precisely: **automatic desktop → Android sync**
+> (opt-in, per device) and **manual Android → desktop send**. It is not
 > "automatic bidirectional clipboard", and saying so would be wrong: Android
 > 10+ refuses clipboard reads to an app without input focus, and AnyFlow uses
 > none of the techniques that defeat that. See
@@ -59,7 +59,7 @@ anyflow/
 │   ├── capabilities/clipboard/ clipboard.v1 — text rules, policy, loop suppression
 │   ├── daemon/                anyflowd
 │   ├── cli/                   anyflow
-│   └── gui/                   (placeholder — GTK4/Libadwaita, later)
+│   └── gui/                   anyflow-gui — GTK4 / libadwaita
 ├── android/                   Kotlin + Compose app
 ├── browser-extension/         (placeholder)
 ├── packaging/fedora/          systemd user unit, RPM spec
@@ -70,21 +70,106 @@ anyflow/
     └── adr/                   ADR-0001 … ADR-0015
 ```
 
-## Running on Fedora
+## Running on Linux
 
-Needs a Rust toolchain and a C compiler (`sudo dnf install gcc`). It does
-**not** need `protobuf-compiler`: the schema is compiled by `protox`, in pure
-Rust ([ADR-0004](docs/adr/ADR-0004-protocol-buffers.md)).
+### Which distributions, and what "supported" means for each
+
+These are not all the same claim, and the difference is worth reading before
+choosing one:
+
+| Distribution | Status | What that means |
+| --- | --- | --- |
+| **Fedora 41+** (developed and certified on 44) | **Runtime certified** | Every capability has been exercised on real hardware in a real GNOME Wayland session, through six certification waves |
+| **Ubuntu 24.04 LTS** | **Build-supported** — compatibility target | Daemon, CLI and GUI compile against the distribution's own GTK stack, proved in CI on every change. **Not yet certified in a real session** |
+| **Ubuntu 26.04 LTS** | **Build-supported** — compatibility target | same |
+| **Debian 13 trixie** | **Build-supported** — compatibility target | same |
+
+"Build-supported" is a deliberately narrower word than "supported". It means
+the code compiles and its portable logic passes its tests on that
+distribution, which is what
+[`.github/workflows/linux-distro-compat.yml`](.github/workflows/linux-distro-compat.yml)
+checks. It does **not** mean discovery, pairing, clipboard, notifications or
+lock detection have been observed working there — those need a real graphical
+session, and until that certification runs the honest word is
+"build-supported".
+
+**Ubuntu 22.04 LTS and Debian 12 bookworm cannot run the GUI** and are not
+targets: their libadwaita (1.2) and GTK (4.8) predate the APIs the interface is
+built from. The daemon and CLI need no GTK at all.
+
+### Prerequisites
+
+Three things, and only the third is distribution-specific in any interesting
+way:
+
+* **A C compiler.** `ring` compiles C and assembly for the TLS primitives.
+  Nothing else in the tree needs one — the daemon and the CLI link no C
+  library at all.
+* **A Rust toolchain, 1.88 or newer.** See the table below; this is the one
+  place where a distribution's own package may not be enough.
+* **GTK 4.12+ and libadwaita 1.5+**, for the GUI only. Every supported
+  distribution ships enough (Ubuntu 24.04 is exactly at the libadwaita floor).
+
+It does **not** need `protobuf-compiler` — the schema is compiled by `protox`,
+in pure Rust ([ADR-0004](docs/adr/ADR-0004-protocol-buffers.md)) — and it does
+**not** need OpenSSL, Avahi, libdbus or libX11 development packages. Transport
+security is `rustls`/`ring`, D-Bus is `zbus` (a pure-Rust implementation),
+mDNS is `mdns-sd` (its own responder, not an Avahi client) and the Xwayland
+clipboard watch is `x11rb` with its own connection backend.
+
+**Fedora**
+
+```bash
+sudo dnf install gcc pkgconf-pkg-config rust cargo
+sudo dnf install gtk4-devel libadwaita-devel glib2-devel   # GUI only
+sudo dnf install wl-clipboard                              # clipboard, at runtime
+sudo dnf install upower                                    # battery.v1, optional
+```
+
+**Ubuntu 24.04 / 26.04 and Debian 13**
+
+```bash
+sudo apt install gcc libc6-dev pkg-config
+sudo apt install libgtk-4-dev libadwaita-1-dev   # GUI only; this also brings
+                                                 # in glib-compile-resources
+sudo apt install wl-clipboard                    # clipboard, at runtime
+sudo apt install upower                          # battery.v1, optional
+```
+
+The package names differ; the runtime binary AnyFlow actually looks for is
+called `wl-copy` on all of them, and the package carrying it is called
+`wl-clipboard` on all of them.
+
+### The Rust toolchain, per distribution
+
+**AnyFlow requires Rust ≥ 1.88.** That number is not a preference: the
+committed `Cargo.lock` contains crates (`time`, `rcgen`, `zbus`) that declare
+it, so an older toolchain fails in Cargo's resolver before compiling a line of
+AnyFlow. The distribution's own `rustc` package is **not** required — it is
+simply the most convenient source when it is new enough.
+
+| Distribution | Its default `rustc` | Enough? | What to use |
+| --- | --- | --- | --- |
+| Fedora 44 | 1.98 | **yes** | `dnf install rust cargo` |
+| Ubuntu 26.04 LTS | 1.93.1 | **yes** | `apt install rustc cargo` |
+| Ubuntu 24.04 LTS | 1.75 | **no** | a newer versioned toolchain from Ubuntu's own archive — `apt install rustc-1.91 cargo-1.91` — or [rustup](https://rustup.rs). Note that `rustc-1.82` is also in the archive and is **not** enough |
+| Debian 13 trixie | 1.85.1 | **no** | `trixie-backports` (`rustc` 1.94.1), or [rustup](https://rustup.rs) |
+
+### Build and run
 
 ```bash
 cd desktop
 cargo build --release
-cargo test --workspace          # 192 tests
+cargo test --workspace          # 717 tests
 
 ./target/release/anyflowd   # foreground, or install the user unit
 ```
 
-As a service:
+As a service. The unit is a **user** unit — the identity key lives 0600 in
+your `$XDG_DATA_HOME` and the control socket in your `$XDG_RUNTIME_DIR`, so
+nothing here wants root. Its contents are distribution-neutral and it runs
+unchanged on all four targets; only the directory it currently sits in is
+Fedora-named, which is a packaging debt rather than a dependency:
 
 ```bash
 install -Dm0644 packaging/fedora/anyflowd.service \
@@ -155,7 +240,8 @@ Needs JDK 21 and Android SDK platform 35. See
 
 ## Pairing
 
-1. On Fedora: `anyflow pair`. A QR code appears; it is valid for 120 seconds
+1. On the computer: `anyflow pair`. A QR code appears; it is valid for 120
+   seconds
    and works once.
 2. On the phone: **Scan pairing code**.
 3. The phone pins the computer's key *from the QR*, before opening a socket —
@@ -163,7 +249,7 @@ Needs JDK 21 and Android SDK platform 35. See
    man-in-the-middle window.
 4. The phone proves it holds the pairing code, bound to both identities and to
    a fresh nonce.
-5. Fedora shows the phone's fingerprint. **Check it matches the phone's
+5. The computer shows the phone's fingerprint. **Check it matches the phone's
    screen**, then accept.
 6. Both sides store the other's public key. The token is destroyed.
 
@@ -238,9 +324,9 @@ implementations cannot drift apart silently:
 * The trust store's persistence path is not covered by the local JVM unit
   tests: it needs a real `Context` and `filesDir`. Its pure logic is tested,
   and `ClipboardPersistenceTest` now covers the file I/O on a device.
-* **Automatic Android → Fedora clipboard is not implemented, and will not be.**
+* **Automatic Android → desktop clipboard is not implemented, and will not be.**
   Android 10+ refuses clipboard reads to an app without input focus, and every
-  way around it is forbidden or user-hostile. Android → Fedora is a deliberate
+  way around it is forbidden or user-hostile. Android → desktop is a deliberate
   action: the Send clipboard button, the Quick Settings tile, or sharing text
   to AnyFlow. Verified on an SM-X620 (Android 16): background read REFUSED,
   focused read ALLOWED, background `setPrimaryClip` APPLIED.
@@ -248,6 +334,18 @@ implementations cannot drift apart silently:
   `wl-copy` and `wl-paste` block behind the lock screen rather than failing.
   Every call is bounded by a timeout and reported as such, so nothing hangs —
   but clipboard sync does not work while the screen is locked.
+* **Sensitive clips are refused where `wl-copy` cannot mark them.** A clip the
+  phone marks as a password or other secret is written with `wl-copy
+  --sensitive`, which tells clipboard managers to keep it out of their
+  history. That option arrived in wl-clipboard 2.3.0, and Ubuntu 24.04,
+  Ubuntu 26.04 and Debian 13 all ship 2.2.1 — so on those three, **AnyFlow
+  refuses such a clip rather than writing it unmarked**, because an unmarked
+  password silently persisted in a history file is the worse outcome. Ordinary
+  clipboard sharing is unaffected. `anyflow clipboard status` and the GUI's
+  clipboard page both say so up front rather than at the moment a password
+  fails to arrive. AnyFlow decides this by asking `wl-copy --help` for the
+  option, never by reading its version — Fedora's `2.2.1^git…` has the flag
+  and Debian's `2.2.1` does not, with the same version string.
 * **Clipboard auto-send needs a compositor that can report clipboard changes.**
   GNOME implements neither wlr- nor ext-data-control, so AnyFlow watches via
   XFIXES on the Xwayland `CLIPBOARD` selection instead (ADR-0014). Without
@@ -259,7 +357,6 @@ implementations cannot drift apart silently:
 * mDNS advertises a stable device id and name, which is a modest tracking
   signal on untrusted networks (threat model, T18). `--no-mdns` is the blunt
   workaround; a per-network toggle is the proper fix.
-* No GUI yet. The daemon and CLI are the whole desktop surface.
 
 ## License
 

@@ -41,6 +41,35 @@ mod settings;
 pub use notifications::Readiness;
 pub use pairing::present_pairing_dialog;
 
+/// The one display-requiring test in this crate.
+///
+/// GTK is initialised once per **process** and binds itself to the thread
+/// that did it; libtest gives every `#[test]` a thread of its own. So a
+/// second `#[test]` that builds widgets does not fail on an assertion — it
+/// panics inside `gtk::Stack::new`, with a message about the wrong thread and
+/// nothing about the page under test. Measured, not feared: adding the
+/// clipboard page's tree test as a second `#[ignore]`d test turned the
+/// notifications one red while both still passed in isolation.
+///
+/// Each page therefore contributes a *section* rather than a test, and they
+/// are called from here in sequence on one thread. A section still fails with
+/// its own name and its own message. The alternative — one integration-test
+/// binary per page, i.e. one process each — would mean making these modules
+/// public for no reason but the harness.
+///
+/// ```console
+/// cargo test -p anyflow-gui -- --ignored --test-threads=1
+/// ```
+#[cfg(test)]
+mod display_gate {
+    #[test]
+    #[ignore = "needs a display: cargo test -p anyflow-gui -- --ignored"]
+    fn every_page_widget_tree() {
+        super::notifications::tests::the_notifications_page_widget_tree();
+        super::clipboard::tests::the_clipboard_page_widget_tree();
+    }
+}
+
 use adw::prelude::*;
 use anyflow_control::{
     ClipboardStatusReport, NotificationsStatusReport, StatusReport, TransferReport,

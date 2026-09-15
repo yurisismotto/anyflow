@@ -18,7 +18,30 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+# The Rust floor, and it is measured from the committed `Cargo.lock` rather
+# than chosen. 1.82 used to stand here and was not true of the tree as
+# committed: `cargo metadata --locked` reports locked crates that demand more
+# than that, and the highest of them is what this number has to be.
+#
+#   time 0.3.55 / time-core / time-macros   1.88.0   <- the floor
+#   rcgen 0.14.10                           1.88
+#   zbus 5.19.0 / zvariant / zcheapstr      1.87
+#
+# So a toolchain below 1.88 fails in Cargo's resolver, before compiling one
+# line of AnyFlow. That is not academic: Debian 13 trixie's stock `rustc` is
+# 1.85.1 and Ubuntu 24.04's `rustc-1.82` package is exactly 1.82, and both
+# were measured failing here (LINUX-UBUNTU-DEBIAN-COMPAT-U0.md §20.3).
+#
+# Downgrading `zbus`, `rcgen` and `time` to hold a 1.82 line was considered
+# and rejected: it would trade the D-Bus client every platform backend shares,
+# and the certificate generator, for a compatibility claim no supported target
+# needs — Ubuntu 24.04 carries `rustc-1.91` in its own archive, Ubuntu 26.04
+# ships 1.93.1, and Debian 13 has backports.
+#
+# `.github/workflows/linux-distro-compat.yml` pins a job to exactly this
+# number so the next dependency bump cannot raise the real floor silently,
+# which is how the 1.82 claim became false in the first place.
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/yurisismotto/anyflow"
 

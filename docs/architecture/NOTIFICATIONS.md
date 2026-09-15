@@ -50,7 +50,7 @@ access contract [ADR-0015](../adr/ADR-0015-notification-access.md), for naming
    └────────┼───────────────────────────────────────────────────────────────────┘
             │  one ordered stream per peer
             ▼
-   ┌─────────────────────────────── Fedora desktop ──────────────────────────────┐
+   ┌─────────────────────────────── Linux desktop ───────────────────────────────┐
    │  anyflow-capability-notifications — decode, validate       (N2)             │
    │        │      uses anyflow_core::notifications             (N0)             │
    │        ▼                                                                    │

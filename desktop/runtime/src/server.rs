@@ -585,6 +585,7 @@ async fn build_clipboard_status(state: &Arc<DaemonState>) -> ClipboardStatusRepo
             enabled: false,
             backend: "none".into(),
             backend_detail: "clipboard.v1 is not enabled in this daemon".into(),
+            backend_available: false,
             watch_available: false,
             sensitive_available: false,
             sensitive_detail: "clipboard.v1 is not enabled in this daemon".into(),
@@ -596,6 +597,11 @@ async fn build_clipboard_status(state: &Arc<DaemonState>) -> ClipboardStatusRepo
     };
 
     let backend = clipboard.backend();
+    // Three separate questions, asked separately and reported separately.
+    // A machine can be "yes, no, no" (GNOME + wl-clipboard 2.2.1, which is
+    // every current Ubuntu LTS and Debian Stable) and any one bit standing in
+    // for the others would misdescribe it.
+    let backend_available = backend.availability().is_ok();
     let watch_available = backend.watch_availability().is_ok();
     let sensitive = backend.sensitive_support();
     let (event_cache_entries, suppression_cache_entries) = clipboard.cache_sizes().await;
@@ -651,6 +657,7 @@ async fn build_clipboard_status(state: &Arc<DaemonState>) -> ClipboardStatusRepo
         enabled: true,
         backend: backend.id().to_string(),
         backend_detail: backend.describe(),
+        backend_available,
         watch_available,
         sensitive_available: sensitive.is_ok(),
         sensitive_detail: sensitive.err().unwrap_or_default(),

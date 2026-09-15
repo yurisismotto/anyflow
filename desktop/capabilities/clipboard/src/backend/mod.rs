@@ -155,6 +155,24 @@ pub trait ClipboardBackend: Send + Sync {
     /// [`sensitive_support`]: Self::sensitive_support
     async fn write_text(&self, text: &ClipboardText, sensitive: bool) -> BackendResult<()>;
 
+    /// Whether the ordinary clipboard works here at all.
+    ///
+    /// A pure predicate answered from what was probed at startup: it must not
+    /// perform I/O. `Err` carries a human-readable cause and remedy.
+    ///
+    /// This is **not** the same question as [`sensitive_support`], and the two
+    /// are kept apart deliberately because a desktop can answer them
+    /// differently: Ubuntu 24.04, Ubuntu 26.04 and Debian 13 all ship a
+    /// working `wl-copy` that cannot mark a clip sensitive. Collapsing them
+    /// into one "clipboard available" bit would force a choice between
+    /// claiming ordinary mirroring is broken (it is not) and claiming
+    /// sensitive clips will arrive (they will not).
+    ///
+    /// [`sensitive_support`]: Self::sensitive_support
+    fn availability(&self) -> std::result::Result<(), String> {
+        Ok(())
+    }
+
     /// Whether this backend can mark a clip sensitive on this system.
     ///
     /// A pure predicate answered from what was probed at startup: it must not
@@ -269,6 +287,10 @@ impl ClipboardBackend for Unsupported {
         Err(BackendError::Unavailable(self.why.clone()))
     }
 
+    fn availability(&self) -> std::result::Result<(), String> {
+        Err(self.why.clone())
+    }
+
     fn sensitive_support(&self) -> std::result::Result<(), String> {
         Err(self.why.clone())
     }
@@ -313,6 +335,9 @@ struct MemoryState {
     /// Whether this backend can mark a clip sensitive. Settable so a test can
     /// drive the old-`wl-copy` path without an old `wl-copy`.
     sensitive_supported: bool,
+    /// Whether the ordinary clipboard is usable at all. Separate from
+    /// `sensitive_supported` because the two really do differ in the field.
+    available: bool,
 }
 
 impl Default for MemoryBackend {
@@ -327,6 +352,7 @@ impl MemoryBackend {
             inner: std::sync::Mutex::new(MemoryState {
                 watch_supported: true,
                 sensitive_supported: true,
+                available: true,
                 ..MemoryState::default()
             }),
         }
@@ -369,6 +395,16 @@ impl MemoryBackend {
     /// wl-clipboard 2.2.1 situation, without a wl-clipboard.
     pub fn set_sensitive_supported(&self, supported: bool) {
         self.lock().sensitive_supported = supported;
+    }
+
+    /// Makes the backend report that there is no usable clipboard at all —
+    /// the "wl-clipboard is not installed" situation.
+    ///
+    /// It changes what the backend *reports*, not what it does: this is here
+    /// so a status renderer can be tested against a degraded machine without
+    /// one. To make operations fail, use [`set_failure`](Self::set_failure).
+    pub fn set_available(&self, available: bool) {
+        self.lock().available = available;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, MemoryState> {
@@ -442,6 +478,14 @@ impl ClipboardBackend for MemoryBackend {
             Ok(())
         } else {
             Err("this backend cannot mark a clip sensitive".into())
+        }
+    }
+
+    fn availability(&self) -> std::result::Result<(), String> {
+        if self.lock().available {
+            Ok(())
+        } else {
+            Err("this backend has no usable clipboard".into())
         }
     }
 }

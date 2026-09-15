@@ -241,6 +241,23 @@ pub struct ClipboardStatusReport {
     /// One line on what the backend can do here, including where clipboard
     /// change notifications come from — or why there are none.
     pub backend_detail: String,
+    /// True when the *ordinary* clipboard works on this desktop: the platform
+    /// has a backend and its helpers are present.
+    ///
+    /// Reported apart from [`sensitive_available`] because the two are
+    /// genuinely different questions and a desktop can answer them
+    /// differently — Ubuntu 24.04, Ubuntu 26.04 and Debian 13 all ship a
+    /// working `wl-copy` whose `--sensitive` does not exist. One bit covering
+    /// both would have to either call ordinary mirroring broken, which it is
+    /// not, or claim sensitive clips will be written, which they will not.
+    ///
+    /// `#[serde(default)]` for the same reason as the field below: a version
+    /// skew between `anyflow` and the agent must not fail to parse a status
+    /// report over a display field.
+    ///
+    /// [`sensitive_available`]: Self::sensitive_available
+    #[serde(default = "default_true")]
+    pub backend_available: bool,
     /// True when this session can report clipboard changes, which is what
     /// `auto_send` needs. False is a normal, documented state (GNOME).
     pub watch_available: bool,

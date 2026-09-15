@@ -126,12 +126,20 @@ impl WaylandBackend {
     /// tell the user what will and will not work *before* they try it, and
     /// that the answer does not change under them mid-session.
     pub fn detect() -> Self {
+        // Names the missing executables and the package that carries them,
+        // and stops there. It used to end `(Fedora: sudo dnf install
+        // wl-clipboard)`, which was the only string in the whole product that
+        // named a distribution — and it is wrong for every user who is not on
+        // one. AnyFlow does not know which package manager this machine has,
+        // and guessing wrong is worse than not guessing: the package is called
+        // `wl-clipboard` on Fedora, Ubuntu and Debian alike, so naming it once
+        // is both shorter and true everywhere. Package-manager commands belong
+        // in the documentation, per distribution, where they can be correct.
         let tools = match (which(WL_COPY), which(WL_PASTE)) {
             (true, true) => Ok(()),
             _ => Err(format!(
                 "{WL_COPY}/{WL_PASTE} not found on PATH. Install the \
-                 wl-clipboard package (Fedora: `sudo dnf install \
-                 wl-clipboard`)."
+                 wl-clipboard package."
             )),
         };
 
@@ -410,6 +418,14 @@ impl ClipboardBackend for WaylandBackend {
         }
     }
 
+    /// The ordinary clipboard, which on this backend means: are the two
+    /// helper binaries here. Nothing about `--sensitive` enters this answer —
+    /// every current Ubuntu LTS and Debian Stable is precisely the case where
+    /// the first is true and the second is not.
+    fn availability(&self) -> std::result::Result<(), String> {
+        self.tools.clone()
+    }
+
     fn sensitive_support(&self) -> std::result::Result<(), String> {
         self.tools.clone()?;
         self.sensitive.as_result()
@@ -501,9 +517,17 @@ fn probe_sensitive() -> SensitiveSupport {
 /// vintage on the machine running the tests — which matters, because the
 /// development machine is precisely the one where this cannot be reproduced.
 fn probe_sensitive_from_output(help: Option<String>) -> SensitiveSupport {
-    const REMEDY: &str = "this system\'s wl-copy does not support marking a \
-         clip sensitive. `--sensitive` was added in wl-clipboard 2.3.0; \
-         upgrade the wl-clipboard package to honour sensitive clips.";
+    // Distro-neutral, and deliberately careful about the version number.
+    // `--sensitive` appeared in upstream wl-clipboard 2.3.0, which is worth
+    // telling the user — but the number is guidance for choosing a build, not
+    // the test AnyFlow applies, and the wording must not imply otherwise:
+    // Fedora's `2.2.1^git20251124` carries a backport of the flag and passes
+    // this probe, while Ubuntu's and Debian's plain 2.2.1 do not. The probe
+    // above is the authority. No package-manager command appears here.
+    const REMEDY: &str = "this system\'s wl-copy does not support sensitive \
+         clipboard marking. Install a wl-clipboard build whose wl-copy \
+         accepts `--sensitive` (upstream added it in 2.3.0; some \
+         distributions backport it into an earlier version).";
 
     match help {
         Some(text) if text.contains("--sensitive") => SensitiveSupport::Supported,

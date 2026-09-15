@@ -48,15 +48,15 @@ who opens the *socket*:
 
 | Transfer | Offers | Approves | Dials the stream | Writes bytes |
 | --- | --- | --- | --- | --- |
-| Android → Fedora | phone | desktop | **phone** | phone |
-| Fedora → Android | desktop | phone | **phone** | desktop |
+| Android → desktop | phone | desktop | **phone** | phone |
+| Desktop → Android | desktop | phone | **phone** | desktop |
 
 The peer that accepts data streams (always the desktop) is the one that issues
 the stream challenge.
 
 ## Flow
 
-### Android → Fedora
+### Android → desktop
 
 ```
 phone                                          desktop
@@ -74,7 +74,7 @@ phone                                          desktop
   │◄──────────────── FILE_COMPLETE {id} ──────────│ state: COMPLETED
 ```
 
-### Fedora → Android
+### Desktop → Android
 
 Identical, except the desktop is the sender, so the challenge cannot ride on
 `FILE_ACCEPT` — the desktop is not the accepter. It sends `FILE_READY`
@@ -270,7 +270,7 @@ person being attacked.
 The offer format has **no path field at all**, relative or absolute. There is
 nothing a peer could set that would name a location on the receiver.
 
-## Fedora destination
+## Desktop destination
 
 `<XDG downloads>/AnyFlow`, resolved without hardcoding a home directory:
 
@@ -336,7 +336,7 @@ transfer rather than delivering something that does not match its own digest.
 sends the first item, saying so. Full batching is the documented next
 increment (see *Not in this version*).
 
-## Fedora send: the CLI
+## Desktop send: the CLI
 
 ```bash
 anyflow send <device> <file>
@@ -356,7 +356,7 @@ Required by default, on both sides. There is no global auto-accept.
 **Android** shows an accept/reject card carrying the sanitized filename, the
 size and the sender's short fingerprint.
 
-**Fedora**'s daemon has no terminal of its own — it runs under
+**The desktop** daemon has no terminal of its own — it runs under
 `systemd --user` — so it cannot prompt. It **declines and logs**, rather than
 inventing a silent yes. `anyflowd --accept-files-without-asking` is the
 documented escape hatch for an unattended test rig; it warns on startup and on

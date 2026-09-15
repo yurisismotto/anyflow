@@ -653,7 +653,11 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
     while std::time::Instant::now() < deadline {
         cycle += 1;
         let seed = (cycle % 40) as u16 + 1;
-        let app = if cycle % 3 == 0 { APP_B } else { APP_A };
+        let app = if cycle.is_multiple_of(3) {
+            APP_B
+        } else {
+            APP_A
+        };
 
         // post, then update the same identity twice
         manager
@@ -670,7 +674,7 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
 
         // a removal every other cycle, so the mirror set churns rather than
         // only growing
-        if cycle % 2 == 0 {
+        if cycle.is_multiple_of(2) {
             manager
                 .handle_control(peer, &remove(seed).encode_to_vec())
                 .await
@@ -691,7 +695,7 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
         );
 
         // a policy toggle, and an allow-list change
-        if cycle % 7 == 0 {
+        if cycle.is_multiple_of(7) {
             let mut policy = switches.0.write().await;
             policy.allow_mirror = !policy.allow_mirror;
             let restored = policy.allow_mirror;
@@ -701,7 +705,7 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
                 switches.0.write().await.allow_mirror = true;
             }
         }
-        if cycle % 11 == 0 {
+        if cycle.is_multiple_of(11) {
             let mut policy = switches.0.write().await;
             policy.when_sink_locked = match policy.when_sink_locked {
                 anyflow_capability_notifications::LockPolicy::Full => {
@@ -712,7 +716,7 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
         }
 
         // a brief disconnect and reconnect — a Wi-Fi blip, minus the Wi-Fi
-        if cycle % 13 == 0 {
+        if cycle.is_multiple_of(13) {
             manager.detach_session(&peer).await;
             tokio::time::sleep(Duration::from_millis(300)).await;
             manager.attach_session(peer, tx.clone()).await;
@@ -724,7 +728,7 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
         }
 
         // a snapshot, which is what a real reconnect would carry
-        if cycle % 17 == 0 {
+        if cycle.is_multiple_of(17) {
             let sync = vec![(cycle % 251) as u8; 16];
             manager
                 .handle_control(
@@ -778,7 +782,7 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
             report.queue.high_water
         );
 
-        if cycle % 200 == 0 {
+        if cycle.is_multiple_of(200) {
             eprintln!(
                 "soak: {}s cycle={cycle} mirrors={} queue_high_water={} \
                  coalesced={} evicted={} dropped_terminal={}",
