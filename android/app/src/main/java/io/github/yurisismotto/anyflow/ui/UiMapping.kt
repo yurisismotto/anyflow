@@ -24,12 +24,26 @@ import io.github.yurisismotto.anyflow.ui.theme.AnyFlowStatus
  */
 object UiMapping {
 
-    /** How a peer's connection reads on a card. */
+    /**
+     * How a peer's connection reads on a card.
+     *
+     * [targeted] is what stops a card lying. The link state is global — there
+     * is one session — so without it every paired computer borrowed it, and
+     * the U2 §39.17 report recorded exactly that: "the UI shows Connecting…
+     * for the unreachable peer *and* for the reachable one, with no
+     * indication that the second is never being attempted". A computer nobody
+     * is dialling is `Available`, not `Connecting`, and certainly not `Error`
+     * for a failure that belongs to a different machine.
+     */
     fun statusFor(
         connection: AnyFlowApp.ConnectionState,
         connected: Boolean,
+        targeted: Boolean = true,
     ): AnyFlowStatus = when {
         connected -> AnyFlowStatus.Connected
+        // Checked before the link state, because the link state is about
+        // whichever computer *is* the target.
+        !targeted -> AnyFlowStatus.Available
         connection is AnyFlowApp.ConnectionState.Connecting -> AnyFlowStatus.Connecting
         connection is AnyFlowApp.ConnectionState.Retrying -> AnyFlowStatus.Connecting
         connection is AnyFlowApp.ConnectionState.Error -> AnyFlowStatus.Error

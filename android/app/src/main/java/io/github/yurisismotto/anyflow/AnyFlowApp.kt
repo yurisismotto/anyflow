@@ -22,6 +22,7 @@ import io.github.yurisismotto.anyflow.notifications.NotificationPolicy
 import io.github.yurisismotto.anyflow.notifications.NotificationSecret
 import io.github.yurisismotto.anyflow.notifications.NotificationSource
 import io.github.yurisismotto.anyflow.pairing.QrPayload
+import io.github.yurisismotto.anyflow.store.PeerTarget
 import io.github.yurisismotto.anyflow.store.TrustStore
 import java.net.InetSocketAddress
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -251,6 +252,36 @@ class AnyFlowApp : Application() {
         val info = packageManager.getApplicationInfo(packageName, 0)
         packageManager.getApplicationLabel(info).toString()
     }.getOrDefault(packageName)
+
+    /**
+     * Which computer this phone is connecting to, right now.
+     *
+     * The single answer to "where to", read fresh every time from the trust
+     * store and the person's choice. It replaces `peers().firstOrNull()` —
+     * the certified U2 §39.17 defect, where storage order was the routing
+     * table and an offline first entry made every later peer unreachable.
+     *
+     * Failing closed on a trust-store error, for the reason the capability
+     * authorizers do: an unreadable store is a reason to dial nothing, not a
+     * reason to dial whatever was cached.
+     */
+    fun targetResolution(): PeerTarget.Resolution = runCatching {
+        PeerTarget.resolve(trustStore.peers(), trustStore.selectedPeerHex)
+    }.getOrDefault(PeerTarget.Resolution.NoTrustedPeer)
+
+    /** The one computer to dial, or null when there is no unambiguous one. */
+    fun targetPeer(): TrustStore.TrustedPeer? = targetResolution().peerOrNull()
+
+    /**
+     * Records the person's choice of computer.
+     *
+     * Returns false — and changes nothing — for a fingerprint that is not
+     * trusted. Choosing a destination is not a route to trust: an unpaired
+     * computer still has to be paired, and the pin is still checked on every
+     * connection to a chosen one.
+     */
+    fun selectPeer(fingerprint: io.github.yurisismotto.anyflow.identity.Fingerprint): Boolean =
+        runCatching { trustStore.selectPeer(fingerprint) }.getOrDefault(false)
 
     /**
      * Where to try reaching a paired computer, best guess first.

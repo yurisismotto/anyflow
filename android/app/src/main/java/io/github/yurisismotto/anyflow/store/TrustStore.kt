@@ -55,6 +55,21 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
      */
     val peersFlow: StateFlow<List<TrustedPeer>> = _peersFlow.asStateFlow()
 
+    private val _selectedPeerFlow = MutableStateFlow(readSelectedPeer())
+
+    /**
+     * The computer the person chose to connect to, as a fingerprint hex.
+     *
+     * A *hex string* rather than a [Fingerprint] on purpose: `Fingerprint`
+     * wraps a `ByteArray`, whose `equals` is identity, so a `StateFlow` of one
+     * would republish on every re-read and compare wrongly. Hex is also the
+     * spelling the UI already navigates by.
+     *
+     * Null means nobody has chosen — which is a real state, not a broken one.
+     * [PeerTarget] decides what that means; this only stores it.
+     */
+    val selectedPeerFlow: StateFlow<String?> = _selectedPeerFlow.asStateFlow()
+
     val deviceId: String get() = state.getString(KEY_DEVICE_ID)
 
     var deviceName: String
@@ -140,7 +155,49 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
 
     /** Forgets a computer. It cannot reconnect without pairing again. */
     fun removePeer(fingerprint: Fingerprint) {
+        // The choice goes with the computer. Leaving the hex behind would be a
+        // dangling instruction to dial something that is no longer trusted —
+        // harmless, because `PeerTarget.resolve` ignores an unmatched choice,
+        // but it would silently re-target if the same key were ever paired
+        // again, which is not a decision this method is entitled to make.
+        if (selectedPeerHex == fingerprint.toHex()) clearSelectedPeer()
         writePeers(peers().filterNot { it.fingerprint.contentEquals(fingerprint) })
+    }
+
+    /** The chosen computer's fingerprint hex, or null when nobody has chosen. */
+    val selectedPeerHex: String? get() = _selectedPeerFlow.value
+
+    /**
+     * Records which computer the person chose to connect to.
+     *
+     * Refuses a fingerprint that is not trusted, and says so by returning
+     * false: choosing a destination is not a way to become trusted, and a
+     * discovered-but-unpaired computer must still go through pairing. Callers
+     * treat false as "nothing was selected", never as "selected anyway".
+     */
+    fun selectPeer(fingerprint: Fingerprint): Boolean {
+        if (peer(fingerprint) == null) return false
+        val hex = fingerprint.toHex()
+        if (_selectedPeerFlow.value == hex) return true
+        state.put(KEY_SELECTED_PEER, hex)
+        persist()
+        _selectedPeerFlow.value = hex
+        return true
+    }
+
+    /** Forgets the choice, without forgetting any computer. */
+    fun clearSelectedPeer() {
+        if (_selectedPeerFlow.value == null) return
+        state.remove(KEY_SELECTED_PEER)
+        persist()
+        _selectedPeerFlow.value = null
+    }
+
+    private fun readSelectedPeer(): String? {
+        val hex = state.optString(KEY_SELECTED_PEER).takeIf { it.isNotEmpty() } ?: return null
+        // Validated rather than trusted: a hand-edited or truncated value must
+        // not become a target, and `fromHex` is the one strict spelling.
+        return if (Fingerprint.fromHex(hex) != null) hex else null
     }
 
     /**
@@ -291,6 +348,17 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
         private const val KEY_CLIPBOARD_POLICY = "clipboardPolicy"
         private const val KEY_NOTIFICATION_POLICY = "notificationPolicy"
         private const val KEY_NOTIFICATION_SECRET_GENERATION = "notificationSecretGeneration"
+
+        /**
+         * The chosen connection target, as a fingerprint hex.
+         *
+         * Additive and optional, so [SCHEMA_VERSION] stays at 1: a file
+         * written before this key existed reads as "nobody has chosen", which
+         * is exactly right, and an older build reading a file that has it
+         * ignores a key it does not know rather than refusing the file. There
+         * is nothing to migrate in either direction.
+         */
+        private const val KEY_SELECTED_PEER = "selectedPeer"
 
         /** Duplicated from `ClipboardCapability.ID` to avoid a cycle. */
         const val CLIPBOARD_CAPABILITY_ID = "clipboard.v1"

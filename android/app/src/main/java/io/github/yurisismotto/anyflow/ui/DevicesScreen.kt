@@ -117,16 +117,34 @@ fun DevicesScreen(
                     deviceIcon = R.drawable.ic_device_desktop,
                     batteryPercent = if (connected) state.remoteBatteryPercent else null,
                     onClick = { onOpenPeer(peer.fingerprint.toHex()) },
-                    footer = { CapabilityChips(peer) },
+                    footer = {
+                        Column(verticalArrangement = Arrangement.spacedBy(AnyFlowSpacing.sm)) {
+                            CapabilityChips(peer)
+                            DeviceConnectAction(peer, state, actions)
+                        }
+                    },
                 )
             }
         }
 
         // --- quick actions ------------------------------------------------
         if (state.peers.isNotEmpty()) {
-            val target = state.peers.firstOrNull { state.isConnected(it) } ?: state.peers.first()
-            val connected = state.isConnected(target)
+            // The computer the person chose, never `peers.first()`. With
+            // several trusted and none chosen there is no target, the tiles
+            // are disabled and the line below says why — which is the honest
+            // answer, and the one the old code replaced with a guess.
+            val target = state.targetPeer
+            val connected = target != null && state.isConnected(target)
             item { AnyFlowSectionLabel("Quick actions") }
+            if (target == null) {
+                item {
+                    Text(
+                        "Choose a device above to send to.",
+                        style = AnyFlowType.body,
+                        color = colors.textSecondary,
+                    )
+                }
+            }
             item {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -139,9 +157,12 @@ fun DevicesScreen(
                         // Disabled rather than hidden: the reason is one tap
                         // away on the device screen, and a row that reflows
                         // whenever a session drops is worse than a grey tile.
+                        // `connected` already implies a target: it is false
+                        // whenever there is not one, so the compiler narrows
+                        // `target` here without a second null check.
                         enabled = connected && target.allows(ClipboardCapability.ID) &&
                             target.clipboardPolicy.allowSend,
-                        onClick = { onSendClipboard(target.fingerprint.toHex()) },
+                        onClick = { target?.let { onSendClipboard(it.fingerprint.toHex()) } },
                         modifier = Modifier.weight(1f),
                     )
                     AnyFlowQuickAction(
@@ -149,7 +170,7 @@ fun DevicesScreen(
                         icon = R.drawable.ic_files,
                         accent = colors.accentBlue,
                         enabled = connected && target.allows(FilesCapability.ID),
-                        onClick = { actions.onPickFileFor(target.fingerprint) },
+                        onClick = { target?.let { actions.onPickFileFor(it.fingerprint) } },
                         modifier = Modifier.weight(1f),
                     )
                     AnyFlowQuickAction(
@@ -163,7 +184,8 @@ fun DevicesScreen(
                         label = "Device settings",
                         icon = R.drawable.ic_settings,
                         accent = colors.textSecondary,
-                        onClick = { onOpenPeer(target.fingerprint.toHex()) },
+                        enabled = target != null,
+                        onClick = { target?.let { onOpenPeer(it.fingerprint.toHex()) } },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -179,6 +201,61 @@ fun DevicesScreen(
                 title = "Local network only",
                 body = "AnyFlow talks straight to your computer over TLS 1.3, pinned to " +
                     "the key you approved when pairing. No account, no cloud, no relay.",
+            )
+        }
+    }
+}
+
+/**
+ * Connect to *this* computer, or disconnect from it.
+ *
+ * ## Why a per-row action exists at all
+ *
+ * The certified U2 §39.17 defect had two halves. The service picking
+ * `peers().firstOrNull()` was one. The other was that there was no way to say
+ * otherwise: the only Connect button on this screen took no argument, so with
+ * two trusted desktops the app offered no means of choosing between them — the
+ * report's words were "there is no in-app way to choose which desktop to use".
+ * Fixing the routing without adding a chooser would have left the second
+ * desktop just as unreachable, only for a tidier reason.
+ *
+ * The button therefore carries `peer.fingerprint`, the pinned identity, into
+ * [MainActions.onConnect]. It is the same value the TLS handshake is checked
+ * against, so what was tapped and what is authenticated cannot drift apart.
+ */
+@Composable
+private fun DeviceConnectAction(
+    peer: TrustStore.TrustedPeer,
+    state: MainUiState,
+    actions: MainActions,
+) {
+    val connected = state.isConnected(peer)
+    val targeted = state.isTarget(peer)
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(AnyFlowSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (connected) {
+            AnyFlowSecondaryButton(text = "Disconnect", onClick = actions.onDisconnect)
+        } else {
+            AnyFlowSecondaryButton(
+                text = "Connect",
+                // Enabled even when this peer is already the target: a second
+                // press is how a person retries, and the service start is
+                // idempotent. What it must never be is a press that connects
+                // to a different computer.
+                onClick = { actions.onConnect(peer.fingerprint) },
+            )
+        }
+        // Stated in words, not by a highlight: which computer the quick
+        // actions and the share sheet will use is the fact this whole fix is
+        // about, and a colour would leave it unreadable to a screen reader.
+        if (targeted && !connected) {
+            Text(
+                "Selected",
+                style = AnyFlowType.caption,
+                color = AnyFlowTheme.colors.textSecondary,
             )
         }
     }
@@ -248,11 +325,23 @@ private fun ConnectionCard(state: MainUiState, actions: MainActions) {
         }
         AnyFlowStatusBadge(status, label = status.label)
         Text(detail, style = AnyFlowType.body, color = colors.textSecondary)
+        if (state.mustChooseTarget) {
+            // The one case the old code answered with `first()`. Saying it is
+            // the whole point: a disabled button with a reason beats a button
+            // that works and dials the wrong desktop.
+            Text(
+                "Several devices are paired. Use Connect on the one you want.",
+                style = AnyFlowType.body,
+                color = colors.textSecondary,
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(AnyFlowSpacing.xs)) {
+            val target = state.targetPeer
             AnyFlowSecondaryButton(
                 text = "Connect",
-                onClick = actions.onConnect,
-                enabled = state.connection !is AnyFlowApp.ConnectionState.Connected,
+                onClick = { target?.let { actions.onConnect(it.fingerprint) } },
+                enabled = target != null &&
+                    state.connection !is AnyFlowApp.ConnectionState.Connected,
             )
             AnyFlowSecondaryButton(
                 text = "Disconnect",
@@ -265,4 +354,4 @@ private fun ConnectionCard(state: MainUiState, actions: MainActions) {
 
 /** Maps a peer to the status vocabulary. See [UiMapping] for the rules. */
 fun MainUiState.statusFor(peer: TrustStore.TrustedPeer): AnyFlowStatus =
-    UiMapping.statusFor(connection, isConnected(peer))
+    UiMapping.statusFor(connection, isConnected(peer), targeted = isTarget(peer))

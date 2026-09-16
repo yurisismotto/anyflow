@@ -18,6 +18,7 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.R
+import io.github.yurisismotto.anyflow.identity.Fingerprint
 import io.github.yurisismotto.anyflow.net.ConnectResult
 import io.github.yurisismotto.anyflow.net.ConnectionCoordinator
 import io.github.yurisismotto.anyflow.net.DialResult
@@ -62,6 +63,14 @@ import kotlinx.coroutines.launch
  * and it hands the coordinator two functions: where to dial and how. Keeping
  * the retry policy in one place — and out of the component that has four
  * different callback threads — is what fixes the loop that used to die.
+ *
+ * ## It does not decide *which computer* either
+ *
+ * It used to, and that was the U2 §39.17 defect: `peers().firstOrNull()` made
+ * trust-store order the routing table, so a desktop that had been powered off
+ * for a week kept every later peer unreachable. The destination now comes from
+ * `PeerTarget`, re-read at the top of every round, and reaches this class as a
+ * fingerprint in the start intent — an identity, not a position.
  */
 class ConnectionService : LifecycleService() {
 
@@ -71,6 +80,18 @@ class ConnectionService : LifecycleService() {
     /** The session currently running, so a lost network can end it promptly. */
     @Volatile
     private var currentConnection: PeerConnection? = null
+
+    /**
+     * Whose session [currentConnection] is, as a fingerprint hex.
+     *
+     * Kept beside the connection rather than inferred from the trust store,
+     * because the question it answers is "is the live session the one we still
+     * want", and by the time that is asked the store already holds the *new*
+     * choice. Without it, retargeting could not tell a session that must be
+     * ended from one that must be left alone.
+     */
+    @Volatile
+    private var currentSessionPeerHex: String? = null
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -108,6 +129,12 @@ class ConnectionService : LifecycleService() {
             return START_NOT_STICKY
         }
 
+        // The identity of the computer the person tapped, carried across the
+        // service boundary. This is the whole point of the fix: the selected
+        // row's *fingerprint* arrives here, so nothing downstream has to guess
+        // a destination from trust-store order.
+        applyRequestedTarget(intent)
+
         startForegroundCompat(getString(R.string.notif_connecting))
 
         val request = NetworkRequest.Builder()
@@ -126,6 +153,38 @@ class ConnectionService : LifecycleService() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Records the target named by a start intent, and re-points a live session.
+     *
+     * Three things have to happen together, which is why they are not spread
+     * across the callers:
+     *
+     *  1. the choice is persisted, so it survives this service being stopped
+     *     and the process being killed;
+     *  2. a session running against a *different* computer is ended, because
+     *     leaving it up would mean the app is connected to one peer while the
+     *     person is looking at another;
+     *  3. the coordinator is told, so the new target is dialled now rather
+     *     than after the previous target's backoff — which for an offline
+     *     first peer could be five minutes of apparent silence.
+     *
+     * A start intent with no target — the system redelivering, or a capability
+     * screen making sure the link is up — changes nothing. It must not clear a
+     * choice, and it must not re-point anything.
+     */
+    private fun applyRequestedTarget(intent: Intent?) {
+        val hex = intent?.getStringExtra(EXTRA_TARGET_FINGERPRINT) ?: return
+        val fingerprint = Fingerprint.fromHex(hex) ?: return
+        // Refused for a computer that is not trusted. Selecting is not a way
+        // to become trusted, and a request naming an unknown fingerprint is
+        // ignored rather than allowed to clear a good choice.
+        if (!app.selectPeer(fingerprint)) return
+        if (currentSessionPeerHex != null && currentSessionPeerHex != hex) {
+            currentConnection?.disconnect()
+        }
+        coordinator?.onTargetChanged(fingerprint.toDisplayShort())
+    }
+
     @Synchronized
     private fun ensureCoordinator(): ConnectionCoordinator =
         coordinator ?: ConnectionCoordinator(
@@ -134,11 +193,22 @@ class ConnectionService : LifecycleService() {
             dial = ::dial,
             log = { event -> Log.i(TAG, event.toString()) },
             onState = ::onLinkState,
+            // "Nothing is paired" and "two computers, and you have not said
+            // which" are both answered by a person, not by a retry. Stating
+            // them stops the loop instead of leaving a countdown on screen
+            // that nothing will ever satisfy.
+            blocked = { app.targetResolution().blockedReason() },
         ).also { coordinator = it }
 
-    /** Where to dial this round. Empty when there is nothing to dial. */
+    /**
+     * Where to dial this round. Empty when there is nothing to dial.
+     *
+     * Re-read every round on purpose: a target chosen while a retry was
+     * pending takes effect on the very next attempt, with no restart and no
+     * cache to go stale.
+     */
     private suspend fun endpointsFor(round: Int) =
-        pairedPeer()?.let { app.candidateAddresses(it, round) } ?: emptyList()
+        targetPeer()?.let { app.candidateAddresses(it, round) } ?: emptyList()
 
     /**
      * One dial, translated into the vocabulary the coordinator retries on.
@@ -149,12 +219,22 @@ class ConnectionService : LifecycleService() {
      * revocation is not retried at all.
      */
     private suspend fun dial(address: java.net.InetSocketAddress): DialResult {
-        val peer = pairedPeer() ?: return DialResult.Terminal("no paired computer")
+        // Having no target is terminal rather than transient, and the reason
+        // says which of the two it is. Neither "nothing is paired" nor "two
+        // computers and no choice" is fixed by dialling again in two seconds,
+        // and a loop that kept trying would burn battery to display a
+        // countdown for something only a person can resolve.
+        val resolution = app.targetResolution()
+        val peer = resolution.peerOrNull()
+            ?: return DialResult.Terminal(resolution.blockedReason() ?: "no paired computer")
 
         return when (val result = app.connect(peer, address)) {
             is ConnectResult.Established -> DialResult.Established {
                 val connection = result.connection
                 currentConnection = connection
+                // Recorded before the session runs, so a retarget arriving in
+                // the same instant can tell whose session this is.
+                currentSessionPeerHex = peer.fingerprint.toHex()
                 updateNotification(getString(R.string.notif_connected, peer.deviceName))
                 // A data stream reuses this session's address, port and
                 // pinned identity. Recorded before the session runs, so a
@@ -173,6 +253,7 @@ class ConnectionService : LifecycleService() {
                     connection.run(lifecycleScope)
                 } finally {
                     currentConnection = null
+                    currentSessionPeerHex = null
                 }
             }
 
@@ -198,7 +279,7 @@ class ConnectionService : LifecycleService() {
             }
 
             is LinkState.Connected -> {
-                val peer = pairedPeer()
+                val peer = targetPeer()
                 app.publishConnectionState(
                     if (peer == null) {
                         AnyFlowApp.ConnectionState.Connecting
@@ -234,14 +315,24 @@ class ConnectionService : LifecycleService() {
 
     private val app: AnyFlowApp get() = application as AnyFlowApp
 
-    private fun pairedPeer(): TrustStore.TrustedPeer? =
-        runCatching { app.trustStore.peers().firstOrNull() }.getOrNull()
+    /**
+     * The computer to connect to, or null when there is no unambiguous one.
+     *
+     * The line this replaces — `app.trustStore.peers().firstOrNull()` — is the
+     * certified U2 §39.17 defect. It answered "where to" with a list index, so
+     * an Ubuntu desktop that had been powered off since the previous sprint
+     * silently absorbed every connection attempt meant for a Debian desktop
+     * sitting reachable on the same LAN.
+     */
+    private fun targetPeer(): TrustStore.TrustedPeer? =
+        runCatching { app.targetPeer() }.getOrNull()
 
     override fun onDestroy() {
         // Being destroyed is an explicit end, not a failure: stop first so
         // nothing schedules a retry into a scope that is going away.
         coordinator?.stop("service destroyed")
         currentConnection?.disconnect()
+        currentSessionPeerHex = null
         runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         super.onDestroy()
     }
@@ -297,8 +388,29 @@ class ConnectionService : LifecycleService() {
 
         const val ACTION_STOP = "io.github.yurisismotto.anyflow.STOP"
 
-        fun start(context: Context) {
-            context.startForegroundService(Intent(context, ConnectionService::class.java))
+        /**
+         * Lowercase fingerprint hex of the computer to connect to.
+         *
+         * A fingerprint rather than a name, an address or a list position: it
+         * is the identity the TLS pin is checked against, so what the person
+         * tapped and what the handshake verifies are the same value end to
+         * end. A public one, so putting it in an intent leaks nothing.
+         */
+        const val EXTRA_TARGET_FINGERPRINT =
+            "io.github.yurisismotto.anyflow.TARGET_FINGERPRINT"
+
+        /**
+         * Starts the connection, optionally re-pointing it at [target].
+         *
+         * [target] null means "connect to whatever is already chosen" — what a
+         * capability screen wants when it just needs the link up. It never
+         * means "pick one for me": with several trusted computers and no
+         * choice made, the loop stops and says so instead of guessing.
+         */
+        fun start(context: Context, target: Fingerprint? = null) {
+            val intent = Intent(context, ConnectionService::class.java)
+            if (target != null) intent.putExtra(EXTRA_TARGET_FINGERPRINT, target.toHex())
+            context.startForegroundService(intent)
         }
 
         fun stop(context: Context) {
