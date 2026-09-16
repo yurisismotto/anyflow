@@ -77,6 +77,61 @@ class UiMappingTest {
         )
     }
 
+    @Test
+    fun `a peer nobody is dialling does not borrow the link state`() {
+        // U2 §39.17: with two paired desktops the card for the one that was
+        // never being attempted read "Connecting…" exactly like the one that
+        // was, which is how a defect in routing became invisible. A computer
+        // that is not the target is resting, whatever the link is doing.
+        for (state in listOf(
+            AnyFlowApp.ConnectionState.Connecting,
+            AnyFlowApp.ConnectionState.Retrying("network", 3),
+            AnyFlowApp.ConnectionState.Error("boom"),
+        )) {
+            assertEquals(
+                "untargeted peer under $state",
+                AnyFlowStatus.Available,
+                UiMapping.statusFor(state, connected = false, targeted = false),
+            )
+        }
+    }
+
+    @Test
+    fun `the targeted peer still shows what the link is doing`() {
+        // The mirror: silencing the untargeted card must not silence the one
+        // the person is actually waiting on.
+        assertEquals(
+            AnyFlowStatus.Connecting,
+            UiMapping.statusFor(
+                AnyFlowApp.ConnectionState.Retrying("network", 3),
+                connected = false,
+                targeted = true,
+            ),
+        )
+        assertEquals(
+            AnyFlowStatus.Error,
+            UiMapping.statusFor(
+                AnyFlowApp.ConnectionState.Error("boom"),
+                connected = false,
+                targeted = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `a live session reads as connected even for an untargeted peer`() {
+        // Defensive: a session that exists is a fact, and must never be
+        // hidden by a targeting flag that has drifted.
+        assertEquals(
+            AnyFlowStatus.Connected,
+            UiMapping.statusFor(
+                AnyFlowApp.ConnectionState.Idle,
+                connected = true,
+                targeted = false,
+            ),
+        )
+    }
+
     // ---- capability and policy gating ------------------------------------
 
     @Test

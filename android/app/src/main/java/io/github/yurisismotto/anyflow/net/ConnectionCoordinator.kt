@@ -140,6 +140,21 @@ class ConnectionCoordinator(
     private val backoff: Backoff = Backoff(),
     private val log: (ConnectionEvent) -> Unit = {},
     private val onState: (LinkState) -> Unit = {},
+    /**
+     * Why there is nothing to connect *to*, checked before each round.
+     *
+     * Null — the default — means "carry on". A reason means the loop stops,
+     * because the blockage is not a network condition and no number of
+     * retries can clear it: nothing is paired, or several computers are and
+     * the person has not said which.
+     *
+     * Without this, both cases arrived here as an empty endpoint list and
+     * became an ordinary transient failure. That retried every few seconds
+     * forever and told the person "reconnecting — no reachable address",
+     * which is untrue twice over: nothing was unreachable, and the thing
+     * that would fix it was a tap, not patience.
+     */
+    private val blocked: suspend () -> String? = { null },
 ) {
 
     /**
@@ -205,6 +220,37 @@ class ConnectionCoordinator(
         wake.trySend(Unit)
         // Belt and braces: if the loop is somehow not running, this is a
         // moment where starting it is exactly right.
+        start()
+    }
+
+    /**
+     * The person chose a different computer to connect to.
+     *
+     * The pending backoff belongs to a destination nobody wants any more, so
+     * it is cut short and the ladder reset — a new target has not failed yet,
+     * and making it wait out the *previous* target's penalty is how a chosen
+     * peer would appear not to respond. This does not decide *which* peer:
+     * the target is re-read from the trust store at the top of every round,
+     * so there is exactly one place that answers "where to".
+     *
+     * [peerHint] is a short fingerprint prefix for the log. Never a name and
+     * never an address, so the transcript says which identity without
+     * implying the choice was made by either.
+     */
+    fun onTargetChanged(peerHint: String? = null) {
+        log(ConnectionEvent.of(ConnectionEvent.Kind.TARGET_CHANGED, "peer" to peerHint))
+        synchronized(this) {
+            if (stopped) return
+            failures = 0
+            ladder = Backoff.Ladder.TRANSIENT
+        }
+        wake.trySend(Unit)
+        // Belt and braces, exactly as in `onNetworkAvailable`: if the loop is
+        // not running but was never stopped, a new destination is the right
+        // moment to start it. A coordinator that *was* stopped stays stopped —
+        // the early return above — because reaching Stopped means either the
+        // person pressed Disconnect or the loop gave up, and both are answered
+        // by the service being started again, which builds a fresh coordinator.
         start()
     }
 
@@ -296,6 +342,10 @@ class ConnectionCoordinator(
     /** One pass over the endpoints. Never throws except for cancellation. */
     private suspend fun runRound(round: Int): Outcome {
         onState(LinkState.Connecting)
+
+        // Asked before the endpoints, because with no destination there is no
+        // sensible question to ask about addresses.
+        blocked()?.let { return Outcome.Terminal(it) }
 
         val candidates = Endpoints.order(endpoints(round))
         log(

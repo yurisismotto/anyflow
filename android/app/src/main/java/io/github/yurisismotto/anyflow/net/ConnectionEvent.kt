@@ -37,6 +37,17 @@ data class ConnectionEvent(
         RETRY_CANCELLED,
         NETWORK_AVAILABLE,
         NETWORK_LOST,
+
+        /**
+         * The person chose a different computer.
+         *
+         * Named separately from `NETWORK_AVAILABLE` even though both shorten a
+         * pending backoff, because they answer different questions in a log:
+         * one says the network came back, this says the destination changed.
+         * Carries a fingerprint prefix — public, and the only way to say which
+         * computer a line is about.
+         */
+        TARGET_CHANGED,
         DISCOVERY,
         STOPPED,
         CONNECT_JOB_END,

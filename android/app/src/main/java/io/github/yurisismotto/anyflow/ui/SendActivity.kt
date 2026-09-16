@@ -8,11 +8,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,14 +24,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
+import io.github.yurisismotto.anyflow.capability.FilesCapability
 import io.github.yurisismotto.anyflow.clipboard.ClipboardText
 import io.github.yurisismotto.anyflow.files.SharedFile
 import io.github.yurisismotto.anyflow.service.ConnectionService
+import io.github.yurisismotto.anyflow.store.PeerTarget
 import io.github.yurisismotto.anyflow.store.TrustStore
 import kotlinx.coroutines.launch
 
@@ -68,6 +75,20 @@ import kotlinx.coroutines.launch
  *    heuristic-password-detector this project refuses to build.
  *
  * This complements the Send clipboard button; it does not replace it.
+ *
+ * ## Where the share goes
+ *
+ * It used to go to `trustStore.peers().firstOrNull()` — the other half of the
+ * certified U2 §39.17 defect, and the half with a data-routing consequence: a
+ * file shared from another app was delivered to whichever computer the trust
+ * store happened to list first, not the one the person was using. With an
+ * offline desktop in that slot the share simply failed; with a *second* live
+ * desktop it would have succeeded against the wrong machine.
+ *
+ * The destination is now resolved by [PeerTarget] over the peers that can
+ * actually receive this kind of share, and the rule is the app's existing one
+ * for ambiguity: one eligible computer is used, several are offered as a
+ * choice, none is stated plainly. Nothing here is decided by list position.
  */
 class SendActivity : ComponentActivity() {
 
@@ -78,30 +99,61 @@ class SendActivity : ComponentActivity() {
 
         val uri = extractSharedUri(intent)
         val sharedText = extractSharedText(intent)
-        val peer = runCatching { app.trustStore.peers().firstOrNull() }.getOrNull()
 
         setContent {
             MaterialTheme {
                 Surface {
+                    // Observed, not read once in `onCreate`. Choosing a
+                    // destination below writes through the trust store, so a
+                    // snapshot taken before the choice would leave this screen
+                    // showing the computer the person just changed away from.
+                    val peers by app.trustStore.peersFlow.collectAsState()
+                    val selectedHex by app.trustStore.selectedPeerFlow.collectAsState()
                     if (sharedText != null && uri == null) {
                         SendTextScreen(
                             text = sharedText,
-                            peer = peer,
-                            onSend = { target, text, onOutcome -> startTextSend(target, text, onOutcome) },
+                            peers = peers,
+                            selectedHex = selectedHex,
+                            onChoose = ::chooseDestination,
+                            onSend = { target, text, onOutcome ->
+                                startTextSend(target, text, onOutcome)
+                            },
                             onClose = { finish() },
                         )
                     } else {
                         SendScreen(
                             app = app,
                             uri = uri,
-                            peer = peer,
-                            onSend = { target, file, onOutcome -> startSend(target, file, onOutcome) },
+                            peers = peers,
+                            selectedHex = selectedHex,
+                            onChoose = ::chooseDestination,
+                            onSend = { target, file, onOutcome ->
+                                startSend(target, file, onOutcome)
+                            },
                             onClose = { finish() },
                         )
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Points the app at the computer chosen for this share.
+     *
+     * Choosing a destination and connecting to it are the same act: a transfer
+     * and a clipboard update both travel over the authenticated session, so a
+     * share aimed at a computer the app is not connected to has nowhere to go.
+     * Starting the service here — rather than at the moment Send is pressed —
+     * also gives the session time to come up while the person is still reading
+     * the screen.
+     *
+     * The choice is written through [ConnectionService], which is the single
+     * writer: it persists it, ends a session belonging to a different computer
+     * and wakes the retry loop, and refuses a fingerprint that is not trusted.
+     */
+    private fun chooseDestination(peer: TrustStore.TrustedPeer) {
+        ConnectionService.start(this, peer.fingerprint)
     }
 
     /**
@@ -116,7 +168,9 @@ class SendActivity : ComponentActivity() {
         text: ClipboardText,
         onOutcome: (UiMapping.SendAttempt) -> Unit,
     ) {
-        ConnectionService.start(this)
+        // Named, not implied: the session must be pointed at the computer this
+        // send is for, or the offer would travel over somebody else's.
+        ConnectionService.start(this, peer.fingerprint)
         lifecycleScope.launch {
             app.clipboard.sendText(peer.fingerprint, text, sensitive = false)
                 .onSuccess {
@@ -182,8 +236,9 @@ class SendActivity : ComponentActivity() {
         uri: Uri,
         onOutcome: (UiMapping.SendAttempt) -> Unit,
     ) {
-        // The connection is what carries the offer, so make sure there is one.
-        ConnectionService.start(this)
+        // The connection is what carries the offer, so make sure there is one —
+        // and that it is pointed at the computer this offer names.
+        ConnectionService.start(this, peer.fingerprint)
         lifecycleScope.launch {
             // Nothing about the file is logged here: the message is the
             // capability's own words, and the throwable is never printed.
@@ -225,7 +280,9 @@ class SendActivity : ComponentActivity() {
 private fun SendScreen(
     app: AnyFlowApp,
     uri: Uri?,
-    peer: TrustStore.TrustedPeer?,
+    peers: List<TrustStore.TrustedPeer>,
+    selectedHex: String?,
+    onChoose: (TrustStore.TrustedPeer) -> Unit,
     onSend: (TrustStore.TrustedPeer, Uri, (UiMapping.SendAttempt) -> Unit) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -237,6 +294,13 @@ private fun SendScreen(
     val name = remember(uri) {
         uri?.let { runCatching { SharedFile(app, it).displayName() }.getOrNull() }
     }
+
+    // A computer without the `files.v1` grant is not a destination, however
+    // well paired it is. Narrowing here rather than letting `offer` refuse
+    // later means the screen never offers a Send that cannot work.
+    val eligible = peers.filter { it.allows(FilesCapability.ID) }
+    val destination = PeerTarget.resolve(eligible, selectedHex)
+    val peer = destination.peerOrNull()
 
     Column(
         modifier = Modifier.padding(16.dp).fillMaxWidth(),
@@ -253,8 +317,25 @@ private fun SendScreen(
                 // a name for a file whose own name was unusable.
                 Text("That file's name cannot be sent safely. Rename it and try again.")
 
-            peer == null ->
+            peers.isEmpty() ->
                 Text("No computer paired yet. Open AnyFlow and scan the pairing code first.")
+
+            eligible.isEmpty() ->
+                // Paired but not permitted, which is a different sentence and a
+                // different fix. Saying "nothing is paired" here would send
+                // someone to the QR scanner for a grant they already own.
+                Text(
+                    "No paired computer is allowed to receive files. Turn on " +
+                        "\"Receive files\" for one of them in AnyFlow first.",
+                )
+
+            peer == null -> {
+                // Several eligible computers and none chosen — the case the
+                // old code answered with `first()`, silently. There is no Send
+                // button until the person names a destination.
+                Text("Which computer should receive ${'$'}name?")
+                DestinationPicker(eligible, selectedHex, onChoose)
+            }
 
             else -> {
                 Card {
@@ -266,6 +347,15 @@ private fun SendScreen(
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
+                }
+
+                // Still offered when there is more than one candidate, even
+                // though one is already chosen: a preselected destination is a
+                // convenience, and it must stay visibly changeable rather than
+                // become the same silent routing under a nicer name.
+                if (eligible.size > 1) {
+                    Text("Send to", style = MaterialTheme.typography.bodySmall)
+                    DestinationPicker(eligible, peer.fingerprint.toHex(), onChoose)
                 }
 
                 val mine = transfers.filter { it.sending && it.filename == name }
@@ -297,6 +387,56 @@ private fun SendScreen(
 }
 
 /**
+ * Which computer receives this share.
+ *
+ * A radio group rather than a dialog: the destination is part of what the
+ * person is confirming, so it belongs on the screen beside the file, not
+ * behind a second tap. Each row states the fingerprint as well as the name,
+ * because two desktops can quite reasonably be called the same thing and only
+ * one of them is the pinned identity being connected to.
+ *
+ * Choosing does not grant anything and does not pair anything. Every peer
+ * listed is already trusted, already holds the capability grant this share
+ * needs, and is still authenticated against its pin when the session opens.
+ */
+@Composable
+private fun DestinationPicker(
+    candidates: List<TrustStore.TrustedPeer>,
+    chosenHex: String?,
+    onChoose: (TrustStore.TrustedPeer) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (candidate in candidates) {
+            val chosen = candidate.fingerprint.toHex() == chosenHex
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // One selectable row, so a screen reader announces the
+                    // name, the fingerprint and the selected state together
+                    // rather than reading a bare radio button.
+                    .selectable(
+                        selected = chosen,
+                        role = Role.RadioButton,
+                        onClick = { onChoose(candidate) },
+                    )
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                RadioButton(selected = chosen, onClick = null)
+                Column {
+                    Text(candidate.deviceName, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        candidate.fingerprint.toDisplayShort(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
  * The text half of the Sharesheet: "Share → AnyFlow" from a browser or a
  * notes app.
  *
@@ -308,11 +448,23 @@ private fun SendScreen(
 @Composable
 private fun SendTextScreen(
     text: ClipboardText,
-    peer: TrustStore.TrustedPeer?,
+    peers: List<TrustStore.TrustedPeer>,
+    selectedHex: String?,
+    onChoose: (TrustStore.TrustedPeer) -> Unit,
     onSend: (TrustStore.TrustedPeer, ClipboardText, (UiMapping.SendAttempt) -> Unit) -> Unit,
     onClose: () -> Unit,
 ) {
     var attempt by remember { mutableStateOf<UiMapping.SendAttempt>(UiMapping.SendAttempt.Idle) }
+
+    // Both gates, not one: the grant says this computer may speak clipboard at
+    // all, the policy says in which direction. A peer failing either is not a
+    // destination, and collapsing them is how a screen comes to offer a Send
+    // that the capability will refuse.
+    val eligible = peers.filter {
+        it.allows(ClipboardCapability.ID) && it.clipboardPolicy.allowSend
+    }
+    val destination = PeerTarget.resolve(eligible, selectedHex)
+    val peer = destination.peerOrNull()
 
     Column(
         modifier = Modifier.padding(16.dp).fillMaxWidth(),
@@ -321,19 +473,25 @@ private fun SendTextScreen(
         Text("Send text with AnyFlow", style = MaterialTheme.typography.headlineSmall)
 
         when {
-            peer == null ->
+            peers.isEmpty() ->
                 Text("No computer paired yet. Open AnyFlow and scan the pairing code first.")
 
-            !peer.allows(ClipboardCapability.ID) ->
+            eligible.isEmpty() ->
                 Text(
-                    "Clipboard sharing is off for ${'$'}{peer.deviceName}. Turn on " +
+                    "No paired computer is set up to receive your clipboard. Turn on " +
                         "\"Share clipboard with this computer\" in AnyFlow first.",
                 )
 
-            !peer.clipboardPolicy.allowSend ->
-                Text("Sending your clipboard to ${'$'}{peer.deviceName} is turned off.")
+            peer == null -> {
+                Text("Which computer should receive this text?")
+                DestinationPicker(eligible, selectedHex, onChoose)
+            }
 
             else -> {
+                if (eligible.size > 1) {
+                    Text("Send to", style = MaterialTheme.typography.bodySmall)
+                    DestinationPicker(eligible, peer.fingerprint.toHex(), onChoose)
+                }
                 Card {
                     Column(Modifier.padding(12.dp), Arrangement.spacedBy(4.dp)) {
                         Text(

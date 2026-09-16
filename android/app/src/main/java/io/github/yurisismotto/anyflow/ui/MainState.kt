@@ -12,6 +12,7 @@ import io.github.yurisismotto.anyflow.notifications.NotificationApp
 import io.github.yurisismotto.anyflow.notifications.NotificationGates
 import io.github.yurisismotto.anyflow.notifications.NotificationPolicy
 import io.github.yurisismotto.anyflow.notifications.NotificationSource
+import io.github.yurisismotto.anyflow.store.PeerTarget
 import io.github.yurisismotto.anyflow.store.TrustStore
 
 /**
@@ -29,6 +30,15 @@ data class MainUiState(
     val keyBackingDescription: String,
     val connection: AnyFlowApp.ConnectionState,
     val peers: List<TrustStore.TrustedPeer>,
+    /**
+     * The computer the person chose to connect to, as a fingerprint hex.
+     *
+     * Observed from the trust store rather than held in a screen, because the
+     * connection service writes it too — it is the identity carried in a start
+     * intent — and a copy owned by the UI would disagree the moment a share
+     * sheet re-pointed the link.
+     */
+    val selectedPeerHex: String?,
     val offers: List<FileTransferManager.IncomingOffer>,
     val transfers: List<FileTransferManager.TransferUi>,
     val pendingClips: List<ClipboardSync.PendingClipInfo>,
@@ -56,6 +66,30 @@ data class MainUiState(
     /** The fingerprint of the peer with a live session, if any. */
     val connectedFingerprintShort: String?
         get() = (connection as? AnyFlowApp.ConnectionState.Connected)?.fingerprintShort
+
+    /**
+     * Which computer this phone is pointed at, and why — or why it is not.
+     *
+     * The same function the connection service resolves its destination with,
+     * over the same two inputs, so the screen cannot show one target while the
+     * service dials another. Both replaced `peers.first()`, which is how the
+     * quick actions used to offer "Send files" for a desktop that had been
+     * powered off for a week.
+     */
+    val target: PeerTarget.Resolution
+        get() = PeerTarget.resolve(peers, selectedPeerHex)
+
+    /** The computer the buttons act on, or null when the person must choose. */
+    val targetPeer: TrustStore.TrustedPeer?
+        get() = target.peerOrNull()
+
+    /** True when several computers are trusted and none has been chosen. */
+    val mustChooseTarget: Boolean
+        get() = target is PeerTarget.Resolution.MustChoose
+
+    /** Whether [peer] is the one the connection is pointed at. */
+    fun isTarget(peer: TrustStore.TrustedPeer): Boolean =
+        targetPeer?.fingerprint?.contentEquals(peer.fingerprint) == true
 
     fun isConnected(peer: TrustStore.TrustedPeer): Boolean =
         connectedFingerprintShort == peer.fingerprint.toDisplayShort()
@@ -107,7 +141,16 @@ data class MainUiState(
 @Immutable
 data class MainActions(
     val onPair: () -> Unit,
-    val onConnect: () -> Unit,
+    /**
+     * Connects to one named computer.
+     *
+     * Takes a fingerprint because the certified defect was that it did not:
+     * the action used to be `() -> Unit`, so the identity of the row the
+     * person tapped stopped at the UI and the service resolved a destination
+     * of its own from trust-store order. The pinned identity now travels all
+     * the way to the socket.
+     */
+    val onConnect: (Fingerprint) -> Unit,
     val onDisconnect: () -> Unit,
     val onForget: (TrustStore.TrustedPeer) -> Unit,
     val onSetFilesGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,

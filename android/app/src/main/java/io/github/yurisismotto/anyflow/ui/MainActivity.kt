@@ -69,7 +69,14 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             app.pair(payload)
-                .onSuccess { ConnectionService.start(this@MainActivity) }
+                // The computer that was just paired becomes the target. It is
+                // the only reading of "scan this code" that is not a guess,
+                // and it is what makes pairing a second desktop work: without
+                // it the new peer would be trusted and unreachable behind
+                // whichever entry the store happened to hold first.
+                .onSuccess { peer ->
+                    ConnectionService.start(this@MainActivity, peer.fingerprint)
+                }
                 .onFailure { showError(it.message ?: "Pairing failed.") }
         }
     }
@@ -193,6 +200,11 @@ class MainActivity : ComponentActivity() {
         // invisible until the screen was recreated.
         val connection by app.connectionState.collectAsState()
         val peers by app.trustStore.peersFlow.collectAsState()
+        // Observed for the same reason the peer list is: the connection
+        // service and the share sheet both write the choice, so a value read
+        // once here would go stale the moment either of them re-pointed the
+        // link.
+        val selectedPeerHex by app.trustStore.selectedPeerFlow.collectAsState()
         val offers by app.files.pendingOffers.collectAsState()
         val transfers by app.files.visible.collectAsState()
         val pendingClips by app.clipboard.pendingClips.collectAsState()
@@ -214,6 +226,7 @@ class MainActivity : ComponentActivity() {
             },
             connection = connection,
             peers = peers,
+            selectedPeerHex = selectedPeerHex,
             offers = offers,
             transfers = transfers,
             pendingClips = pendingClips,
@@ -228,9 +241,14 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun rememberMainActions(): MainActions = MainActions(
         onPair = ::requestScan,
-        onConnect = { ConnectionService.start(this) },
+        // The fingerprint of the row that was tapped, carried into the start
+        // intent. This is the seam the certified defect fell through: the
+        // action used to take nothing, and the service picked a peer itself.
+        onConnect = { peer -> ConnectionService.start(this, peer) },
         onDisconnect = { ConnectionService.stop(this) },
         onForget = { peer ->
+            // `removePeer` drops the choice with the computer, so the next
+            // connection cannot be aimed at something no longer trusted.
             app.trustStore.removePeer(peer.fingerprint)
             ConnectionService.stop(this)
         },
@@ -351,7 +369,10 @@ class MainActivity : ComponentActivity() {
 
         when (eligible.size) {
             0 -> showError("No computer is set up to receive your clipboard.")
-            1 -> sendClipboard(eligible.first().fingerprint)
+            // `single`, not `first`: the branch is already guarded by the size,
+            // and spelling it this way means no peer-selection call site in the
+            // app can be read as "whichever one is first".
+            1 -> sendClipboard(eligible.single().fingerprint)
             else -> showError("Choose which computer to send the clipboard to.")
         }
     }
