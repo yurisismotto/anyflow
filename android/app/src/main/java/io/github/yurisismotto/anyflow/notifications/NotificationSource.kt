@@ -252,15 +252,24 @@ class NotificationSource(
         var dismissesPerformed = 0
 
         /**
-         * Whether this connection has been given its active-state snapshot.
+         * The policy shape the last snapshot was built with, or null when this
+         * connection is owed one.
          *
          * A snapshot can only be sent once the peer has claimed `SINK`, and a
          * peer announces its roles just after the session comes up rather than
          * before. So the snapshot is attempted at attach and again when the
-         * announcement arrives, and this is what stops the second attempt from
-         * duplicating the first.
+         * announcement arrives, and a non-null value is what stops the second
+         * attempt from duplicating the first.
+         *
+         * It holds the *shape* rather than a boolean because a snapshot is a
+         * statement about what this peer is entitled to see, and the person can
+         * change that mid-session — turning sharing on and only then choosing
+         * which apps to share is the ordinary order, and it leaves a snapshot
+         * that was correct when it was sent and is not any more. Comparing the
+         * shape re-sends exactly when the answer would differ and never merely
+         * because an event happened.
          */
-        var snapshotSent = false
+        var snapshotShape: SnapshotShape? = null
 
         fun remember(idHex: String, hashHex: String) {
             sent.remove(idHex)
@@ -493,9 +502,11 @@ class NotificationSource(
             is NotificationEvent.SessionAttached -> {
                 val session = Session(event.peer, event.peerDeviceId, event.send)
                 sessions[event.peer.toHex()] = session
+                // Roles first, before `updateBinding` can produce anything
+                // else: this device says what it is ahead of any content.
                 announceRoles(session)
                 updateBinding()
-                sendSnapshot(session)
+                converge(session)
             }
 
             is NotificationEvent.SessionDetached -> {
@@ -517,8 +528,7 @@ class NotificationSource(
                 // anything: the map is reconstructed, never restored.
                 rebuildIdMap()
                 for (session in sessions.values) {
-                    announceRoles(session)
-                    sendSnapshot(session)
+                    converge(session)
                 }
             }
 
@@ -530,7 +540,7 @@ class NotificationSource(
                 // is already up — no reconnect, and no window in which the
                 // desktop still believes it is being mirrored to.
                 for (session in sessions.values) {
-                    announceRoles(session)
+                    converge(session)
                 }
                 idMap.clear()
                 // The ids those entries named can never be mapped again, so a
@@ -544,8 +554,17 @@ class NotificationSource(
                 // Settings, can change what this device can physically do —
                 // and therefore its roles. `announce` returns null for an
                 // unchanged set, so this costs nothing when nothing moved.
+                //
+                // It can also change what a peer is *owed* without changing
+                // any role at all: a grant made to one computer while another
+                // is already connected leaves the listener bound and the role
+                // set identical, so there is no announcement and no
+                // `onListenerConnected` to ride on. Converging here is what
+                // sends that computer the shade it just became entitled to,
+                // and what makes a revoke/re-enable inside one session resync
+                // rather than resume mid-stream.
                 for (session in sessions.values) {
-                    announceRoles(session)
+                    converge(session)
                 }
             }
 
@@ -688,6 +707,40 @@ class NotificationSource(
     private suspend fun handleInbound(peer: Fingerprint, control: NotificationControl) {
         val session = sessions[peer.toHex()] ?: return
 
+        // A role announcement is exempt from the grant check, and it is the
+        // only body that is.
+        //
+        // # Why, and why refusing it was the P3 defect
+        //
+        // A role says what the peer **can** do; the grant says what it is
+        // **allowed** to do, and the two are answered in two places on purpose
+        // (ADR-0017 §6). [PeerRoleState] is read for exactly two things — do
+        // not send content to a peer that never claimed `SINK`, and tell the
+        // UI whether the computer claims `DISMISS_REPORTER` — so recording one
+        // can only ever *withhold*. It cannot widen anything: every outbound
+        // path re-reads the grant for itself, and every inbound body below is
+        // still refused without one.
+        //
+        // Refusing it did widen nothing either, but it lost something. The
+        // desktop announces its roles **once**, when the session comes up, and
+        // has no trigger to say it again. A person who pairs a computer and
+        // then turns notification sharing on — the ordinary order, because the
+        // app deliberately withholds `notifications.v1` at pairing — was
+        // ungranted at the instant that one announcement arrived, so it was
+        // dropped here and this phone went on believing the computer had
+        // claimed no roles for the rest of the session. Both send paths are
+        // gated on `SINK`, so nothing was ever mirrored, and the only recovery
+        // was restarting the desktop daemon to manufacture a second
+        // announcement. `answer` has no id to echo for a `ROLES` body, so it
+        // was dropped silently: no reply, and nothing in either log.
+        //
+        // The desktop's own `handle_control` has always checked the grant per
+        // body and exempted `Roles`. This is the two ends agreeing.
+        if (control.bodyCase == NotificationControl.BodyCase.ROLES) {
+            applyPeerRoles(session, control)
+            return
+        }
+
         // The grant is re-read here rather than trusted from the handshake, so
         // a revocation is in force on a session that is already up.
         if (policyFor(peer) == NotificationPolicy.DENIED) {
@@ -696,19 +749,7 @@ class NotificationSource(
         }
 
         when (control.bodyCase) {
-            NotificationControl.BodyCase.ROLES -> {
-                val rejection = session.peerRoles.apply(control.roles)
-                if (rejection != null) {
-                    Log.i(TAG, "peer roles refused: $rejection")
-                } else {
-                    Log.i(TAG, "peer roles epoch=${session.peerRoles.epoch()}")
-                    // A peer announces its roles just after the session comes
-                    // up, which is after this side attached. This is where a
-                    // peer that has just claimed SINK gets the snapshot it
-                    // could not be sent a moment ago.
-                    if (!session.snapshotSent) sendSnapshot(session)
-                }
-            }
+            NotificationControl.BodyCase.ROLES -> Unit // handled above
 
             NotificationControl.BodyCase.RESULT -> {
                 // A verdict on something we sent. Logged as an enum name, with
@@ -922,6 +963,107 @@ class NotificationSource(
     }
 
     /**
+     * Whether this peer is owed mirrored content **right now**.
+     *
+     * The three independent questions, asked together and re-asked every time
+     * any of them could have moved: can this device source at all, has the
+     * peer said it can display, and is this particular computer allowed to be
+     * sent anything. None of them implies another and all three are checked
+     * again per notification — this is the convergence question, not the
+     * authorization one.
+     */
+    private fun mirroringIsLive(session: Session): Boolean =
+        isSourcing() &&
+            session.peerRoles.has(NotificationRole.NOTIFICATION_ROLE_SINK) &&
+            policyFor(session.peer).allowMirror
+
+    /**
+     * Brings one live session up to date with what this device can currently
+     * do. The single convergence seam, and the answer to "why is a restart
+     * needed".
+     *
+     * Called from every event that can change the answer and from nowhere
+     * else: a session attaching, the listener binding or unbinding, a grant or
+     * a filter changing, and a peer announcing its own roles. There is no
+     * timer here and no polling loop — each of those events already knows the
+     * state moved, which is the whole reason a restart was ever able to fix
+     * what it fixed.
+     *
+     * Three things happen, in this order, and each is idempotent:
+     *
+     * 1. **Roles.** [SourceRoleState.announce] answers null for an unchanged
+     *    set, so an event that changed nothing semantically costs no epoch and
+     *    no wire traffic. Repeated callbacks are free.
+     * 2. **Authority lost.** When the relationship is no longer live the
+     *    snapshot flag is cleared, so if it returns later in this same session
+     *    the peer is given a fresh, coherent picture rather than the tail of
+     *    an old one. Nothing is sent: a narrowing is announced by the role set
+     *    above and acted on by the peer.
+     * 3. **Authority gained.** When it is live and this connection has not had
+     *    its snapshot, it gets one. This is what makes notifications that were
+     *    *already on the shade* appear the moment sharing is turned on, rather
+     *    than only the next one to arrive.
+     */
+    private suspend fun converge(session: Session) {
+        announceRoles(session)
+        if (!mirroringIsLive(session)) {
+            session.snapshotShape = null
+            return
+        }
+        if (session.snapshotShape != shapeOf(policyFor(session.peer))) {
+            sendSnapshot(session)
+        }
+    }
+
+    /**
+     * The parts of a peer's policy that decide **what a snapshot contains**.
+     *
+     * Membership only. `whenSourceLocked` is deliberately left out: it decides
+     * how a notification is *reduced*, not whether this peer is entitled to it,
+     * and including it would let a lock-policy change re-send content that the
+     * lock policy had withheld — which is exactly the "unlocking is not
+     * retroactive" rule (ADR-0015 §7) reached by another road. `knownApps` is
+     * left out for a duller reason: the app picker writes it whenever it lists
+     * the installed apps, and resyncing because a list was drawn would be the
+     * announcement storm in snapshot form.
+     */
+    private data class SnapshotShape(
+        val allowMirror: Boolean,
+        val allowedApps: Set<String>,
+        val includeOngoing: Boolean,
+        val includeWorkProfile: Boolean,
+    )
+
+    private fun shapeOf(policy: NotificationPolicy) = SnapshotShape(
+        allowMirror = policy.allowMirror,
+        allowedApps = policy.allowedApps,
+        includeOngoing = policy.includeOngoing,
+        includeWorkProfile = policy.includeWorkProfile,
+    )
+
+    /**
+     * Records one peer's role announcement and converges on it.
+     *
+     * The epoch rule lives in [PeerRoleState]; a refusal is logged as a reason
+     * and changes nothing, which is what makes a replayed or reordered
+     * announcement inert rather than harmful.
+     */
+    private suspend fun applyPeerRoles(session: Session, control: NotificationControl) {
+        val rejection = session.peerRoles.apply(control.roles)
+        if (rejection != null) {
+            Log.i(TAG, "peer roles refused: $rejection")
+            return
+        }
+        Log.i(TAG, "peer roles epoch=${session.peerRoles.epoch()}")
+        // A peer announces its roles just after the session comes up, which is
+        // after this side attached. This is where a peer that has just claimed
+        // SINK gets the snapshot it could not be sent a moment ago — and where
+        // a peer that has just *stopped* claiming it gives up its snapshot
+        // shape, so a later re-widening is a fresh picture.
+        converge(session)
+    }
+
+    /**
      * The active-state snapshot for one peer.
      *
      * `BEGIN`, every currently-active notification that passes every filter a
@@ -976,7 +1118,10 @@ class NotificationSource(
         }
 
         emit(session, NotificationWire.syncMarker(syncId, SyncMarker.Phase.PHASE_END))
-        session.snapshotSent = true
+        // Recorded here, after the bracket closed, and from the policy this
+        // snapshot actually used — every early return above leaves it untouched
+        // so the peer is still owed one.
+        session.snapshotShape = shapeOf(policy)
         Log.i(TAG, "snapshot sent: $sent of ${active.size} active")
     }
 

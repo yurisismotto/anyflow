@@ -1081,7 +1081,22 @@ impl NotificationManager {
         }
     }
 
+    /// Announces this device's roles to one peer, if they have changed.
+    ///
+    /// # The channel is taken *before* the announcement is recorded
+    ///
+    /// `LocalRoles::announce` is a state transition, not a query: it records
+    /// the set as announced and burns an epoch, and it answers `None` for
+    /// every later call with the same set. Recording that and then discovering
+    /// there is no outbound channel loses the announcement **permanently** for
+    /// that session — this device would go on reporting `announced 2 (epoch
+    /// 1)` to a peer that was never told anything, and nothing short of a new
+    /// session could put it right. So the sender is taken first and the state
+    /// is only advanced once there is somewhere for the message to go.
     async fn announce_roles(&self, slot: &Arc<PeerSlot>) {
+        let Some(outbound) = slot.outbound.read().await.clone() else {
+            return;
+        };
         let available = self.is_available();
         let reporting = self.reports_dismissals();
         let announcement = {
@@ -1089,9 +1104,6 @@ impl NotificationManager {
             state.local_roles.announce(available, reporting)
         };
         let Some(announcement) = announcement else {
-            return;
-        };
-        let Some(outbound) = slot.outbound.read().await.clone() else {
             return;
         };
 
