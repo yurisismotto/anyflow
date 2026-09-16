@@ -18,10 +18,15 @@
 //! It restores whatever was on the clipboard when it started, so running it
 //! does not silently eat the clipboard content someone was about to paste.
 //!
-//! # Two ways this can fail that are not bugs
+//! # Three ways this can fail that are not bugs
 //!
 //! * **`wl-clipboard` is not installed** — reported as `Unavailable`, and the
 //!   test says so rather than failing obscurely.
+//! * **`wl-copy` cannot mark a clip sensitive** — wl-clipboard below 2.3.0,
+//!   which is what Ubuntu 24.04, Ubuntu 26.04 and Debian 13 ship. Also not a
+//!   failure: the sensitive test below asserts the *refusal* contract on such
+//!   a host instead of a round trip that cannot happen there (U2 TC1).
+//!   Ordinary clipboard mirroring is unaffected.
 //! * **The session is locked** — on GNOME, `wl-copy` and `wl-paste` block
 //!   indefinitely behind a lock screen waiting for a seat, so the backend's
 //!   timeout fires and the result is `TimedOut`. The tests below name that
@@ -251,17 +256,179 @@ async fn the_real_clipboard_carries_a_maximum_sized_clip() {
     .await;
 }
 
-/// `wl-copy --sensitive` must not corrupt the content it marks.
+/// A sensitive clip does on this machine exactly what this machine says it
+/// can do — and nothing else.
+///
+/// # The defect this replaces (U2 TC1)
+///
+/// This test used to write a sensitive clip and assert it round-tripped,
+/// unconditionally. That is only true where `wl-copy` understands
+/// `--sensitive`, which is a property of the *installed tool* and not of the
+/// platform: Ubuntu 24.04, Ubuntu 26.04 and Debian 13 all ship wl-clipboard
+/// 2.2.1 without the flag, while Fedora's `2.2.1^git…` snapshot has it
+/// (PLAT-DEC-013, U0 §8).
+///
+/// On those distributions the product did the right thing — ordinary
+/// clipboard available, sensitive capability reported unavailable, sensitive
+/// write refused fail-closed, no content handed to an unmarked `wl-copy` —
+/// and this test failed anyway. A red gate for correct fail-closed behaviour
+/// is worse than no gate: it trains the next person to ignore it.
+///
+/// # What is asserted instead
+///
+/// The **product contract**, which is the same sentence on every host:
+///
+/// > `sensitive_support()` is a promise, and `write_text(_, true)` keeps it
+/// > in both directions.
+///
+/// * supported → the marked write succeeds and the content survives intact;
+/// * unsupported → the write is refused with the typed capability error
+///   [`BackendError::Unavailable`], the ordinary clipboard is untouched and
+///   still works, and **no sensitive byte reaches the clipboard at all**.
+///
+/// Unsupported is an *asserted* state here, not a skipped one. A host without
+/// the flag runs strictly more assertions than a host with it, because the
+/// fail-closed path is the one with a privacy consequence if it breaks.
+///
+/// The measurement for "no byte reached the clipboard" is the clipboard
+/// itself: an ordinary sentinel is placed first, and after the refusal the
+/// clipboard must still hold that sentinel. An implementation that fell back
+/// to an unmarked `wl-copy` would have replaced it with the canary, and that
+/// is precisely the privacy regression PLAT-DEC-013 refuses to make.
+/// `tests/sensitive_capability.rs` proves the same property one level lower,
+/// against the child process's stdin, on every machine and without a
+/// compositor.
 #[tokio::test]
 #[ignore = "touches the real system clipboard; run with --ignored --test-threads=1"]
-async fn a_sensitive_write_still_round_trips() {
+async fn a_sensitive_write_honours_this_backend_s_advertised_capability() {
+    /// Never written to an unmarked clipboard, and asserted to be absent when
+    /// the capability is missing.
+    const CANARY: &str = "anyflow-sensitive-canary-3f9c1a";
+    const SENTINEL: &str = "anyflow ordinary sentinel";
+
     preserving_clipboard(|b| async move {
-        let value = ClipboardText::validate("sensitive round trip").expect("valid");
-        write(&b, &value, true).await;
-        assert_eq!(
-            read(&b).await.expect("text").as_str(),
-            "sensitive round trip"
+        // The suite cannot say anything about sensitive clips on a machine
+        // with no usable clipboard at all. That is a different outcome from
+        // "no `--sensitive`", and it is named rather than folded in.
+        if let Err(why) = b.availability() {
+            panic!(
+                "this session has no usable clipboard, so the sensitive \
+                 contract cannot be gated here: {why}"
+            );
+        }
+
+        let support = b.sensitive_support();
+        eprintln!(
+            "sensitive marking on this host: {}",
+            match &support {
+                Ok(()) => "supported".to_string(),
+                Err(why) => format!("unsupported ({why})"),
+            }
         );
+
+        // A known ordinary clip first. It proves the ordinary path works
+        // before anything sensitive is attempted, and it is the marker the
+        // refusal case measures against.
+        let sentinel = ClipboardText::validate(SENTINEL).expect("valid");
+        write(&b, &sentinel, false).await;
+        assert_eq!(
+            read(&b)
+                .await
+                .expect("the sentinel is on the clipboard")
+                .as_str(),
+            SENTINEL,
+            "the ordinary clipboard must work before the sensitive path is judged"
+        );
+
+        let canary = ClipboardText::validate(CANARY).expect("valid");
+        let outcome = b.write_text(&canary, true).await;
+
+        match (support, outcome) {
+            // ---------------------------------------------------------------
+            // Supported: the promise is kept, and the marking does not corrupt
+            // what it marks.
+            // ---------------------------------------------------------------
+            (Ok(()), Ok(())) => {
+                let read_back = read(&b).await.expect("the marked clip is on the clipboard");
+                assert_eq!(
+                    read_back.as_str(),
+                    CANARY,
+                    "a marked clip must survive the platform byte for byte"
+                );
+                assert_eq!(
+                    read_back.hash(),
+                    canary.hash(),
+                    "the content hash must survive marking"
+                );
+            }
+
+            // ---------------------------------------------------------------
+            // Unsupported: refused, typed, and inert.
+            // ---------------------------------------------------------------
+            (Err(why), Err(e)) => {
+                // The typed capability error, not a generic failure. Before
+                // Wave 0 this surfaced as `wl-copy exited with 1`, which told
+                // the operator nothing and named no remedy.
+                assert!(
+                    matches!(e, BackendError::Unavailable(_)),
+                    "a refused sensitive clip must be a capability error, not {e:?}"
+                );
+                // The reason a person can act on travelled with it.
+                assert!(
+                    !why.is_empty(),
+                    "an unsupported backend must say why, so status can print it"
+                );
+                assert!(
+                    !e.to_string().contains(CANARY),
+                    "the refusal must not carry the content it refused"
+                );
+
+                // Fail-closed, measured rather than assumed: nothing was
+                // written. The clipboard still holds the ordinary sentinel,
+                // so no unmarked fallback copy happened.
+                let after = read(&b).await.expect("the sentinel must still be there");
+                assert_eq!(
+                    after.as_str(),
+                    SENTINEL,
+                    "a refused sensitive clip must leave the clipboard untouched"
+                );
+                assert!(
+                    !after.as_str().contains(CANARY),
+                    "sensitive content reached the clipboard on a host that \
+                     cannot mark it — this is the privacy regression \
+                     PLAT-DEC-013 exists to prevent"
+                );
+
+                // And the ordinary clipboard is unharmed by the refusal: the
+                // capability degrades, it does not break.
+                let ordinary = ClipboardText::validate("ordinary after refusal").expect("valid");
+                write(&b, &ordinary, false).await;
+                assert_eq!(
+                    read(&b).await.expect("text").as_str(),
+                    "ordinary after refusal",
+                    "ordinary mirroring must keep working where sensitive marking cannot"
+                );
+            }
+
+            // ---------------------------------------------------------------
+            // The predicate lied. Both directions are defects, and each has a
+            // different consequence worth naming.
+            // ---------------------------------------------------------------
+            (Ok(()), Err(e)) => panic!(
+                "sensitive_support() said this backend can mark a clip, and the \
+                 marked write failed: {}\n\nA status screen that promises \
+                 sensitive clips will arrive, on a machine where they do not, \
+                 is worse than one that admits the gap.",
+                explain(&e)
+            ),
+            (Err(why), Ok(())) => panic!(
+                "sensitive_support() said this backend CANNOT mark a clip \
+                 ({why}) and the write succeeded anyway.\n\nEither the probe \
+                 is wrong, or the clip was written unmarked — and an unmarked \
+                 write of a sensitive clip leaves a password in the desktop's \
+                 clipboard history without telling anyone."
+            ),
+        }
     })
     .await;
 }

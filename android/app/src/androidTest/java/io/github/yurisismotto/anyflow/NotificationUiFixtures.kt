@@ -79,12 +79,26 @@ object NotificationUiFixtures {
         accessGranted: Boolean = true,
         status: NotificationSource.Status = sourcingStatus(),
         hasWorkProfile: Boolean = false,
+        /**
+         * Which computer the person chose, as P1's explicit-target model
+         * requires (`PeerTarget`).
+         *
+         * `null` is the honest default here and not a shortcut: this fixture
+         * builds a state with exactly **one** trusted peer, and one candidate
+         * resolves to `OnlyTrustedPeer` whether or not a choice was ever made.
+         * So the consent screens under test get a target without this fixture
+         * asserting anything about routing, which is `PeerTargetTest`'s
+         * subject and not theirs. A parameter rather than a hard-coded `null`
+         * so a future multi-peer consent test can state its own choice.
+         */
+        selectedPeerHex: String? = null,
     ): MainUiState = MainUiState(
         ownDeviceName = "Tablet",
         ownFingerprint = "0000 0000 0000 0000",
         keyBackingDescription = "Key stored in the hardware-backed keystore",
         connection = AnyFlowApp.ConnectionState.Connected("fedora", "7E63 7B4E 937B 7732"),
         peers = listOf(peer),
+        selectedPeerHex = selectedPeerHex,
         offers = emptyList(),
         transfers = emptyList(),
         pendingClips = emptyList(),

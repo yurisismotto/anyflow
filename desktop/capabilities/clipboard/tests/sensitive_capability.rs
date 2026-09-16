@@ -28,6 +28,20 @@
 //! than relying on `--test-threads=1` being remembered. Nothing here touches
 //! the real system clipboard; `tests/real_backend.rs` is the suite that does.
 
+// This whole target drives the `wl-clipboard` helpers through a real process
+// boundary: it writes `#!/bin/sh` fakes, chmods them with
+// `std::os::unix::fs::PermissionsExt` and asks `WaylandBackend::detect()` to
+// find them. All three exist only on Unix with `linux-backends` on, so the
+// target is classified the same way `notifications/tests/real_dbus.rs` is:
+// whole-file `cfg`, compiling to an empty test binary rather than a compile
+// error when the feature is off.
+//
+// Without this the portable Windows gate cannot build the clipboard crate's
+// test targets at all — `cargo test --no-run --no-default-features` fails on
+// the `backend::wayland` import here. Measured on the U2 baseline, where that
+// step was already red (U2 TC1 §15).
+#![cfg(all(unix, feature = "linux-backends"))]
+
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -459,5 +473,137 @@ async fn a_new_looking_version_without_the_flag_is_treated_as_unsupported() {
     assert!(
         !fakes.invocations().contains("--version"),
         "the backend must never consult --version"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// U2 TC1 — the contract `tests/real_backend.rs` asserts against a live
+// compositor, asserted here against both fakes on every machine.
+// ---------------------------------------------------------------------------
+
+/// Drives one backend through the whole sensitive contract and returns which
+/// branch it took.
+///
+/// # Why this exists rather than a third pair of hand-written tests
+///
+/// `real_backend.rs` is `#[ignore]`d: it needs a Wayland session and is asked
+/// for by name during a certification run, so no CI job ever executes it. The
+/// contract it gates is therefore ungated between certifications — which is
+/// how U2 TC1 could sit in the tree at all.
+///
+/// This function is the same sentence, run twice by ordinary `cargo test`,
+/// once against a `wl-copy` that has the flag and once against one that does
+/// not. `false` and `true` are both passes; neither is a skip. The Linux
+/// distro matrix runs this package, so every supported distribution asserts
+/// it on every pull request.
+async fn assert_sensitive_contract(backend: &WaylandBackend, fakes: &Fakes) -> bool {
+    assert_eq!(
+        backend.availability(),
+        Ok(()),
+        "this helper judges the sensitive path, and needs a usable clipboard first"
+    );
+
+    // An ordinary clip first: the marker the refusal case measures against,
+    // and proof that ordinary mirroring works before anything is marked.
+    backend
+        .write_text(&text("an ordinary clip"), false)
+        .await
+        .expect("ordinary writes must work regardless of sensitive support");
+
+    let support = backend.sensitive_support();
+    let outcome = backend.write_text(&text(CANARY), true).await;
+
+    match (support, outcome) {
+        (Ok(()), Ok(())) => {
+            assert!(
+                fakes.invocations().contains("--sensitive"),
+                "a backend that claims marking must actually pass the flag:\n{}",
+                fakes.invocations()
+            );
+            assert!(
+                fakes.stdin_bytes().contains(CANARY),
+                "a marked write must deliver its content"
+            );
+            assert!(backend.describe().contains("sensitive marking: yes"));
+            true
+        }
+        (Err(why), Err(e)) => {
+            assert!(
+                matches!(e, BackendError::Unavailable(_)),
+                "a refused sensitive clip must be the typed capability error, not {e:?}"
+            );
+            assert!(!why.is_empty(), "an unsupported backend must say why");
+            assert!(
+                !e.to_string().contains(CANARY),
+                "the refusal must not carry the content it refused"
+            );
+            assert!(backend.describe().contains("sensitive marking: no"));
+
+            // Fail-closed, measured at the process boundary: not one content
+            // byte, and no unmarked fallback copy.
+            assert!(
+                !fakes.stdin_bytes().contains(CANARY),
+                "sensitive content reached wl-copy on a system that cannot mark it"
+            );
+            assert!(
+                !fakes.invocations().contains("--sensitive"),
+                "the flag was passed to a wl-copy that does not understand it"
+            );
+            // The one copy that did run is the ordinary clip above; the
+            // canary added none.
+            let copies = fakes
+                .invocations()
+                .lines()
+                .filter(|l| l.starts_with("ARGV wl-copy"))
+                .filter(|l| !l.contains("--help"))
+                .count();
+            assert_eq!(copies, 1, "a refused clip must spawn no wl-copy of its own");
+            false
+        }
+        (Ok(()), Err(e)) => {
+            panic!("sensitive_support() promised marking and the marked write failed: {e:?}")
+        }
+        (Err(why), Ok(())) => panic!(
+            "sensitive_support() said marking is impossible ({why}) and the write \
+             succeeded anyway — the clip went out unmarked"
+        ),
+    }
+}
+
+#[tokio::test]
+async fn the_sensitive_contract_holds_where_the_flag_exists() {
+    let fakes = Fakes::install(
+        Some(WlCopySpec {
+            help_lists_sensitive: true,
+            version: "wl-clipboard 2.3.0",
+        }),
+        true,
+    );
+    let backend = fakes.backend();
+
+    assert!(
+        assert_sensitive_contract(&backend, &fakes).await,
+        "this fake advertises `--sensitive`, so the supported branch is the \
+         one that must be taken"
+    );
+}
+
+#[tokio::test]
+async fn the_sensitive_contract_holds_where_the_flag_is_missing() {
+    // Ubuntu 24.04 / 26.04 and Debian 13 (U0 §8) — the host shape that made
+    // the old `real_backend.rs` assertion fail for correct behaviour.
+    let fakes = Fakes::install(
+        Some(WlCopySpec {
+            help_lists_sensitive: false,
+            version: "wl-clipboard 2.2.1",
+        }),
+        true,
+    );
+    let backend = fakes.backend();
+
+    assert!(
+        !assert_sensitive_contract(&backend, &fakes).await,
+        "this fake has no `--sensitive`, so the refusal branch is the one that \
+         must be taken — an unsupported host is an asserted state, never a skip"
     );
 }

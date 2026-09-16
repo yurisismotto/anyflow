@@ -71,6 +71,29 @@ async fn connect() -> DbusSink {
     }
 }
 
+/// `GetCapabilities`, asked again over a connection of this test's own.
+///
+/// Deliberately not routed through [`DbusSink`]: the point is to have a second
+/// opinion about what the server said, so that the sink's parse can be checked
+/// against it rather than against itself.
+async fn advertised_capabilities() -> Vec<String> {
+    let connection = zbus::Connection::session()
+        .await
+        .expect("availability() just succeeded, so the session bus is reachable");
+    let proxy = zbus::Proxy::new(
+        &connection,
+        "org.freedesktop.Notifications",
+        "/org/freedesktop/Notifications",
+        "org.freedesktop.Notifications",
+    )
+    .await
+    .expect("the notification interface");
+    proxy
+        .call("GetCapabilities", &())
+        .await
+        .expect("a server that answered GetServerInformation must answer GetCapabilities")
+}
+
 #[tokio::test]
 #[ignore = "talks to the real notification server; run with --ignored --test-threads=1"]
 async fn the_real_server_answers_and_says_what_it_can_do() {
@@ -83,11 +106,83 @@ async fn the_real_server_answers_and_says_what_it_can_do() {
 
     // Not asserted as a fixed set: `GetCapabilities` is the server's answer,
     // not ours, and a suite that required GNOME's exact list would fail on
-    // KDE for no reason. What is asserted is that the answer was usable.
-    assert!(
-        capabilities.body || !capabilities.body,
-        "the capability set decoded"
+    // KDE for no reason. `body`, `body-markup` and `persistence` are all
+    // optional in the freedesktop specification, so asserting any of them
+    // would be inventing a requirement.
+    //
+    // What *is* universal is how this sink is built, and that is what is
+    // asserted here. Three invariants, each one the implementation's own
+    // promise rather than the desktop's:
+
+    // 1. The capability query actually completed, and was parsed faithfully.
+    //
+    //    This is the one the old assertion was reaching for and could not
+    //    express. `DbusSink::connect` calls `GetCapabilities` with
+    //    `.unwrap_or_else(|_| Vec::new())`: a failed query is indistinguishable,
+    //    from inside the returned struct, from a server that advertises
+    //    nothing. So the answer is fetched again here, independently, and the
+    //    sink's parsed view is compared against it token by token.
+    //
+    //    Nothing about GNOME's list is required — only that whatever this
+    //    server says, the sink recorded exactly that. A sink that
+    //    substring-matched (`body` inside `body-markup`), that dropped the
+    //    query, or that invented a capability the server never sent, fails
+    //    here on every desktop.
+    let advertised = advertised_capabilities().await;
+    eprintln!("GetCapabilities (fresh query): {advertised:?}");
+    for (name, parsed) in [
+        ("body", capabilities.body),
+        ("body-markup", capabilities.body_markup),
+        ("persistence", capabilities.persistence),
+    ] {
+        assert_eq!(
+            parsed,
+            advertised.iter().any(|c| c == name),
+            "the sink's `{name}` disagrees with what this server advertises \
+             ({advertised:?}) — the capability set is parsed, not decorative"
+        );
+    }
+
+    // 2. `capabilities()` is a pure accessor over a set read once at connect
+    //    and never re-negotiated (see `NotificationSink::capabilities`). Two
+    //    calls must therefore be equal — a sink that re-queried the bus here
+    //    would make the role announcement depend on when it was asked.
+    assert_eq!(
+        capabilities,
+        sink.capabilities(),
+        "the capability set is read once at connect and never re-negotiated"
     );
+
+    // 3. `dismiss_reporting` is the single input to the `DISMISS_REPORTER`
+    //    role, and it is deliberately NOT read from `GetCapabilities`: the
+    //    specification has no capability string for "I will tell you why a
+    //    notification closed". What decides it is whether this process
+    //    actually holds a `NotificationClosed` subscription. So the honest
+    //    invariant is that the announced bit and the stream agree — and it
+    //    holds on GNOME, KDE, dunst and mako alike, because it is a property
+    //    of this code and not of the server.
+    //
+    //    This is also the assertion with teeth. Wiring `dismiss_reporting` to
+    //    an advertised string, or announcing the role while the match rule
+    //    failed to install, would clear a peer's notifications every time a
+    //    banner timed out on a screen nobody was looking at — and it would
+    //    fail here.
+    let closed = sink.closed_events();
+    assert_eq!(
+        capabilities.dismiss_reporting,
+        closed.is_some(),
+        "dismiss_reporting must reflect the close-signal subscription this \
+         process actually holds, not what the server advertises"
+    );
+
+    // And the stream is handed over, not cloned: one stream, one consumer.
+    // A second reader would split close signals between two halves of the
+    // capability and lose dismissals at random.
+    assert!(
+        sink.closed_events().is_none(),
+        "closed_events() must hand the receiver over exactly once"
+    );
+    drop(closed);
 }
 
 #[tokio::test]
