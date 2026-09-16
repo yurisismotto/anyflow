@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use anyflow_capability_battery::{BatteryCapability, BatteryState, UPowerReader};
+use anyflow_capability_battery::{BatteryCapability, BatteryState, LocalBattery, UPowerReader};
 use anyflow_capability_clipboard::{ClipboardCapability, ClipboardManager};
 use anyflow_capability_files::{
     Destination, FilesCapability, FilesConfig, StreamRole, TransferApproval, TransferManager,
@@ -115,11 +115,23 @@ async fn main() -> anyhow::Result<()> {
     // ---- capabilities -----------------------------------------------------
     let battery_state = Arc::new(BatteryState::default());
     let mut battery = BatteryCapability::new(Arc::clone(&battery_state));
-    if let Some(upower) = UPowerReader::connect().await {
-        tracing::info!("UPower available; this machine will report its own battery");
-        battery = battery.with_local_source(Arc::new(upower));
-    } else {
-        tracing::info!("no local battery source; battery.v1 is receive-only");
+    // `battery.v1` is registered either way. Registration is what lets this
+    // machine *receive* the phone's battery, and a machine with no battery of
+    // its own still wants that. What absence removes is the local *source* —
+    // so we send nothing rather than sending a fabricated 0%.
+    match UPowerReader::detect().await {
+        LocalBattery::Present(upower) => {
+            tracing::info!("UPower available; this machine will report its own battery");
+            battery = battery.with_local_source(Arc::new(upower));
+        }
+        LocalBattery::Absent => {
+            tracing::info!(
+                "UPower available; no system battery present; battery.v1 is receive-only"
+            );
+        }
+        LocalBattery::Unavailable => {
+            tracing::info!("no local battery source; battery.v1 is receive-only");
+        }
     }
 
     // files.v1. Note what is NOT here: an entry in `auto_grant`. Writing a

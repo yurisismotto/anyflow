@@ -25,7 +25,9 @@ use anyflow_core::Fingerprint;
 use anyflow_proto::v1::capabilities as pb;
 use prost::Message;
 
-pub use upower::UPowerReader;
+pub use upower::{
+    presence, reading_of, BatteryPresence, DisplayDevice, LocalBattery, UPowerReader,
+};
 
 pub const CAPABILITY_ID: &str = "battery.v1";
 
@@ -96,14 +98,23 @@ impl BatteryState {
 /// The capability handler.
 pub struct BatteryCapability {
     state: Arc<BatteryState>,
-    /// Reads this machine's own battery, if it has one. `None` on a desktop
-    /// or when the `upower` feature is off: we then only receive.
+    /// Reads this machine's own battery, if it has one. `None` on a machine
+    /// with no battery, or when the `upower` feature is off: we then only
+    /// receive. Receiving is unaffected — a battery-less desktop still shows
+    /// the phone's battery, which is the common case.
     local: Option<Arc<dyn LocalBatterySource>>,
 }
 
 /// Source of this device's own battery level.
+///
+/// A machine with no battery must not have one of these installed at all —
+/// that is how "this computer has no battery" is expressed, and it is why
+/// `read` returning `None` has to mean *send nothing* rather than *send
+/// zero*. Reporting 0% for a battery-less tower is the P2 defect this
+/// contract exists to prevent.
 #[async_trait::async_trait]
 pub trait LocalBatterySource: Send + Sync {
+    /// The current reading, or `None` when there is nothing truthful to say.
     async fn read(&self) -> Option<BatteryReading>;
 }
 
