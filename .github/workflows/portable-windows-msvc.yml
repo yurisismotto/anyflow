@@ -192,6 +192,7 @@ jobs:
       - name: Notification test files unchanged (classification guard)
         run: |
           $expected = @(
+            'convergence.rs',
             'dismiss.rs',
             'hardening.rs',
             'logging.rs',

@@ -180,16 +180,38 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Re-reads the permission state Android owns.
+     * Re-reads the permission state Android owns, and tells the capability
+     * when it has moved.
      *
      * Called on every resume, which covers the one path that matters: the
      * person went to Settings and came back. It is also the path that covers
      * a *revocation* made there, which is why it re-reads rather than only
      * checking when it expects a grant.
+     *
+     * # Why the second line exists
+     *
+     * Reading it into [notificationAccess] updates the *screen*. It does not
+     * update the capability, and the OS notification-access grant is one of
+     * the three independent inputs to whether this device can source at all —
+     * so a person who granted access in Android's settings and came back got a
+     * consent screen that said "Allowed" over a session that had not asked the
+     * system to bind the listener and had not re-announced its roles. Nothing
+     * mirrored until some *other* in-app write happened to call
+     * [NotificationSource.policyChanged] as a side effect, and picking an app
+     * was usually that write — which is why it looked like it worked.
+     *
+     * Only on a change: `policyChanged` is idempotent and announces nothing
+     * for an unchanged role set, but a resume is frequent and this keeps the
+     * event meaning what it says.
      */
     override fun onResume() {
         super.onResume()
-        notificationAccess = NotificationAccess.isGranted(this)
+        val granted = NotificationAccess.isGranted(this)
+        val changed = granted != notificationAccess
+        notificationAccess = granted
+        if (changed) {
+            app.notifications.policyChanged()
+        }
     }
 
     /** Collects every observable the UI draws from into one snapshot. */
