@@ -71,6 +71,28 @@ pub enum Request {
     /// Every transfer this daemon knows about in this run.
     Transfers,
 
+    /// Becomes this daemon's incoming-file approval provider.
+    ///
+    /// The connection then streams [`Event::FileOfferRequest`] — one per
+    /// offer a peer makes — and each is answered with a
+    /// [`Request::FileDecision`] on the *same* connection. It is the `Pair`
+    /// shape, for the same reason: the question comes from the daemon, the
+    /// answer has to get back to the question, and the window in which
+    /// answering is possible is exactly the life of this connection.
+    ///
+    /// Attaching does not change policy. It gives the daemon a way to ask;
+    /// with nobody attached the daemon still declines, which is the existing
+    /// headless behaviour and stays the default.
+    WatchFileOffers,
+
+    /// Answers one [`Event::FileOfferRequest`]. Only valid inside a
+    /// [`Request::WatchFileOffers`] stream.
+    ///
+    /// `transfer` is the full hex id from the event and is matched exactly,
+    /// never as a prefix: a consent decision names one transfer, and a prefix
+    /// would make which transfer it named depend on what else existed.
+    FileDecision { transfer: String, accept: bool },
+
     /// Cancels a transfer by id, or by an unambiguous id prefix.
     CancelTransfer { transfer: String },
 
@@ -198,6 +220,54 @@ pub enum Event {
     /// A transfer changed. Streamed by `Send` so the CLI can render progress
     /// without polling.
     TransferProgress(TransferReport),
+
+    /// This connection is now the approval provider, and the daemon will ask
+    /// it about incoming files.
+    ///
+    /// `unattended` says the daemon was started with
+    /// `--accept-files-without-asking` and will therefore accept without
+    /// asking anybody. A client is told rather than left waiting for prompts
+    /// that cannot arrive — and it is reported, never changed, from here.
+    FileApprovalReady { unattended: bool },
+
+    /// A peer is offering a file and a human has to decide.
+    ///
+    /// Everything needed to make the decision and nothing else. There is no
+    /// field here that could hold a byte of the file, the stream challenge,
+    /// or any part of the session's key material — this event is consent, not
+    /// content.
+    FileOfferRequest(FileOfferRequest),
+
+    /// An offer stopped being answerable before anyone answered it.
+    ///
+    /// The peer disconnected, the offer expired, or the pairing was revoked.
+    /// The prompt on screen must close; a decision sent afterwards is inert
+    /// on both sides, but leaving a dead question in front of a person and
+    /// letting them press Accept on it is its own defect.
+    FileOfferWithdrawn { transfer_id: String, reason: String },
+}
+
+/// One incoming file, as the human deciding about it is shown it.
+///
+/// The identity fields are the authenticated ones. `fingerprint` comes from
+/// the pinned TLS identity, not from anything the peer asserted, and
+/// `device_name` is the *locally stored* name for that fingerprint — a peer
+/// cannot rename itself into looking like another device on this screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileOfferRequest {
+    /// Full hex. This is what a [`Request::FileDecision`] must name.
+    pub transfer_id: String,
+    /// The trust store's name for this fingerprint, or a placeholder when the
+    /// device somehow has no record. Never the name in the offer.
+    pub device_name: String,
+    pub device_id: String,
+    pub fingerprint: String,
+    pub fingerprint_short: String,
+    /// Sanitized. The raw peer-supplied name never reaches a display.
+    pub filename: String,
+    pub size_bytes: u64,
+    /// Advisory and peer-supplied. Shown, never acted on.
+    pub mime_type: String,
 }
 
 /// One transfer, as the CLI sees it.

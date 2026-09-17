@@ -909,7 +909,7 @@ impl TransferManager {
         );
 
         // Asking a human must not block the session's message loop: it can
-        // take up to ACCEPT_TIMEOUT, during which pings, battery updates and
+        // take as long as the accept timeout allows, during which pings, battery updates and
         // — critically — an unpair must all keep working.
         let manager = Arc::clone(self);
         let request = IncomingOffer {
@@ -960,10 +960,26 @@ impl TransferManager {
         let id = request.transfer_id;
         let peer = request.peer;
 
-        let accepted =
-            tokio::time::timeout(ACCEPT_TIMEOUT, self.approval.confirm_receive(&request))
-                .await
-                .unwrap_or(false);
+        // Derived from the configured timeout rather than from the constant,
+        // so a host that lengthens `accept_timeout` does not find its prompts
+        // cut short by a bound it never set — and deliberately *later* than
+        // the reaper's deadline for the same state, so that an offer nobody
+        // answers is ended by the reaper, as `TimedOut`, rather than by this,
+        // as `DeclinedByUser`. See `APPROVAL_BACKSTOP_GRACE`.
+        //
+        // When the reaper wins, this future is not left hanging either: the
+        // host's approval provider is told the transfer ended and drops the
+        // question, and the late `false` that arrives here cannot re-end an
+        // already terminal transfer.
+        let backstop = self
+            .config
+            .read()
+            .await
+            .accept_timeout
+            .saturating_add(APPROVAL_BACKSTOP_GRACE);
+        let accepted = tokio::time::timeout(backstop, self.approval.confirm_receive(&request))
+            .await
+            .unwrap_or(false);
 
         if !accepted {
             self.fail(id, FailureReason::DeclinedByUser).await;
@@ -1026,7 +1042,16 @@ impl TransferManager {
         // The acceptor moves into Transferring *before* the challenge goes
         // out, so that by the time a dialer can act on it the stream will be
         // accepted. See FileReady in files_v1.proto.
+        //
+        // A refusal here is not a "should not happen": it is the stale-accept
+        // path. Asking a human takes human time, and the reaper may have
+        // ended this transfer while the prompt was on screen — the peer
+        // disconnected, the offer expired, the pairing was revoked. The state
+        // machine is what makes a late yes inert, and the temp file opened a
+        // few lines above has to go with it: `clean_up_temp` already ran, on
+        // a record that did not yet have a path to clean.
         if !self.transition(id, TransferState::Transferring, None).await {
+            self.clean_up_temp(id).await;
             return;
         }
 

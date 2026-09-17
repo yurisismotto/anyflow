@@ -41,6 +41,14 @@ pub struct DaemonState {
     /// composed without a notification sink gets — which is a normal state,
     /// not a broken one: the capability is simply not registered.
     pub notifications: Option<Arc<NotificationManager>>,
+    /// Where an incoming file offer goes to be put to a human.
+    ///
+    /// The *same* object `files.v1` was constructed with, held here so the
+    /// control server can attach a provider to it. It is not a second
+    /// approval path: the capability asks this and only this, and a daemon
+    /// composed without it simply has no way for a graphical client to
+    /// answer — which is the pre-existing headless behaviour, unchanged.
+    pub file_approval: Option<Arc<crate::approval::FileApproval>>,
 
     /// The single open pairing window, if any.
     pairing: Mutex<Option<PairingSession>>,
@@ -85,6 +93,7 @@ impl DaemonState {
             transfers: None,
             clipboard: None,
             notifications: None,
+            file_approval: None,
             pairing: Mutex::new(None),
             confirm_tx: Mutex::new(None),
             sessions: RwLock::new(HashMap::new()),
@@ -126,6 +135,20 @@ impl DaemonState {
     /// [`with_clipboard`]: Self::with_clipboard
     pub fn with_notifications(mut self, notifications: Arc<NotificationManager>) -> Self {
         self.notifications = Some(notifications);
+        self
+    }
+
+    /// Attaches the file-approval seam.
+    ///
+    /// Takes the very `Arc` that was handed to [`TransferManager::new`] as
+    /// its [`TransferApproval`]. Passing a *different* instance here would
+    /// compile and would be silently useless — the control server would
+    /// attach a provider to an object nothing ever asks — so the daemon
+    /// builds one and clones it.
+    ///
+    /// [`TransferApproval`]: anyflow_capability_files::TransferApproval
+    pub fn with_file_approval(mut self, approval: Arc<crate::approval::FileApproval>) -> Self {
+        self.file_approval = Some(approval);
         self
     }
 

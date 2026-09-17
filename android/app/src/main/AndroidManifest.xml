@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- LAN connection to the paired computer. -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -127,6 +128,45 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          The pairing QR scanner (ANDROID-UX-ORIENTATION-01).
+
+          This activity is not ours: it is `CaptureActivity` from
+          `com.journeyapps:zxing-android-embedded`, which `ScanContract`
+          launches. It is re-declared here for exactly one attribute.
+
+          The library's own manifest declares it with
+
+              android:screenOrientation="sensorLandscape"
+
+          and the manifest merger imported that verbatim, because AnyFlow had
+          nothing of its own to say about it. That is why the scanner forced
+          landscape on a phone held in portrait: nobody in this repository
+          ever asked for landscape, and nothing here could have been changed
+          to stop it — the declaration came from a dependency.
+
+          `unspecified` is the platform default and the only value that means
+          "not ours to decide": Android applies the user's own orientation
+          policy, so a device with rotation locked to portrait stays portrait
+          and one with auto-rotate on follows the sensor. It is deliberately
+          NOT `fullSensor` or `fullUser`, which the library's README suggests:
+          those force sensor rotation and would override a person's rotation
+          lock, which is the same defect pointing the other way.
+
+          `tools:replace` is required — without it the merger sees two
+          conflicting values for one attribute and fails the build. Every
+          other attribute the library sets (its theme, `clearTaskOnLaunch`,
+          `stateNotNeeded`, `windowSoftInputMode`) is inherited unchanged.
+
+          The second half of the fix is in `PairingScanner.options()`: the
+          library *also* pins the orientation at runtime unless it is told not
+          to. Fixing either alone leaves the scanner locked.
+        -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="unspecified"
+            tools:replace="android:screenOrientation" />
 
         <!--
           The Sharesheet entry point: Gallery / Files / Browser -> Share ->

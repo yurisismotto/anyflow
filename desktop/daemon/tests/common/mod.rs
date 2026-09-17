@@ -62,24 +62,55 @@ pub struct TestServer {
     /// Where this server stores received files.
     pub downloads: std::path::PathBuf,
     /// Steers the "does a human accept this file?" answer.
+    ///
+    /// Present on every server, but only *wired* to `files.v1` when the
+    /// server was started with [`ApprovalMode::Switch`]. A broker-backed
+    /// server leaves this at zero asks, which is itself the assertion that
+    /// the real seam is the one being exercised.
     pub approvals: Arc<ApprovalSwitch>,
+    /// The production approval seam, when this server was built with it.
+    ///
+    /// The very object `files.v1` asks and the control server attaches a
+    /// provider to — not a second one that happens to look the same.
+    pub file_approval: Option<Arc<FileApproval>>,
     _dir: tempfile::TempDir,
+}
+
+/// Which `TransferApproval` a [`TestServer`] is built with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalMode {
+    /// An in-test switch. What almost every `files.v1` test wants: the
+    /// question of *who* answers is not what those tests are about.
+    Switch,
+    /// The production [`FileApproval`], so a test drives the real path a
+    /// desktop UI drives — control socket, provider attachment and all.
+    Broker,
 }
 
 impl TestServer {
     /// A server on IPv4 loopback. The default for tests that do not care
     /// about address families.
     pub async fn start() -> Self {
-        Self::start_inner(false).await
+        Self::start_inner(false, ApprovalMode::Switch).await
+    }
+
+    /// A server whose `files.v1` asks the production approval seam.
+    ///
+    /// Nothing else differs. The trust store, the TLS, the reaper and the
+    /// transfer state machine are the ones that ship; only the thing that
+    /// answers "does a human accept this?" is swapped for the object a
+    /// desktop UI would attach to.
+    pub async fn start_with_approval_provider() -> Self {
+        Self::start_inner(false, ApprovalMode::Broker).await
     }
 
     /// A server bound the way the real daemon binds, so both address
     /// families are exercised where the host has them.
     pub async fn start_dual_stack() -> Self {
-        Self::start_inner(true).await
+        Self::start_inner(true, ApprovalMode::Switch).await
     }
 
-    async fn start_inner(dual_stack: bool) -> Self {
+    async fn start_inner(dual_stack: bool, approval_mode: ApprovalMode) -> Self {
         init_crypto();
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open(dir.path()).expect("store");
@@ -89,6 +120,17 @@ impl TestServer {
 
         let downloads = dir.path().join("downloads");
         let approvals = Arc::new(ApprovalSwitch::default());
+        let file_approval = match approval_mode {
+            ApprovalMode::Switch => None,
+            // `false`: never the unattended override. A test that wants that
+            // behaviour asks for it explicitly, and no test gets it by
+            // default — which is the same rule the daemon follows.
+            ApprovalMode::Broker => Some(Arc::new(FileApproval::new(false))),
+        };
+        let approval: Arc<dyn TransferApproval> = match &file_approval {
+            Some(broker) => Arc::clone(broker) as Arc<dyn TransferApproval>,
+            None => Arc::clone(&approvals) as Arc<dyn TransferApproval>,
+        };
         let transfers = TransferManager::new(
             StreamRole::Acceptor,
             fingerprint,
@@ -104,7 +146,7 @@ impl TestServer {
                 accept_timeout: Duration::from_secs(3),
                 stream_open_timeout: Duration::from_millis(700),
             },
-            Arc::clone(&approvals) as Arc<dyn TransferApproval>,
+            approval,
         );
 
         // A memory clipboard, never the machine's own: a test suite that
@@ -141,12 +183,14 @@ impl TestServer {
         let tls = anyflow_core::tls::server_config(store.identity()).expect("server config");
         let acceptor = TlsAcceptor::from(tls);
 
-        let state = Arc::new(
-            DaemonState::new(store, registry, Arc::clone(&battery))
-                .with_transfers(Arc::clone(&transfers))
-                .with_clipboard(Arc::clone(&clipboard))
-                .with_notifications(Arc::clone(&notifications)),
-        );
+        let mut state_builder = DaemonState::new(store, registry, Arc::clone(&battery))
+            .with_transfers(Arc::clone(&transfers))
+            .with_clipboard(Arc::clone(&clipboard))
+            .with_notifications(Arc::clone(&notifications));
+        if let Some(broker) = &file_approval {
+            state_builder = state_builder.with_file_approval(Arc::clone(broker));
+        }
+        let state = Arc::new(state_builder);
 
         // The real authorizer: the trust store, asked fresh every time. The
         // grant rules under test are the production ones.
@@ -202,6 +246,7 @@ impl TestServer {
             notification_lock,
             downloads,
             approvals,
+            file_approval,
             _dir: dir,
         }
     }
@@ -790,6 +835,7 @@ use anyflow_capability_notifications::backend::{
 use anyflow_capability_notifications::{
     NotificationAuthorizer, NotificationManager, NotificationPolicy, NotificationsCapability,
 };
+use anyflow_daemon::approval::FileApproval;
 
 fn is_partial(name: &str) -> bool {
     name.starts_with(".anyflow-") || name.ends_with(".part")

@@ -724,8 +724,13 @@ async fn send_file(
                 return Ok(());
             }
 
-            // Not part of a send stream.
-            Event::PairingReady { .. } | Event::ConfirmRequest { .. } => continue,
+            // Not part of a send stream. The file-approval events belong to
+            // a `watch_file_offers` stream and cannot arrive here.
+            Event::PairingReady { .. }
+            | Event::ConfirmRequest { .. }
+            | Event::FileApprovalReady { .. }
+            | Event::FileOfferRequest(_)
+            | Event::FileOfferWithdrawn { .. } => continue,
         }
     }
     Ok(())
@@ -779,7 +784,10 @@ async fn pair(stream: UnixStream, ttl: Option<u64>) -> anyhow::Result<()> {
             }
 
             // Not part of a pairing stream.
-            Event::TransferProgress(_) => continue,
+            Event::TransferProgress(_)
+            | Event::FileApprovalReady { .. }
+            | Event::FileOfferRequest(_)
+            | Event::FileOfferWithdrawn { .. } => continue,
 
             Event::Finished { status, detail } => {
                 match status.as_str() {

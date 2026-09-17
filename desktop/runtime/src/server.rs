@@ -15,9 +15,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::control::{
     BatteryReport, ClipboardFlag, ClipboardPeerReport, ClipboardStatusReport, ConnectionReport,
-    DeviceReport, DeviceState, Event, NotificationPeerReport, NotificationSetting,
-    NotificationsStatusReport, PendingClipReport, Request, Response, StatusReport, TransferReport,
-    BATTERY_STALE_AFTER_SECS,
+    DeviceReport, DeviceState, Event, FileOfferRequest, NotificationPeerReport,
+    NotificationSetting, NotificationsStatusReport, PendingClipReport, Request, Response,
+    StatusReport, TransferReport, BATTERY_STALE_AFTER_SECS,
 };
 use crate::state::DaemonState;
 
@@ -105,6 +105,18 @@ async fn serve_client<S: anyflow_control::transport::ControlStream>(
         }
         Request::Send { device, path } => {
             run_send_session(state, write, &device, &path).await?;
+        }
+        Request::WatchFileOffers => {
+            run_file_approval_session(state, lines, write).await?;
+        }
+        Request::FileDecision { .. } => {
+            send(
+                &mut write,
+                &Response::Error {
+                    message: "file_decision is only valid inside a watch_file_offers stream".into(),
+                },
+            )
+            .await?;
         }
         Request::ClipboardStatus => {
             let report = build_clipboard_status(&state).await;
@@ -895,6 +907,205 @@ async fn run_send_session(
     }
 
     Ok(())
+}
+
+/// Drives the incoming-file approval provider over one control connection.
+///
+/// This is the missing product surface from U2: an Android device offers a
+/// file, `files.v1` asks [`FileApproval`], `FileApproval` asks whoever is on
+/// the other end of this socket, and the answer comes back down it. The
+/// daemon depends on no toolkit to do it — a GTK window, a `anyflow` command
+/// and a test are all the same client from here.
+///
+/// The provider's attachment lives exactly as long as this connection. When
+/// it ends — the window closed, the process died, the socket broke — every
+/// question it was still being asked is dropped, which `files.v1` reads as a
+/// decline. There is no path through this function that produces an
+/// acceptance nobody sent.
+///
+/// [`FileApproval`]: crate::approval::FileApproval
+async fn run_file_approval_session(
+    state: Arc<DaemonState>,
+    mut lines: tokio::io::Lines<BufReader<impl tokio::io::AsyncRead + Unpin>>,
+    mut write: impl AsyncWrite + Unpin,
+) -> anyhow::Result<()> {
+    let (Some(approval), Some(transfers)) = (state.file_approval.clone(), state.transfers.clone())
+    else {
+        send(
+            &mut write,
+            &Response::Error {
+                message: "this agent has no incoming-file approval seam".into(),
+            },
+        )
+        .await?;
+        return Ok(());
+    };
+
+    // Subscribed *before* attaching, so that a transfer which ends between
+    // the two cannot slip through unwithdrawn.
+    let mut events = transfers.subscribe();
+    let (epoch, mut offers) = approval.attach();
+
+    send(
+        &mut write,
+        &Event::FileApprovalReady {
+            unattended: approval.unattended(),
+        },
+    )
+    .await?;
+
+    // Which offers this provider has been shown and not yet answered. Kept so
+    // a transfer that ends underneath a prompt produces exactly one
+    // withdrawal, for a prompt that is actually on screen.
+    let mut open: std::collections::BTreeSet<anyflow_capability_files::transfer::TransferId> =
+        std::collections::BTreeSet::new();
+
+    let outcome = loop {
+        tokio::select! {
+            // A peer made an offer and `files.v1` wants a human.
+            offer = offers.recv() => {
+                let Some(offer) = offer else {
+                    // The seam dropped this provider: it was replaced by a
+                    // newer one. Ending is right — the new session owns the
+                    // prompts now.
+                    break ("replaced", "another approval provider attached".to_string());
+                };
+
+                // The transfer may already have ended while the question was
+                // in flight — a disconnect, the reaper. Putting a dead
+                // question on screen is its own defect, so it is checked
+                // rather than assumed.
+                let live = transfers
+                    .snapshot_one(offer.transfer_id)
+                    .await
+                    .is_some_and(|s| !s.state.is_terminal());
+                if !live {
+                    approval.withdraw(offer.transfer_id);
+                    continue;
+                }
+
+                let request = file_offer_request(&state, &offer).await;
+                open.insert(offer.transfer_id);
+                send(&mut write, &Event::FileOfferRequest(request)).await?;
+            }
+
+            // The human answered — or hung up.
+            line = lines.next_line() => {
+                match line {
+                    Ok(None) | Err(_) => {
+                        break ("closed", "the approval provider disconnected".to_string());
+                    }
+                    Ok(Some(text)) => {
+                        if let Ok(Request::FileDecision { transfer, accept }) =
+                            serde_json::from_str::<Request>(&text)
+                        {
+                            apply_file_decision(&approval, &mut open, &transfer, accept);
+                        }
+                        // Anything else on this connection is ignored rather
+                        // than answered. A stray request must not be able to
+                        // stand in for a decision.
+                    }
+                }
+            }
+
+            // A transfer settled. If a prompt for it is open, it is now a
+            // question about something that no longer exists.
+            event = events.recv() => {
+                match event {
+                    Ok(anyflow_capability_files::TransferEvent(snapshot)) => {
+                        if snapshot.state.is_terminal() && open.remove(&snapshot.id) {
+                            approval.withdraw(snapshot.id);
+                            send(&mut write, &Event::FileOfferWithdrawn {
+                                transfer_id: snapshot.id.to_hex(),
+                                reason: snapshot
+                                    .failure
+                                    .map(|f| f.as_str().to_string())
+                                    .unwrap_or_else(|| snapshot.state.as_str().to_string()),
+                            }).await?;
+                        }
+                    }
+                    // Lagged: this provider fell behind a burst of progress
+                    // updates. Nothing that matters here is lost — a terminal
+                    // state is re-derivable, and a prompt left open is bounded
+                    // by the accept timeout either way.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break ("closed", "the transfer manager went away".to_string()),
+                }
+            }
+        }
+    };
+
+    // Detaching declines whatever is still pending. The epoch is what stops a
+    // session that was already displaced from unhooking its replacement.
+    approval.detach(epoch);
+    send(
+        &mut write,
+        &Event::Finished {
+            status: outcome.0.to_string(),
+            detail: outcome.1,
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+/// Applies one decision, and only to a prompt this provider actually has open.
+///
+/// The `open` check is not belt and braces over the seam's own keying: it is
+/// what stops a client from answering a question it was never asked, on a
+/// transfer it learned about from `anyflow transfers`.
+fn apply_file_decision(
+    approval: &crate::approval::FileApproval,
+    open: &mut std::collections::BTreeSet<anyflow_capability_files::transfer::TransferId>,
+    transfer: &str,
+    accept: bool,
+) {
+    // Exact, never a prefix. See `TransferId::from_hex`.
+    let Some(id) = anyflow_capability_files::transfer::TransferId::from_hex(transfer) else {
+        return;
+    };
+    if !open.remove(&id) {
+        return;
+    }
+    let decision = approval.decide(id, accept);
+    tracing::debug!(
+        transfer = %id,
+        accept,
+        answered = matches!(decision, crate::approval::Decision::Answered),
+        "an incoming file offer was answered by the approval provider"
+    );
+}
+
+/// Describes an offer to the human who has to decide about it.
+///
+/// The device name comes from the **trust store**, keyed by the authenticated
+/// fingerprint — never from the offer. A peer that renamed itself to match
+/// another of your devices changes nothing about what this says.
+async fn file_offer_request(
+    state: &Arc<DaemonState>,
+    offer: &anyflow_capability_files::IncomingOffer,
+) -> FileOfferRequest {
+    let device_name = {
+        let store = state.store.lock().await;
+        store
+            .trusted_peer(&offer.peer)
+            .map(|p| p.device_name.clone())
+            // A peer with no record cannot reach `files.v1` at all, so this is
+            // unreachable in practice. It says so rather than inventing a
+            // plausible name.
+            .unwrap_or_else(|| "an unknown device".to_string())
+    };
+
+    FileOfferRequest {
+        transfer_id: offer.transfer_id.to_hex(),
+        device_name,
+        device_id: offer.peer_device_id.clone(),
+        fingerprint: offer.peer.to_hex(),
+        fingerprint_short: offer.peer.to_display_short(),
+        filename: offer.filename.clone(),
+        size_bytes: offer.size_bytes,
+        mime_type: offer.mime_type.clone(),
+    }
 }
 
 /// Drives an interactive pairing session over one control connection.

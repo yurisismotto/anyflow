@@ -27,6 +27,7 @@
 /// tests keep one import path for them.
 pub use anyflow_control as control;
 
+pub mod approval;
 pub mod listener;
 pub mod mdns;
 pub mod renegotiate;
