@@ -3,6 +3,13 @@
   The brand artwork, compiled into the binary so it cannot go missing when the
   app runs from anywhere other than the source tree.
 
+  The `icons/` tree is an icon-theme directory, not a loose file: `install_icons`
+  in src/lib.rs adds this prefix to the default `GtkIconTheme`, so the
+  application icon resolves by *name* — `io.github.yurisismotto.anyflow` — in
+  the window list and the switcher, with or without anything installed under
+  /usr/share/icons. The file in it is derived from the canonical
+  docs/design/assets/app-icon.svg by build.rs rather than committed twice.
+
   Glyph icons are NOT here: the desktop draws them from the platform's own
   Adwaita symbolic set. GTK recolours a symbolic icon by forcing a fill, which
   turns a stroke-drawn glyph into a solid blob — and accent tinting (status
@@ -12,9 +19,11 @@
 -->
 <gresources>
   <gresource prefix="/io/github/yurisismotto/anyflow">
-    <file preprocess="xml-stripblanks">icon-flowing-ribbon.svg</file>
-    <file preprocess="xml-stripblanks">logo-flowing-a.svg</file>
+    <file preprocess="xml-stripblanks">logo-flow-a.svg</file>
+    <file preprocess="xml-stripblanks">logo-flow-a-mono.svg</file>
+    <file preprocess="xml-stripblanks">logo-flow-a-small.svg</file>
     <file preprocess="xml-stripblanks">ribbon-connection.svg</file>
     <file preprocess="xml-stripblanks">app-icon.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/apps/io.github.yurisismotto.anyflow.svg</file>
   </gresource>
 </gresources>

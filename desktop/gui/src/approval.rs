@@ -55,11 +55,24 @@ use crate::widgets::{self, SPACING_SM, SPACING_XS};
 const DECLINE: &str = "decline";
 const ACCEPT: &str = "accept";
 
-/// Attaches this window to the daemon as its incoming-file approval provider.
+/// Attaches this application to the daemon as its incoming-file approval
+/// provider.
 ///
-/// The returned handle must be kept alive for as long as the window: dropping
-/// it detaches, and a detached daemon goes back to declining every file.
-pub fn install(window: &adw::ApplicationWindow) -> Rc<client::ApprovalHandle> {
+/// The returned handle must be kept alive for as long as the application:
+/// dropping it detaches, and a detached daemon goes back to declining every
+/// file.
+///
+/// `parent` is asked, each time an offer arrives, which window the question
+/// should appear over. It is a closure rather than a window because the
+/// attachment outlives any one of them: AnyFlow has a Quick Panel and a
+/// Settings window, either may be closed, and closing one must not stop the
+/// machine being able to accept a file. When it answers `None` there is no
+/// window to ask over and the offer is left unanswered — which the daemon
+/// resolves as a decline, the safe direction.
+pub fn install<P>(parent: P) -> Rc<client::ApprovalHandle>
+where
+    P: Fn() -> Option<gtk::Window> + 'static,
+{
     // One dialog per pending offer, keyed by the full transfer id. Keyed
     // rather than counted because an answer, a withdrawal and a close all
     // name one specific offer, and "the dialog on top" is not that.
@@ -75,7 +88,6 @@ pub fn install(window: &adw::ApplicationWindow) -> Rc<client::ApprovalHandle> {
     let slot: Rc<RefCell<Weak<client::ApprovalHandle>>> = Rc::new(RefCell::new(Weak::new()));
 
     let created = {
-        let window = window.clone();
         let open = open.clone();
         let handle = slot.clone();
         Rc::new(client::watch_file_offers(move |update| match update {
@@ -93,7 +105,9 @@ pub fn install(window: &adw::ApplicationWindow) -> Rc<client::ApprovalHandle> {
             }
             ApprovalUpdate::Offer(request) => {
                 let handle = handle.borrow().clone();
-                present(&window, &open, &handle, &request);
+                if let Some(window) = parent() {
+                    present(&window, &open, &handle, &request);
+                }
             }
             ApprovalUpdate::Withdrawn(transfer_id) => {
                 // The offer expired, the peer disconnected, or the pairing
@@ -124,7 +138,7 @@ pub fn install(window: &adw::ApplicationWindow) -> Rc<client::ApprovalHandle> {
 /// delivered it alive for ever. An upgrade that fails means the window has
 /// gone, and a decision with nowhere to go is a decline by default.
 fn present(
-    window: &adw::ApplicationWindow,
+    window: &gtk::Window,
     open: &Rc<RefCell<HashMap<String, adw::AlertDialog>>>,
     handle: &Weak<client::ApprovalHandle>,
     request: &FileOfferRequest,

@@ -1,0 +1,41 @@
+[Desktop Entry]
+Type=Application
+Name=AnyFlow
+GenericName=Device Continuity
+Comment=One flow. Any device. Send files, clipboard and notifications between this computer and your phone, over your own network.
+# The application id, the GtkApplication id, the D-Bus name and the icon name
+# are deliberately the same string. GNOME and KDE both match a window to its
+# launcher by that id, and an icon theme is searched by it — so a mismatch
+# here is what makes a running window show a grey fallback square.
+Icon=io.github.yurisismotto.anyflow
+Exec=anyflow-gui
+# GApplication registers on the session bus under this name and exports its
+# action group there. Declaring it lets the shell activate an already-running
+# AnyFlow over D-Bus instead of starting a second process — and it is the same
+# bus name a later desktop-shell integration would use to raise the panel.
+DBusActivatable=true
+Terminal=false
+# The X11 half of the same association, and it is *not* the app id. GTK sets a
+# Wayland app_id from the GApplication id, but an X11 WM_CLASS from the program
+# name — measured on this build under Xwayland:
+#
+#     WM_CLASS(STRING) = "anyflow-gui", "anyflow-gui"
+#
+# so a shell matching an X11 window would look for `anyflow-gui.desktop` and
+# find nothing. This is the key that exists to say "that window is this
+# launcher" when the two names differ.
+StartupWMClass=anyflow-gui
+Categories=Network;FileTransfer;
+Keywords=phone;android;clipboard;transfer;sync;continuity;notifications;
+StartupNotify=true
+SingleMainWindow=false
+
+# The Quick Panel, as a launcher shortcut. Right-click the icon in the dash,
+# or search for it. This is the same activation seam as `app.quick-panel` and
+# `anyflow-gui --quick-panel`; a future tray item is a third caller of it and
+# needs nothing new.
+Actions=quick-panel;
+
+[Desktop Action quick-panel]
+Name=Quick Panel
+Exec=anyflow-gui --quick-panel

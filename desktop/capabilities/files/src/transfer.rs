@@ -279,6 +279,55 @@ impl FailureReason {
     pub fn is_cancellation(self) -> bool {
         matches!(self, Self::CancelledByUser | Self::DeclinedByUser)
     }
+
+    /// The stable token a local front end may branch on.
+    ///
+    /// [`as_str`] is a sentence for a person to read, and rewording one is a
+    /// copy change that must stay free. A front end that needs to tell
+    /// *declined* from *timed out* — to choose its own calm wording for each —
+    /// cannot get that from prose without making every reword a silent
+    /// behaviour change somewhere else. This is the machine-readable half, and
+    /// the two are deliberately separate.
+    ///
+    /// The tokens are the names in
+    /// [`anyflow_control::transfer_failure`](../../../control/src/lib.rs); the
+    /// correspondence is pinned by a test in `desktop/runtime`, which is the
+    /// one crate that can see both.
+    ///
+    /// [`as_str`]: Self::as_str
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::DeclinedByUser => "declined_by_user",
+            Self::NotAuthorized => "not_authorized",
+            Self::TooManyTransfers => "too_many_transfers",
+            Self::TooLarge => "too_large",
+            Self::BadMetadata => "bad_metadata",
+            Self::TimedOut => "timed_out",
+            Self::Integrity => "integrity",
+            Self::Storage => "storage",
+            Self::Transport => "transport",
+            Self::CancelledByUser => "cancelled_by_user",
+            Self::Revoked => "revoked",
+            Self::UnknownTransfer => "unknown_transfer",
+        }
+    }
+
+    /// Every variant, so a new one cannot be added without the tests that
+    /// enumerate them noticing.
+    pub const ALL: [FailureReason; 12] = [
+        Self::DeclinedByUser,
+        Self::NotAuthorized,
+        Self::TooManyTransfers,
+        Self::TooLarge,
+        Self::BadMetadata,
+        Self::TimedOut,
+        Self::Integrity,
+        Self::Storage,
+        Self::Transport,
+        Self::CancelledByUser,
+        Self::Revoked,
+        Self::UnknownTransfer,
+    ];
 }
 
 impl fmt::Display for FailureReason {
@@ -290,6 +339,26 @@ impl fmt::Display for FailureReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A code is a token, not a sentence: no spaces, and distinct per
+    /// variant. A front end branches on these, so a collision would silently
+    /// merge two outcomes into one label.
+    #[test]
+    fn every_failure_reason_has_a_distinct_machine_code() {
+        let mut seen = std::collections::BTreeSet::new();
+        for reason in FailureReason::ALL {
+            let code = reason.code();
+            assert!(
+                !code.is_empty() && !code.contains(' ') && code == code.to_ascii_lowercase(),
+                "{code:?} is not a token"
+            );
+            assert!(seen.insert(code), "two reasons share the code {code:?}");
+            // The prose and the token are separate on purpose: rewording the
+            // sentence must not change what anything branches on.
+            assert_ne!(code, reason.as_str(), "the token is just the prose");
+        }
+        assert_eq!(seen.len(), FailureReason::ALL.len());
+    }
 
     #[test]
     fn a_transfer_id_is_exactly_sixteen_bytes() {

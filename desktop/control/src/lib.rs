@@ -280,6 +280,20 @@ pub struct FileOfferRequest {
 pub struct TransferReport {
     /// Full hex. Local only: the truncated form is what reaches a log.
     pub transfer_id: String,
+    /// Creation order within the daemon's run: lower is older.
+    ///
+    /// The daemon holds transfers in a map keyed by transfer id, and a
+    /// transfer id is 128 random bits, so the order this list arrives in is
+    /// the order of a random number. A front end that shows "the most recent
+    /// first" needs to be told which one that is rather than inferring it
+    /// from position — the same rule that makes a destination a fingerprint
+    /// and never a list index.
+    ///
+    /// `#[serde(default)]` for the reason the clipboard report's fields are:
+    /// a version skew between `anyflow` and the agent must not fail to parse
+    /// a whole status report over one display field.
+    #[serde(default)]
+    pub seq: u64,
     pub device_name: String,
     pub fingerprint_short: String,
     pub direction: String,
@@ -291,9 +305,106 @@ pub struct TransferReport {
     /// `None` for a zero-byte file, where a percentage means nothing.
     pub percentage: Option<u8>,
     pub state: String,
-    /// Set once the transfer is not going to complete.
+    /// Set once the transfer is not going to complete. A sentence, for a
+    /// person to read — see [`failure_code`] for the machine-readable half.
+    ///
+    /// [`failure_code`]: Self::failure_code
     pub failure: Option<String>,
+    /// The same failure, as a stable token from [`transfer_failure`].
+    ///
+    /// Present alongside the prose rather than instead of it because the two
+    /// have different jobs and different stability. [`failure`] is copy: it
+    /// is shown verbatim by the CLI and by the Settings transfer list, and
+    /// rewording it must stay free. This is what a front end *branches* on
+    /// when it wants to tell "declined" from "timed out" in order to choose
+    /// its own wording — pattern-matching the prose would turn every reword
+    /// into a silent behaviour change in another crate.
+    ///
+    /// [`failure`]: Self::failure
+    #[serde(default)]
+    pub failure_code: Option<String>,
     pub stored_at: Option<String>,
+}
+
+/// The tokens [`TransferReport::failure_code`] can carry.
+///
+/// One per `FailureReason` in `anyflow-capability-files`, which owns the enum
+/// and produces these from `FailureReason::code()`. They are named here
+/// because this crate is the contract between the agent and its front ends,
+/// and a front end may not depend on the capability crate to learn them. The
+/// correspondence is pinned by a test in `desktop/runtime`, the one crate
+/// that can see both halves.
+pub mod transfer_failure {
+    pub const DECLINED_BY_USER: &str = "declined_by_user";
+    pub const NOT_AUTHORIZED: &str = "not_authorized";
+    pub const TOO_MANY_TRANSFERS: &str = "too_many_transfers";
+    pub const TOO_LARGE: &str = "too_large";
+    pub const BAD_METADATA: &str = "bad_metadata";
+    pub const TIMED_OUT: &str = "timed_out";
+    pub const INTEGRITY: &str = "integrity";
+    pub const STORAGE: &str = "storage";
+    pub const TRANSPORT: &str = "transport";
+    pub const CANCELLED_BY_USER: &str = "cancelled_by_user";
+    pub const REVOKED: &str = "revoked";
+    pub const UNKNOWN_TRANSFER: &str = "unknown_transfer";
+
+    /// Every token, for an exhaustiveness check.
+    pub const ALL: [&str; 12] = [
+        DECLINED_BY_USER,
+        NOT_AUTHORIZED,
+        TOO_MANY_TRANSFERS,
+        TOO_LARGE,
+        BAD_METADATA,
+        TIMED_OUT,
+        INTEGRITY,
+        STORAGE,
+        TRANSPORT,
+        CANCELLED_BY_USER,
+        REVOKED,
+        UNKNOWN_TRANSFER,
+    ];
+}
+
+/// The values [`TransferReport::state`] can carry, and which of them are
+/// terminal.
+///
+/// Named here for the same reason as [`transfer_failure`]: a front end deciding
+/// whether a transfer is still moving must not have to keep its own guess at
+/// the state machine's vocabulary. The set is exactly
+/// `anyflow-capability-files`' `TransferState`, and `desktop/runtime` pins the
+/// correspondence.
+pub mod transfer_state {
+    pub const OFFERED: &str = "offered";
+    pub const WAITING_ACCEPT: &str = "waiting_accept";
+    pub const TRANSFERRING: &str = "transferring";
+    pub const VERIFYING: &str = "verifying";
+    pub const COMPLETED: &str = "completed";
+    pub const FAILED: &str = "failed";
+    pub const CANCELLED: &str = "cancelled";
+
+    /// The three states nothing leaves.
+    pub const TERMINAL: [&str; 3] = [COMPLETED, FAILED, CANCELLED];
+
+    /// Whether this state is one nothing leaves.
+    ///
+    /// An unknown state — a newer agent than this front end — counts as
+    /// *not* terminal, which is the safe direction: a transfer wrongly
+    /// believed to be still moving is shown as in flight and corrects itself
+    /// on the next poll, whereas one wrongly believed finished would be
+    /// reported as an outcome that never happened.
+    pub fn is_terminal(state: &str) -> bool {
+        TERMINAL.contains(&state)
+    }
+}
+
+/// The values [`TransferReport::direction`] can carry.
+///
+/// From the point of view of *this* device, and the only truthful source of a
+/// transfer's direction: not the filename, and not which window the person
+/// happened to press a button in.
+pub mod transfer_direction {
+    pub const SENDING: &str = "sending";
+    pub const RECEIVING: &str = "receiving";
 }
 
 /// What `clipboard.v1` can actually do here, and for whom.

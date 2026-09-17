@@ -580,7 +580,7 @@ pub(in crate::views) mod tests {
             ..DaemonState::default()
         }));
         let stack = gtk::Stack::new();
-        let pages = super::Pages::new(&stack, state.clone());
+        let pages = super::Pages::new(&stack, state.clone(), crate::views::test_selection());
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let borrowed = state.borrow();
         render(&container, &borrowed, &pages);

@@ -1,9 +1,10 @@
 //! The dashboard: what is here, and what can be done with it now.
 
 use adw::prelude::*;
-use anyflow_control::{DeviceReport, Request, Response};
+use anyflow_control::{DeviceReport, Response};
 
 use super::Pages;
+use crate::panel::model::{self, Action, PanelModel};
 use crate::widgets::{self, Status, SPACING_MD, SPACING_SM, SPACING_XS};
 use crate::{client, DaemonState};
 
@@ -66,20 +67,26 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
         return;
     }
 
+    // The same model the Quick Panel draws, from the same state and the same
+    // stored choice. Building it here rather than re-deriving a destination
+    // is the point: there is one answer to "where does Send go", and both
+    // surfaces read it.
+    let panel = PanelModel::build(state, pages.selection.current().as_deref());
+
     for device in &devices {
-        container.append(&device_card(device));
+        container.append(&device_card(device, &panel, pages));
     }
 
     // --- activity and quick actions --------------------------------------
     let columns = widgets::row(SPACING_SM);
     columns.set_homogeneous(true);
     columns.append(&activity_card(state));
-    columns.append(&quick_actions_card(&devices));
+    columns.append(&quick_actions_card(&panel));
     container.append(&columns);
 }
 
 /// One device, as the reference draws it.
-fn device_card(device: &DeviceReport) -> gtk::Box {
+fn device_card(device: &DeviceReport, panel: &PanelModel, pages: &Pages) -> gtk::Box {
     let card = widgets::card();
 
     let top = widgets::row(SPACING_SM);
@@ -109,24 +116,57 @@ fn device_card(device: &DeviceReport) -> gtk::Box {
     // Battery only while a session is live: telemetry is dropped when a peer
     // disconnects, so an offline device never carries a number here.
     if let Some(battery) = &device.battery {
-        let panel = widgets::column(2);
-        panel.add_css_class("af-card-sunken");
-        panel.set_valign(gtk::Align::Start);
-        panel.append(&widgets::caption("Battery"));
+        let gauge = widgets::column(2);
+        gauge.add_css_class("af-card-sunken");
+        gauge.set_valign(gtk::Align::Start);
+        gauge.append(&widgets::caption("Battery"));
         let pct = widgets::subtitle(&format!("{}%", battery.percentage));
-        panel.append(&pct);
+        gauge.append(&pct);
         let bar = widgets::progress(Some(battery.percentage as f64 / 100.0));
         bar.set_size_request(120, -1);
-        panel.append(&bar);
+        gauge.append(&bar);
         // A reading old enough to be history is labelled as such rather than
         // shown as though it were current.
-        panel.append(&widgets::caption(&if battery.stale {
+        gauge.append(&widgets::caption(&if battery.stale {
             format!("last known · {}s ago", battery.age_secs)
         } else {
             battery.charging_state.replace('_', " ")
         }));
-        top.append(&panel);
+        top.append(&gauge);
     }
+    // Which device the quick actions mean. Stated on the card, and settable
+    // from it, because this is the screen where a person is looking at their
+    // devices — and because a Send button that does not say where it sends is
+    // how U2 P1 happened.
+    let selected = panel
+        .peers
+        .iter()
+        .find(|p| p.fingerprint.eq_ignore_ascii_case(&device.fingerprint))
+        .is_some_and(|p| p.selected);
+    let choice = widgets::row(SPACING_XS);
+    choice.set_valign(gtk::Align::Center);
+    if selected {
+        let icon = gtk::Image::from_icon_name("object-select-symbolic");
+        icon.set_pixel_size(16);
+        choice.append(&icon);
+        let label = widgets::caption("Selected for quick actions");
+        choice.append(&label);
+        choice.set_accessible_role(gtk::AccessibleRole::Group);
+        choice.update_property(&[gtk::accessible::Property::Label(
+            "Selected for quick actions",
+        )]);
+    } else {
+        let use_this = widgets::secondary_button("Use this device", None);
+        use_this.update_property(&[gtk::accessible::Property::Label(&format!(
+            "Use {} for quick actions",
+            device.device_name
+        ))]);
+        let fingerprint = device.fingerprint.clone();
+        let pages = pages.clone();
+        use_this.connect_clicked(move |_| pages.choose_peer(&fingerprint));
+        choice.append(&use_this);
+    }
+    top.append(&choice);
     card.append(&top);
 
     card.append(&widgets::separator());
@@ -255,73 +295,68 @@ fn activity_card(state: &DaemonState) -> gtk::Box {
     card
 }
 
-/// Only actions the daemon can actually perform.
-fn quick_actions_card(devices: &[&DeviceReport]) -> gtk::Box {
+/// Only actions the daemon can actually perform, aimed where the application
+/// says they are aimed.
+///
+/// This used to pick a destination of its own — the first connected device
+/// that happened to hold `files.v1` — which is list position with a filter in
+/// front of it, and the trust store's order is not stable. The destination is
+/// now [`PanelModel::send_file`], the same value the Quick Panel's button
+/// carries, resolved from the fingerprint the person chose.
+fn quick_actions_card(panel: &PanelModel) -> gtk::Box {
     let card = widgets::card();
     card.append(&widgets::section_label("Quick actions"));
 
-    let connected: Vec<&DeviceReport> = devices.iter().copied().filter(|d| d.connected).collect();
-    let target = connected
-        .iter()
-        .find(|d| d.granted_capabilities.iter().any(|c| c == "files.v1"))
-        .copied();
-
     let send = widgets::secondary_button("Send a file…", Some("document-send-symbolic"));
-    send.set_sensitive(target.is_some());
-    if let Some(device) = target {
-        let device_id = device.device_id.clone();
-        let name = device.device_name.clone();
-        send.connect_clicked(move |button| {
-            choose_and_send_file(button, device_id.clone(), name.clone());
-        });
-    } else {
-        send.set_tooltip_text(Some(
-            "Connect a device and grant it files.v1 to send a file.",
-        ));
+    send.set_sensitive(panel.send_file.is_ready());
+    match &panel.send_file {
+        Action::Ready { peer_name, .. } => {
+            let text = format!("Send a file to {peer_name}");
+            send.set_tooltip_text(Some(&text));
+            send.update_property(&[gtk::accessible::Property::Label(&text)]);
+            let action = panel.send_file.clone();
+            send.connect_clicked(move |button| choose_and_send_file(button, &action));
+        }
+        Action::Blocked { reason } => {
+            send.set_tooltip_text(Some(reason));
+            send.update_property(&[
+                gtk::accessible::Property::Label("Send a file"),
+                gtk::accessible::Property::Description(reason),
+            ]);
+        }
     }
     card.append(&send);
 
-    if let Some(device) = target {
-        card.append(&widgets::caption(&format!(
-            "Sends to {}",
-            device.device_name
-        )));
-    } else if connected.is_empty() {
-        card.append(&widgets::caption("No device is connected right now."));
-    } else {
-        card.append(&widgets::caption(
-            "No connected device has files.v1 granted.",
-        ));
-    }
+    card.append(&widgets::caption(&match &panel.send_file {
+        Action::Ready { peer_name, .. } => format!("Sends to {peer_name}"),
+        Action::Blocked { reason } => reason.clone(),
+    }));
     card
 }
 
-fn choose_and_send_file(button: &gtk::Button, device_id: String, device_name: String) {
+fn choose_and_send_file(button: &gtk::Button, action: &Action) {
     let window = button.root().and_downcast::<gtk::Window>();
     let dialog = gtk::FileDialog::builder().title("Send a file").build();
+    let action = action.clone();
     dialog.open(
         window.as_ref(),
         gtk::gio::Cancellable::NONE,
         move |result| {
             let Ok(file) = result else { return };
             let Some(path) = file.path() else { return };
-            let path = path.to_string_lossy().into_owned();
-            client::send(
-                Request::Send {
-                    device: device_id,
-                    path,
-                },
-                move |reply| {
-                    // The daemon streams transfer events on this connection; the
-                    // dashboard picks the transfer up on its next refresh, so
-                    // only an outright refusal needs reporting here.
-                    if let Ok(Response::Error { message }) = reply {
-                        eprintln!(
-                            "anyflow-gui: could not offer the file to {device_name}: {message}"
-                        );
-                    }
-                },
-            );
+            let Some(request) =
+                model::send_file_request(&action, path.to_string_lossy().into_owned())
+            else {
+                return;
+            };
+            client::send(request, move |reply| {
+                // The daemon streams transfer events on this connection; the
+                // dashboard picks the transfer up on its next refresh, so only an
+                // outright refusal needs reporting here.
+                if let Ok(Response::Error { message }) = reply {
+                    eprintln!("anyflow-gui: could not offer the file: {message}");
+                }
+            });
         },
     );
 }
