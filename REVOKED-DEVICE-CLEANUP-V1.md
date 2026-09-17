@@ -1081,3 +1081,124 @@ PIN-locked tablet, and a working pairing I declined to break unasked — not a
 defect and not a weakened invariant. The same recovery path is certified end to
 end on real hardware on the desktop, and its Android rules are pinned
 headlessly.
+
+---
+
+## 28. PR #34 CI follow-up
+
+Two CI failures on PR #34, fixed here. Neither was a product defect, and
+**nothing in §1–§27 changed** — no production code, no security invariant, no
+physical evidence.
+
+### Android — `:app:compileDebugAndroidTestKotlin`
+
+**What passed already.** `:app:assembleDebug` and `:fixture:assembleDebug` were
+green. The application builds.
+
+**Root cause, and it is mine.** The instrumented source set still referenced the
+pre-sprint API. This sprint deliberately did not *run*
+`connectedDebugAndroidTest` — it uninstalls the app and would have destroyed the
+tablet's pairing and the §20 evidence — but I wrongly let that decision stand in
+for compiling it too. `assembleDebugAndroidTest` compiles instrumented tests
+**without installing or running anything on the tablet**, so there was never a
+reason to skip it. It is now part of the local gate list.
+
+**No hard-delete API was restored.** `TrustStore.removePeer` stays gone. Every
+call site was moved to the real lifecycle — `revokePeer` then `hideRevokedPeer`
+— which is what those tests actually needed: a peer that holds no grant, no
+policy and no row.
+
+| File | Change |
+| --- | --- |
+| `ClipboardPersistenceTest.kt` | Two cleanup sites moved to a shared `cleanUp()` helper that revokes and then removes from the list. `a_forgotten_computer_leaves_no_clipboard_policy_behind` renamed to `revoking_a_computer_scrubs_its_clipboard_policy_and_the_tombstone_keeps_it_denied` and re-aimed at the real rule. |
+| `NotificationHardwareGateTest.kt` | `tearDown` revokes and then removes the synthetic `0x7e` peer. |
+| `NotificationUiFixtures.kt` | `state()` gained the real `listedPeers`; `Recorder.actions()` replaced `onForget` with `onRevoke` and `onRemoveFromList`. |
+
+The renamed clipboard test is a **stronger** claim than the one it replaces.
+The old one asserted "the policy is gone because the whole record is gone",
+which says nothing about a record that stays. It now asserts that revoking
+*scrubs* the grants and the clipboard policy from the record itself — read back
+through `peerRecord`, from a freshly opened store, so the assertion is against
+the file — and that the tombstone keeps answering `DENIED` afterwards. That is
+the invariant that matters now precisely *because* the record survives: a stale
+`autoReceive` on a revoked peer is consent waiting to be resurrected by a
+re-pair.
+
+`NotificationUiFixtures.state()` needed `listedPeers` to be a **real value**,
+not an empty placeholder. `MainUiState.peerByHex` now resolves against the
+listed set, so an empty list would have handed every consent screen a null peer
+and rendered "This device is no longer paired" instead of the thing under test —
+a compile fix that silently voided the tests. It defaults to the same single
+trusted peer as `peers`, with a parameter for a future revoked-row test.
+
+The two `Recorder` lambdas **record** rather than no-op. No consent screen
+should ever ask to revoke a computer, and a recorder is what lets a test say so;
+an empty lambda would hide it.
+
+**The two "Cannot infer type for parameter" errors were cascading**, as
+suspected — not a separate defect. Both failing tests are
+`fun … = runBlocking { … }` whose block *ended* on a `store.removePeer(peer)`
+call; with that reference unresolved Kotlin could not infer the lambda's return
+type. Both disappeared once the API calls were corrected, with no separate fix.
+That also explains why the reported line numbers were 57 and 141 and not 118 —
+the middle test ends on an `assertEquals`, so its block type was still
+inferable.
+
+**Result:** `:app:assembleDebugAndroidTest` → BUILD SUCCESSFUL.
+
+### Windows MSVC — the classification guard
+
+**What passed already.** `cargo check` and `cargo build`
+`--locked --no-default-features --target x86_64-pc-windows-msvc` both completed
+for the full portable package set. This was **not** a portability regression.
+
+The job stopped at *"Core test files unchanged (guard for the exclusion
+below)"*, because `desktop/core/tests/` gained `revoked_tombstone.rs` and the
+guard requires every new core test target to be classified deliberately. That
+is the guard doing exactly its job.
+
+**Classification: unix-fs adapter.** Established by inspection *and* measurement
+rather than assumed:
+
+* every case in the file goes through `Store::open(tempdir)`, and several read
+  and rewrite `state.json` directly to exercise schema migration, the
+  hidden-implies-revoked fail-closed rule and survival across a restart;
+* `Store::open` is `#[cfg(feature = "unix-fs")]` (`core/src/store.rs`);
+* compiling it with the feature off fails with
+  `E0599: no associated function or constant named 'open' found for struct
+  anyflow_core::store::Store` — run locally to confirm, not inferred.
+
+So it belongs beside `identity_and_store` and `identity_states`, and **not** in
+the portable `--no-default-features` test set. The portable half of this
+feature — what a tombstone does to admission — lives in `anyflow-daemon`'s
+`revoked_cleanup` suite, which is outside this job's crate set in any case.
+
+**Workflow change** (`.github/workflows/portable-windows-msvc.yml`), one step,
+nothing weakened:
+
+1. `'revoked_tombstone.rs'` added to the explicit `$expected` core test-file
+   guard;
+2. the comment above it corrected from "`anyflow-core` has **two**" to
+   "**three**", naming `identity_and_store`, `identity_states` and
+   `revoked_tombstone`;
+3. the reason recorded inline, including the measured `E0599`;
+4. `revoked_tombstone` **not** added to the portable
+   `cargo test --no-run --no-default-features` list;
+5. the guard itself untouched — no wildcard, no skip, no relaxation.
+
+**Honest limit:** a local Fedora run proves nothing about the MSVC runner. The
+change here is a *classification*, and the Windows job remains the certification
+source; it has to go green after push before this is settled.
+
+### Gates after the fix
+
+```
+:app:assembleDebugAndroidTest                    BUILD SUCCESSFUL
+:app:testDebugUnitTest :app:assembleDebug        688 passed, 0 failed; BUILD SUCCESSFUL
+cargo fmt --all --check                          CLEAN
+cargo test --workspace -j 2                      898 passed, 0 failed (59 suites)
+cargo clippy --locked --workspace --all-targets --all-features -j 2 -- -D warnings
+                                                 0 warnings
+```
+
+`connectedDebugAndroidTest` was not run and the tablet app was not reinstalled.

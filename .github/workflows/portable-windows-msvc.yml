@@ -145,16 +145,29 @@ jobs:
 
       # ---------------------------------------------------------------- 4 --
       # Test targets. Five of the six portable crates compile every test
-      # target with the platform features off. `anyflow-core` has two that do
-      # not, and deliberately so: `identity_and_store` and `identity_states`
-      # test the *unix-fs adapter* — `Store::open(dir)`, `probe_identity_at`,
-      # the 0600-mode refusal. Those functions do not exist when `unix-fs` is
-      # off, which is the seam working as designed. They are adapter tests,
-      # not portable-core tests, and are outside POC-CORE-04's scope.
+      # target with the platform features off. `anyflow-core` has three that
+      # do not, and deliberately so — they test the *unix-fs adapter* rather
+      # than the portable core:
       #
-      # They are named here rather than skipped by a wildcard, and the guard
-      # below fails if the set of core test files changes, so a *new* core
-      # test cannot slip past this gate unnoticed.
+      #   * `identity_and_store`  — `Store::open(dir)`, trust-store round trips
+      #   * `identity_states`     — `probe_identity_at`, the 0600-mode refusal
+      #   * `revoked_tombstone`   — the revoked-device tombstone lifecycle
+      #
+      # `revoked_tombstone` joined them with the revoked-device cleanup work.
+      # It is an adapter test for the same reason the other two are: every one
+      # of its cases goes through `Store::open(tempdir)`, and several read and
+      # rewrite `state.json` on disk directly to exercise schema migration, the
+      # hidden-implies-revoked fail-closed rule, and survival across a restart.
+      # `Store::open` is `#[cfg(feature = "unix-fs")]`, so with the feature off
+      # the target does not compile — measured, not assumed: it fails with
+      # `E0599: no associated function ... named 'open'`. That is the seam
+      # working as designed. The *portable* half of the same feature — the
+      # tombstone's effect on admission — is covered by `anyflow-daemon`'s
+      # `revoked_cleanup` suite, which is outside this job's crate set anyway.
+      #
+      # All three are named here rather than skipped by a wildcard, and the
+      # guard below fails if the set of core test files changes, so a *new*
+      # core test cannot slip past this gate unnoticed.
       - name: Core test files unchanged (guard for the exclusion below)
         run: |
           $expected = @(
@@ -164,7 +177,8 @@ jobs:
             'notifications_protocol.rs',
             'pairing.rs',
             'portable_boundary.rs',
-            'protocol.rs'
+            'protocol.rs',
+            'revoked_tombstone.rs'
           ) | Sort-Object
           $actual = Get-ChildItem core/tests -Filter *.rs -File |
                     Select-Object -ExpandProperty Name | Sort-Object
