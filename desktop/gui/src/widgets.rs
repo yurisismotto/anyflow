@@ -379,18 +379,33 @@ pub fn empty_state(title_text: &str, subtitle_text: &str) -> gtk::Box {
     b
 }
 
-/// The Flowing Ribbon: the product and connection mark.
+/// The Flow A — the AnyFlow mark.
+///
+/// One mark, everywhere. The product used to carry two: a filled "A" for
+/// institutional use and a teal-to-violet ribbon between two dots as the
+/// product and application icon. The ribbon-and-dots was the weaker half of
+/// that pair — at 16 px it reduces to two blobs and a hairline, it has no
+/// letterform to hold on to, and "a line between two dots" is the single most
+/// crowded space in this category. It is no longer the primary mark.
+///
+/// What replaced it is *one continuous ribbon that draws an A*: up the right
+/// leg to the apex, down the left leg, round a hook at the foot, and out
+/// again as the crossbar. Continuity is the brand idea and here it is
+/// literal — the mark is a single unbroken path, so there is nothing to come
+/// apart at small sizes and nothing that depends on colour to be read.
+///
+/// The two-node ribbon survives where it is actually about a connection —
+/// [`empty_state`]'s illustration — which is the job it was always best at.
 pub fn brand_mark(size: i32) -> gtk::Picture {
-    let p = gtk::Picture::for_resource("/io/github/yurisismotto/anyflow/icon-flowing-ribbon.svg");
-    p.set_size_request(size, size);
-    p.set_can_shrink(true);
-    p.set_accessible_role(gtk::AccessibleRole::Presentation);
-    p
-}
-
-/// The Flowing A: the institutional mark. About and onboarding.
-pub fn brand_logo(size: i32) -> gtk::Picture {
-    let p = gtk::Picture::for_resource("/io/github/yurisismotto/anyflow/logo-flowing-a.svg");
+    // Below about 24 px the 8-unit stroke lands under a pixel and a half and
+    // starts to grey out, so a slightly heavier cut of the same geometry
+    // takes over. Same path, same terminals, one step of weight.
+    let asset = if size < 24 {
+        "logo-flow-a-small.svg"
+    } else {
+        "logo-flow-a.svg"
+    };
+    let p = gtk::Picture::for_resource(&format!("/io/github/yurisismotto/anyflow/{asset}"));
     p.set_size_request(size, size);
     p.set_can_shrink(true);
     p.set_accessible_role(gtk::AccessibleRole::Presentation);

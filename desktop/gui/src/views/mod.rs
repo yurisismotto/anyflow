@@ -67,6 +67,8 @@ mod display_gate {
     fn every_page_widget_tree() {
         super::notifications::tests::the_notifications_page_widget_tree();
         super::clipboard::tests::the_clipboard_page_widget_tree();
+        crate::panel::tests::the_quick_panel_widget_tree();
+        crate::application_gate::the_application_window_behaviour();
     }
 }
 
@@ -77,6 +79,7 @@ use anyflow_control::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::selection::Selection;
 use crate::widgets::{self, SPACING_MD, SPACING_SM, SPACING_XS};
 use crate::{DaemonState, Page};
 
@@ -87,11 +90,18 @@ use crate::{DaemonState, Page};
 #[derive(Clone)]
 pub struct Pages {
     pub state: Rc<RefCell<DaemonState>>,
+    /// Which device this desktop sends to. The *same* choice the Quick Panel
+    /// reads and writes — there is one, it belongs to the application, and
+    /// neither surface has a private idea of where a Send goes.
+    pub selection: Rc<Selection>,
     /// What each page was last drawn from. See [`Pages::render`].
     drawn: Rc<RefCell<Drawn>>,
-    /// Asks the daemon again. Installed by `build_window`, because the poll it
-    /// triggers has to hold a `Pages` of its own.
+    /// Asks the daemon again. Installed by the application, because the poll
+    /// it triggers has to hold a `Pages` of its own.
     refresh: Refresh,
+    /// Redraws every surface after a change the daemon knows nothing about —
+    /// which is exactly one thing: the chosen device.
+    redraw: Refresh,
     dashboard: gtk::Box,
     files: gtk::Box,
     clipboard: gtk::Box,
@@ -142,6 +152,19 @@ impl Changed {
     }
 }
 
+/// A selection store the page tests can hold without touching the real one.
+///
+/// Pointed at a path that is never written: these tests build widget trees,
+/// and a test that quietly rewrote the developer's chosen device would be a
+/// bad neighbour.
+#[cfg(test)]
+pub(crate) fn test_selection() -> Rc<Selection> {
+    Rc::new(Selection::at(std::env::temp_dir().join(format!(
+        "anyflow-gui-test-{}/gui.json",
+        std::process::id()
+    ))))
+}
+
 fn page_box() -> gtk::Box {
     let b = widgets::column(SPACING_SM);
     b.set_margin_top(SPACING_MD);
@@ -152,11 +175,17 @@ fn page_box() -> gtk::Box {
 }
 
 impl Pages {
-    pub fn new(stack: &gtk::Stack, state: Rc<RefCell<DaemonState>>) -> Self {
+    pub fn new(
+        stack: &gtk::Stack,
+        state: Rc<RefCell<DaemonState>>,
+        selection: Rc<Selection>,
+    ) -> Self {
         let pages = Pages {
             state,
+            selection,
             drawn: Rc::new(RefCell::new(Drawn::default())),
             refresh: Rc::new(RefCell::new(None)),
+            redraw: Rc::new(RefCell::new(None)),
             dashboard: page_box(),
             files: page_box(),
             clipboard: page_box(),
@@ -185,6 +214,35 @@ impl Pages {
     /// Installs the poll that [`Pages::refresh_now`] triggers.
     pub fn set_refresh(&self, refresh: Rc<dyn Fn()>) {
         *self.refresh.borrow_mut() = Some(refresh);
+    }
+
+    /// Installs the application-wide redraw that [`Pages::choose_peer`] runs.
+    pub fn set_redraw(&self, redraw: Rc<dyn Fn()>) {
+        *self.redraw.borrow_mut() = Some(redraw);
+    }
+
+    /// Records a deliberate choice of device and redraws every surface.
+    ///
+    /// The fingerprint, never the name and never the row. See
+    /// [`crate::selection`].
+    pub fn choose_peer(&self, fingerprint: &str) {
+        self.selection.choose(fingerprint);
+        let redraw = self.redraw.borrow().clone();
+        if let Some(redraw) = redraw {
+            redraw();
+        } else {
+            self.redraw_now();
+        }
+    }
+
+    /// Redraws unconditionally, for a change [`Pages::render`] cannot see.
+    ///
+    /// `render` compares against the daemon's last answer, and the chosen
+    /// device is not part of it — so a choice would otherwise leave the
+    /// screen unchanged until the daemon happened to say something new.
+    pub fn redraw_now(&self) {
+        self.drawn.borrow_mut().any = false;
+        self.render();
     }
 
     /// Asks the daemon again, now.

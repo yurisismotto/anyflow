@@ -953,7 +953,7 @@ pub(in crate::views) mod tests {
             ..DaemonState::default()
         }));
         let stack = gtk::Stack::new();
-        let pages = super::Pages::new(&stack, state.clone());
+        let pages = super::Pages::new(&stack, state.clone(), crate::views::test_selection());
         let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let borrowed = state.borrow();
         render(&container, &borrowed, &pages);
@@ -1199,7 +1199,7 @@ pub(in crate::views) mod tests {
             gtk::init().expect("a display is needed: run with --ignored on a desktop session");
         }
         let stack = gtk::Stack::new();
-        let pages = super::Pages::new(&stack, state);
+        let pages = super::Pages::new(&stack, state, crate::views::test_selection());
         let page = pages.notifications.clone();
         pages.render();
         (pages, page, stack)
@@ -1455,9 +1455,10 @@ pub(in crate::views) mod tests {
     fn transfer() -> anyflow_control::TransferReport {
         anyflow_control::TransferReport {
             transfer_id: "t".into(),
+            seq: 1,
             device_name: "Tablet".into(),
             fingerprint_short: "7E63 7B4E 937B 7732".into(),
-            direction: "incoming".into(),
+            direction: anyflow_control::transfer_direction::RECEIVING.into(),
             filename: "a.txt".into(),
             mime_type: "text/plain".into(),
             size_bytes: 4,
@@ -1465,6 +1466,7 @@ pub(in crate::views) mod tests {
             percentage: Some(50),
             state: "transferring".into(),
             failure: None,
+            failure_code: None,
             stored_at: None,
         }
     }

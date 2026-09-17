@@ -400,6 +400,7 @@ async fn transfer_report(
 
     TransferReport {
         transfer_id: snapshot.id.to_hex(),
+        seq: snapshot.seq,
         device_name,
         fingerprint_short: snapshot.peer.to_display_short(),
         direction: snapshot.direction.as_str().to_string(),
@@ -410,6 +411,7 @@ async fn transfer_report(
         percentage: snapshot.percentage(),
         state: snapshot.state.as_str().to_string(),
         failure: snapshot.failure.map(|f| f.as_str().to_string()),
+        failure_code: snapshot.failure.map(|f| f.code().to_string()),
         stored_at: snapshot.stored_at.as_ref().map(|p| p.display().to_string()),
     }
 }
@@ -1441,5 +1443,89 @@ pub async fn do_notifications_policy(
 
     Response::Ok {
         message: format!("{} {}", fingerprint.to_display_short(), described),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The control vocabulary
+// ---------------------------------------------------------------------------
+
+/// Pins the two halves of the transfer vocabulary to each other.
+///
+/// `anyflow-capability-files` owns the state machine and the failure enum;
+/// `anyflow-control` names the tokens a front end is allowed to branch on.
+/// Neither crate can see the other, and this one sees both — so this is the
+/// only place the correspondence can be checked, and it is checked
+/// exhaustively rather than by spot-checking the interesting variants.
+#[cfg(test)]
+mod vocabulary {
+    use anyflow_capability_files::transfer::{FailureReason, TransferState};
+    use anyflow_control::{transfer_direction, transfer_failure, transfer_state};
+
+    #[test]
+    fn every_failure_reason_is_a_token_the_control_protocol_names() {
+        for reason in FailureReason::ALL {
+            assert!(
+                transfer_failure::ALL.contains(&reason.code()),
+                "{:?} produces {:?}, which anyflow-control does not name — \
+                 a front end branching on it would see an unknown token and \
+                 fall back to a generic label",
+                reason,
+                reason.code()
+            );
+        }
+        // And nothing is named that cannot happen, which would be a label
+        // nothing could ever reach.
+        let produced: Vec<&str> = FailureReason::ALL.iter().map(|r| r.code()).collect();
+        for token in transfer_failure::ALL {
+            assert!(
+                produced.contains(&token),
+                "anyflow-control names {token:?}, which no FailureReason produces"
+            );
+        }
+    }
+
+    #[test]
+    fn every_transfer_state_is_a_token_the_control_protocol_names() {
+        let named = [
+            transfer_state::OFFERED,
+            transfer_state::WAITING_ACCEPT,
+            transfer_state::TRANSFERRING,
+            transfer_state::VERIFYING,
+            transfer_state::COMPLETED,
+            transfer_state::FAILED,
+            transfer_state::CANCELLED,
+        ];
+        for state in [
+            TransferState::Offered,
+            TransferState::WaitingAccept,
+            TransferState::Transferring,
+            TransferState::Verifying,
+            TransferState::Completed,
+            TransferState::Failed,
+            TransferState::Cancelled,
+        ] {
+            assert!(
+                named.contains(&state.as_str()),
+                "{:?} serialises as {:?}, which anyflow-control does not name",
+                state,
+                state.as_str()
+            );
+            // The two crates must agree on which states are terminal, or a
+            // front end will show a finished transfer as still moving — or,
+            // worse, a moving one as finished.
+            assert_eq!(
+                transfer_state::is_terminal(state.as_str()),
+                state.is_terminal(),
+                "{state:?} is terminal in one crate and not the other"
+            );
+        }
+    }
+
+    #[test]
+    fn both_directions_are_named() {
+        use anyflow_capability_files::transfer::Direction;
+        assert_eq!(Direction::Sending.as_str(), transfer_direction::SENDING);
+        assert_eq!(Direction::Receiving.as_str(), transfer_direction::RECEIVING);
     }
 }

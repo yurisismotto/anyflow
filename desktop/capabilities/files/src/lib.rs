@@ -200,6 +200,15 @@ impl FilesConfig {
 #[derive(Debug, Clone)]
 pub struct TransferSnapshot {
     pub id: TransferId,
+    /// Creation order within this process: lower is older.
+    ///
+    /// Exposed because a transfer id is 128 random bits and therefore says
+    /// nothing about age, and because the map these are read out of is keyed
+    /// by that id — so the order they arrive in is the order of a random
+    /// number. Anything that wants to show the most recent transfer first has
+    /// to be told which one that is; deriving it from list position would be
+    /// the same defect U2 P1 fixed for peers.
+    pub seq: u64,
     pub peer: Fingerprint,
     pub direction: Direction,
     pub filename: String,
@@ -278,6 +287,7 @@ impl TransferRecord {
     fn snapshot(&self) -> TransferSnapshot {
         TransferSnapshot {
             id: self.id,
+            seq: self.seq,
             peer: self.peer,
             direction: self.direction,
             filename: self.filename.clone(),

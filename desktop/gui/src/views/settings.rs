@@ -56,11 +56,12 @@ pub fn render(container: &gtk::Box, state: &DaemonState) {
         false,
     ));
 
-    // About: the institutional mark, not the product one.
+    // About: the mark, at the one size in the application where it is big
+    // enough to be looked at rather than glanced past.
     let about = widgets::column(SPACING_SM);
     about.set_halign(gtk::Align::Center);
     about.set_margin_top(SPACING_SM);
-    about.append(&widgets::brand_logo(48));
+    about.append(&widgets::brand_mark(48));
     let name = widgets::subtitle("AnyFlow");
     name.set_halign(gtk::Align::Center);
     about.append(&name);
