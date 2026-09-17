@@ -22,7 +22,7 @@
 //! through an `async_channel`. No GTK object is ever touched off the main
 //! thread.
 
-use anyflow_control::{Event, Request, Response};
+use anyflow_control::{Event, FileOfferRequest, Request, Response};
 use anyflow_linux::control_socket_path;
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -200,5 +200,179 @@ impl PairHandle {
 impl Drop for PairHandle {
     fn drop(&mut self) {
         self.cancel();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Incoming-file approval
+// ---------------------------------------------------------------------------
+
+/// How long to wait before re-attaching after the approval stream drops.
+///
+/// The daemon is a `systemd --user` unit and can be restarted underneath a
+/// running window. Without a retry the desktop would silently stop being able
+/// to accept files until the user thought to close and reopen it — and
+/// "silently stops asking" is indistinguishable, from the user's side, from
+/// the defect this whole surface exists to fix.
+const REATTACH_SECS: u64 = 2;
+
+/// What the approval watcher tells the UI.
+#[derive(Debug, Clone)]
+pub enum ApprovalUpdate {
+    /// This window is now the daemon's approval provider.
+    Attached {
+        /// The daemon was started with `--accept-files-without-asking` and
+        /// will accept without asking anybody. Reported so the UI can say so
+        /// rather than wait for prompts that cannot arrive.
+        unattended: bool,
+    },
+    /// A peer is offering a file and a human has to decide.
+    Offer(Box<FileOfferRequest>),
+    /// One offer stopped being answerable. Carries the full hex transfer id.
+    Withdrawn(String),
+    /// The link to the daemon ended. Every prompt on screen is now stale and
+    /// must come down: there is nothing left that could act on an answer.
+    Detached,
+}
+
+/// Becomes the daemon's incoming-file approval provider for as long as this
+/// window lives.
+///
+/// A separate function from [`send`] for the reason [`pair`] is: the daemon
+/// asks the question, and the answer has to travel back down the *same*
+/// connection that asked it.
+///
+/// `on_update` runs on the GTK main loop and may touch widgets.
+pub fn watch_file_offers<F>(mut on_update: F) -> ApprovalHandle
+where
+    F: FnMut(ApprovalUpdate) + 'static,
+{
+    let (event_tx, event_rx) = async_channel::bounded::<ApprovalUpdate>(64);
+    let (decision_tx, decision_rx) = async_channel::bounded::<(String, bool)>(16);
+
+    runtime().spawn(async move {
+        loop {
+            // A failure to connect is the ordinary state before the daemon
+            // starts, not an error worth shouting about: the rest of the
+            // window already reports an unreachable daemon.
+            if let Ok(stream) = UnixStream::connect(control_socket_path()).await {
+                run_approval_stream(stream, &event_tx, &decision_rx).await;
+                // Whatever ended it, every prompt this session opened is now
+                // unanswerable. Say so before retrying.
+                if event_tx.send(ApprovalUpdate::Detached).await.is_err() {
+                    return;
+                }
+            }
+            if event_tx.is_closed() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(REATTACH_SECS)).await;
+        }
+    });
+
+    let rx = event_rx.clone();
+    gtk::glib::spawn_future_local(async move {
+        while let Ok(update) = rx.recv().await {
+            on_update(update);
+        }
+    });
+
+    ApprovalHandle {
+        decide: decision_tx,
+        events: event_rx,
+    }
+}
+
+/// One attachment: attach, then pump prompts out and decisions back until
+/// either end hangs up.
+async fn run_approval_stream(
+    stream: UnixStream,
+    events: &async_channel::Sender<ApprovalUpdate>,
+    decisions: &async_channel::Receiver<(String, bool)>,
+) {
+    let (read, mut write) = stream.into_split();
+    let Ok(mut bytes) = serde_json::to_vec(&Request::WatchFileOffers) else {
+        return;
+    };
+    bytes.push(b'\n');
+    if write.write_all(&bytes).await.is_err() || write.flush().await.is_err() {
+        return;
+    }
+
+    let mut lines = BufReader::new(read).lines();
+    loop {
+        tokio::select! {
+            line = lines.next_line() => {
+                let Ok(Some(text)) = line else { return };
+                // The daemon may answer with a plain error instead of an
+                // event — an agent built without the approval seam does.
+                if serde_json::from_str::<Response>(&text)
+                    .is_ok_and(|r| matches!(r, Response::Error { .. }))
+                {
+                    return;
+                }
+                let update = match serde_json::from_str::<Event>(&text) {
+                    Ok(Event::FileApprovalReady { unattended }) => {
+                        ApprovalUpdate::Attached { unattended }
+                    }
+                    Ok(Event::FileOfferRequest(request)) => {
+                        ApprovalUpdate::Offer(Box::new(request))
+                    }
+                    Ok(Event::FileOfferWithdrawn { transfer_id, .. }) => {
+                        ApprovalUpdate::Withdrawn(transfer_id)
+                    }
+                    // `Finished` ends the stream; anything else on this
+                    // connection is not ours to act on.
+                    Ok(Event::Finished { .. }) => return,
+                    Ok(_) => continue,
+                    Err(_) => return,
+                };
+                if events.send(update).await.is_err() {
+                    return;
+                }
+            }
+
+            decision = decisions.recv() => {
+                let Ok((transfer, accept)) = decision else { return };
+                let Ok(mut bytes) = serde_json::to_vec(&Request::FileDecision { transfer, accept })
+                else {
+                    continue;
+                };
+                bytes.push(b'\n');
+                if write.write_all(&bytes).await.is_err() || write.flush().await.is_err() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Keeps the approval attachment alive and carries answers back to it.
+pub struct ApprovalHandle {
+    decide: async_channel::Sender<(String, bool)>,
+    events: async_channel::Receiver<ApprovalUpdate>,
+}
+
+impl ApprovalHandle {
+    /// Answers one prompt, by the full transfer id the prompt carried.
+    ///
+    /// Fire-and-forget on purpose. A decision the daemon no longer has a
+    /// prompt for is ignored there, so there is no failure here worth
+    /// reporting to a person who has already moved on.
+    pub fn decide(&self, transfer: &str, accept: bool) {
+        let tx = self.decide.clone();
+        let transfer = transfer.to_string();
+        runtime().spawn(async move {
+            let _ = tx.send((transfer, accept)).await;
+        });
+    }
+}
+
+impl Drop for ApprovalHandle {
+    fn drop(&mut self) {
+        // Closing both ends is what stops the retry loop: the daemon then
+        // sees the socket close and declines anything still pending.
+        self.events.close();
+        self.decide.close();
     }
 }

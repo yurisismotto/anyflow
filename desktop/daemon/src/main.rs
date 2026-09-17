@@ -17,7 +17,7 @@ use anyflow_capability_notifications::backend::{
 use anyflow_capability_notifications::{NotificationManager, NotificationsCapability};
 use anyflow_control::transport::ControlTransport;
 use anyflow_core::capability::CapabilityRegistry;
-use anyflow_daemon::{listener, mdns, server, state::DaemonState};
+use anyflow_daemon::{approval::FileApproval, listener, mdns, server, state::DaemonState};
 use clap::Parser;
 use tokio_rustls::TlsAcceptor;
 
@@ -158,15 +158,18 @@ async fn main() -> anyhow::Result<()> {
         "files.v1 ready"
     );
 
-    let approval: Arc<dyn TransferApproval> = if args.accept_files_without_asking {
+    if args.accept_files_without_asking {
         tracing::warn!(
             "--accept-files-without-asking is set: incoming files will NOT be \
              confirmed by a human"
         );
-        Arc::new(AcceptEverything)
-    } else {
-        Arc::new(ConsoleApproval)
-    };
+    }
+    // One object, two roles: `files.v1` asks it whether to accept an incoming
+    // file, and the control server attaches the desktop UI to it as the thing
+    // that answers. Building two would compile and would silently never ask
+    // anybody, so the `Arc` is cloned rather than the constructor called
+    // twice.
+    let approval = Arc::new(FileApproval::new(args.accept_files_without_asking));
 
     let transfers = TransferManager::new(
         // The desktop is the stable listener, so it is always the end that
@@ -174,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
         StreamRole::Acceptor,
         identity_fp,
         files_config,
-        approval,
+        Arc::clone(&approval) as Arc<dyn TransferApproval>,
     );
 
     // clipboard.v1. Like files.v1 it is absent from `auto_grant`: a device
@@ -262,7 +265,8 @@ async fn main() -> anyhow::Result<()> {
         DaemonState::new(store, registry, battery_state)
             .with_transfers(Arc::clone(&transfers))
             .with_clipboard(Arc::clone(&clipboard))
-            .with_notifications(Arc::clone(&notifications)),
+            .with_notifications(Arc::clone(&notifications))
+            .with_file_approval(Arc::clone(&approval)),
     );
 
     // The state is the authorizer: every grant question is answered from the
@@ -358,48 +362,4 @@ async fn main() -> anyhow::Result<()> {
     // is, and a named pipe has no file to unlink.
     transport.release();
     Ok(())
-}
-
-/// Approval that asks nobody, for an unattended test rig.
-struct AcceptEverything;
-
-#[async_trait::async_trait]
-impl TransferApproval for AcceptEverything {
-    async fn confirm_receive(&self, offer: &anyflow_capability_files::IncomingOffer) -> bool {
-        tracing::warn!(
-            transfer = %offer.transfer_id,
-            filename = %offer.filename,
-            "accepting a file without asking (--accept-files-without-asking)"
-        );
-        true
-    }
-}
-
-/// The default: refuse, loudly, and tell the operator how to accept.
-///
-/// The daemon has no terminal of its own — it runs under `systemd --user` —
-/// so it cannot prompt. Rather than inventing a silent yes, it declines and
-/// logs what happened. A desktop GUI and a `anyflow recv` command are the
-/// planned ways to answer; until one exists, `--accept-files-without-asking`
-/// is the documented escape hatch for a test rig.
-///
-/// Declining is the safe direction. An implementation that defaulted to
-/// "yes, because nobody is watching" would let any granted peer write to the
-/// download directory unattended, which is precisely what receiver approval
-/// exists to prevent.
-struct ConsoleApproval;
-
-#[async_trait::async_trait]
-impl TransferApproval for ConsoleApproval {
-    async fn confirm_receive(&self, offer: &anyflow_capability_files::IncomingOffer) -> bool {
-        tracing::warn!(
-            transfer = %offer.transfer_id,
-            filename = %offer.filename,
-            size = offer.size_bytes,
-            peer = %offer.peer.to_display_short(),
-            "declining an incoming file: no way to ask a human. Start the \
-             daemon with --accept-files-without-asking to accept unattended."
-        );
-        false
-    }
 }

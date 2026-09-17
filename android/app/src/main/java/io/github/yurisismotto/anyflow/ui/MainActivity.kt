@@ -21,7 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.capability.BatteryCapability
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
@@ -35,7 +34,6 @@ import io.github.yurisismotto.anyflow.clipboard.SystemClipboard
 import io.github.yurisismotto.anyflow.identity.Fingerprint
 import io.github.yurisismotto.anyflow.notifications.InstalledApps
 import io.github.yurisismotto.anyflow.notifications.NotificationAccess
-import io.github.yurisismotto.anyflow.pairing.QrPayload
 import io.github.yurisismotto.anyflow.service.ConnectionService
 import io.github.yurisismotto.anyflow.store.TrustStore
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowTheme
@@ -59,13 +57,19 @@ class MainActivity : ComponentActivity() {
     private val app: AnyFlowApp get() = application as AnyFlowApp
 
     private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
-        val contents = result.contents ?: return@registerForActivityResult
-        val payload = QrPayload.parse(contents)
-        if (payload == null) {
+        // Rotating the scanner recreates its Activity, but this launcher
+        // belongs to *this* Activity and is delivered exactly one result per
+        // scan — so a code scanned after a rotation pairs once, not twice.
+        val payload = when (val outcome = PairingScanner.outcomeOf(result.contents)) {
+            // Back, or dismissed. Nothing to report and nothing to do.
+            PairingScanner.Outcome.Cancelled -> return@registerForActivityResult
             // Never echo the scanned text back to the screen: it may contain
             // a pairing token, and it is attacker-supplied either way.
-            showError("That QR code is not a AnyFlow pairing code.")
-            return@registerForActivityResult
+            PairingScanner.Outcome.NotAnyFlowCode -> {
+                showError("That QR code is not a AnyFlow pairing code.")
+                return@registerForActivityResult
+            }
+            is PairingScanner.Outcome.Pair -> outcome.payload
         }
         lifecycleScope.launch {
             app.pair(payload)
@@ -442,12 +446,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchScanner() {
-        scanLauncher.launch(
-            ScanOptions()
-                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                .setPrompt("Point at the QR code shown by `anyflow pair`")
-                .setBeepEnabled(false),
-        )
+        // The request is built in `PairingScanner` so that what it does and
+        // does not ask for — notably that it does not lock the orientation —
+        // is testable rather than buried in a call site.
+        scanLauncher.launch(PairingScanner.options())
     }
 
     /**

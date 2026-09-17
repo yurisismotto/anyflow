@@ -9,10 +9,10 @@
 //! | Module | Now lives in | Why |
 //! | --- | --- | --- |
 //! | `control` | `anyflow-control` | the CLI/GUI contract, shared without inheriting the agent |
-//! | `listener`, `mdns`, `state` | `anyflow-runtime` | portable; no platform surface |
+//! | `listener`, `mdns`, `state`, `approval` | `anyflow-runtime` | portable; no platform surface |
 //! | `server` | `anyflow-runtime` + `anyflow-linux` | the protocol is portable, the endpoint is not |
 
-pub use anyflow_runtime::{listener, mdns, state};
+pub use anyflow_runtime::{approval, listener, mdns, state};
 
 /// The local control protocol.
 pub mod control {

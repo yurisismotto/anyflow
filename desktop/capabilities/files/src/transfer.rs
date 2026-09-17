@@ -41,6 +41,32 @@ impl TransferId {
         self.0.iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    /// The inverse of [`to_hex`], for the local control protocol.
+    ///
+    /// Exact, and never a prefix: the full id is how a human's answer to one
+    /// offer is bound to that offer. A prefix match would make the binding
+    /// depend on which other transfers happened to exist at the time, which
+    /// is not a property a consent decision may have. Case-insensitive
+    /// because that is a spelling of the same id, not a different one.
+    ///
+    /// [`to_hex`]: Self::to_hex
+    pub fn from_hex(text: &str) -> Option<Self> {
+        let bytes = text.as_bytes();
+        // Checked up front, and it does more than reject rubbish: it is what
+        // makes every two-byte slice below a valid `str`, and what stops
+        // `from_str_radix` from accepting a signed form like `+a` as a
+        // spelling of `0a`. One id, one spelling.
+        if bytes.len() != TRANSFER_ID_LEN * 2 || !bytes.iter().all(u8::is_ascii_hexdigit) {
+            return None;
+        }
+        let mut out = [0u8; TRANSFER_ID_LEN];
+        for (i, byte) in out.iter_mut().enumerate() {
+            let hex = std::str::from_utf8(&bytes[i * 2..i * 2 + 2]).ok()?;
+            *byte = u8::from_str_radix(hex, 16).ok()?;
+        }
+        Some(Self(out))
+    }
+
     /// The form that may appear in a log: the first 8 hex characters.
     ///
     /// Enough to correlate lines about one transfer, far too little to help
@@ -271,6 +297,34 @@ mod tests {
         assert!(TransferId::from_bytes(&[0u8; 15]).is_none());
         assert!(TransferId::from_bytes(&[0u8; 17]).is_none());
         assert!(TransferId::from_bytes(&[]).is_none());
+    }
+
+    #[test]
+    fn a_transfer_id_round_trips_through_hex() {
+        let id = TransferId::from_bytes(&[
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0, 1, 2, 3, 4, 5, 6, 7,
+        ])
+        .expect("id");
+        assert_eq!(TransferId::from_hex(&id.to_hex()), Some(id));
+        assert_eq!(TransferId::from_hex(&id.to_hex().to_uppercase()), Some(id));
+    }
+
+    #[test]
+    fn a_transfer_id_is_never_parsed_from_a_prefix_or_from_rubbish() {
+        let id = TransferId::from_bytes(&[0xab; 16]).expect("id");
+        let hex = id.to_hex();
+        // A prefix is not an id: a consent decision must name exactly one
+        // transfer, whatever else happens to exist.
+        assert_eq!(TransferId::from_hex(&hex[..8]), None);
+        assert_eq!(TransferId::from_hex(&format!("{hex}00")), None);
+        assert_eq!(TransferId::from_hex(""), None);
+        assert_eq!(TransferId::from_hex(&"z".repeat(32)), None);
+        // Multi-byte characters are 32 *bytes* here and must not be sliced
+        // into on the way to a parse.
+        assert_eq!(TransferId::from_hex(&"é".repeat(16)), None);
+        // And there is one spelling of an id: `from_str_radix` would take a
+        // sign on each pair otherwise.
+        assert_eq!(TransferId::from_hex(&"+a".repeat(16)), None);
     }
 
     #[test]

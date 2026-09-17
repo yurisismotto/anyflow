@@ -11,6 +11,7 @@
 //! the system's accessibility settings because it is built out of the
 //! platform's own widgets.
 
+pub mod approval;
 pub mod client;
 pub mod theme;
 pub mod views;
@@ -409,6 +410,19 @@ fn build_window(app: &adw::Application, initial: Page) {
     // Every control calls this once the daemon has answered it — see
     // `Pages::refresh_now`.
     pages.set_refresh(refresh.clone());
+
+    // The incoming-file approval provider.
+    //
+    // Owned by the *window*, not by this scope: `build_window` returns
+    // immediately, and a handle dropped here would detach the moment the
+    // window appeared. The signal handler below holds it, so it lives exactly
+    // as long as the window does and detaches when the window goes — which
+    // returns the daemon to declining every file, the safe direction and the
+    // behaviour a desktop with no GUI has always had.
+    let approval = RefCell::new(Some(approval::install(&window)));
+    window.connect_destroy(move |_| {
+        approval.borrow_mut().take();
+    });
 
     // Draw the empty state once, so the window is not blank while the first
     // poll is in flight.

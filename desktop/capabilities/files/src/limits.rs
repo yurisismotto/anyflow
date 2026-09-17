@@ -49,6 +49,22 @@ pub const MAX_MIME_TYPE_BYTES: usize = 128;
 /// transfer pending on the desktop forever.
 pub const ACCEPT_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// How much longer than the accept timeout the approval *future* is allowed
+/// to run before it is dropped.
+///
+/// There are two bounds on an unanswered offer and only one of them should
+/// ever fire. The reaper's — `deadline_for(WaitingAccept)` — is the one with
+/// the right word for what happened, [`crate::transfer::FailureReason::TimedOut`],
+/// and it is the one the peer should hear. The timeout wrapped around
+/// `confirm_receive` exists only so a provider that never answers cannot leak
+/// a task; a decline is all it can say, and "declined by the user" is the
+/// wrong thing to tell a phone about a prompt nobody touched.
+///
+/// So this grace makes the backstop strictly later than the reaper, by more
+/// than one [`REAP_INTERVAL`] tick. Without it the two land on the same
+/// instant and which reason the peer is told becomes a race.
+pub const APPROVAL_BACKSTOP_GRACE: Duration = Duration::from_secs(5);
+
 /// How long, after an acceptance, the dialer has to open the data stream.
 ///
 /// Short: both peers are already connected and the dial is a local TCP+TLS
