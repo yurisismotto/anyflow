@@ -174,4 +174,28 @@
     <string name="notif_diag_role_none">no role</string>
     <string name="notif_diag_epoch">epoch %1$d</string>
     <string name="notif_diag_no_session">No session</string>
+
+    <!--
+      Revoked devices, and taking them off the list.
+
+      The wording is the load-bearing part of this feature. "Remove from list"
+      has to read as tidying up and nothing more, because what it does *not*
+      do — un-revoke the device — is the whole security property. So the body
+      of every confirmation says what remains true afterwards, in those words,
+      and nothing anywhere says delete, erase, key, certificate or unrevoke.
+    -->
+    <string name="action_cancel">Cancel</string>
+
+    <string name="device_revoked_explanation">This device can no longer connect.</string>
+    <string name="device_revoked_pin_note">This key is still pinned and still refused. Pairing again means scanning a new code and checking the fingerprint on both screens.</string>
+
+    <string name="device_revoke_action">Revoke this device</string>
+    <string name="device_revoke_confirm_title">Revoke %1$s?</string>
+    <string name="device_revoke_confirm_body">This device will no longer be able to connect. Pairing it again means scanning a new code and checking the fingerprint on both screens.</string>
+    <string name="device_revoke_confirm_button">Revoke</string>
+
+    <string name="device_remove_from_list_action">Remove from list</string>
+    <string name="device_remove_from_list_confirm_title">Remove %1$s from the list?</string>
+    <string name="device_remove_from_list_confirm_body">This device will stay revoked and cannot reconnect unless you pair it again.</string>
+    <string name="device_remove_from_list_confirm_button">Remove</string>
 </resources>

@@ -361,5 +361,58 @@ object UiMapping {
      * A list rather than a flag on each button, so that "is this destructive"
      * has one answer rather than one per screen.
      */
-    val DESTRUCTIVE_ACTIONS = setOf("forget_device")
+    val DESTRUCTIVE_ACTIONS = setOf(
+        // Kept under its original name: the *presentation* rule this set
+        // encodes has not changed, and renaming it would only make the
+        // history harder to read. What the button does changed — it revokes
+        // rather than deletes — and that is `ACTION_REVOKE` below.
+        "forget_device",
+        ACTION_REVOKE,
+        ACTION_REMOVE_FROM_LIST,
+    )
+
+    /** Withdraw trust from a computer. The row stays, marked Revoked. */
+    const val ACTION_REVOKE = "revoke_device"
+
+    /** Take an already revoked computer off the list, keeping the tombstone. */
+    const val ACTION_REMOVE_FROM_LIST = "remove_from_list"
+
+    /** Connect to a computer, grant it something, choose it as a target. */
+    const val ACTION_CONNECT = "connect"
+
+    /**
+     * What one device row offers, decided once.
+     *
+     * Stated here rather than as `if (peer.revoked)` in each screen so the
+     * two rules that matter cannot drift apart between the list and the
+     * detail screen:
+     *
+     *  * a **revoked** computer offers exactly one thing — taking it off the
+     *    list. Not Connect, not a grant switch, and above all not a second
+     *    Revoke, because "revoke" on something already revoked reads as
+     *    though it would do something;
+     *  * a **trusted** computer never offers "Remove from list". Removing is
+     *    tidying-up, and tidying-up must not be a route to withdrawing trust
+     *    without saying so. The store refuses it too; this is the half that
+     *    means a person is never shown it.
+     */
+    fun deviceActions(peer: TrustStore.TrustedPeer): Set<String> = when {
+        peer.revoked -> setOf(ACTION_REMOVE_FROM_LIST)
+        else -> setOf(ACTION_CONNECT, ACTION_REVOKE)
+    }
+
+    /**
+     * How a device row describes itself to an assistive technology.
+     *
+     * The name and the state in one string, because a badge that is a
+     * separate object from the name it belongs to is two unrelated
+     * announcements. Never colour alone, and never an icon alone: the state
+     * is a word.
+     */
+    fun deviceStateDescription(peer: TrustStore.TrustedPeer): String =
+        if (peer.revoked) {
+            "${peer.deviceName}, revoked. This device can no longer connect."
+        } else {
+            peer.deviceName
+        }
 }

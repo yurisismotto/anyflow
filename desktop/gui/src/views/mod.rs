@@ -235,6 +235,18 @@ impl Pages {
         }
     }
 
+    /// Drops the chosen device **only** if it is the one named.
+    ///
+    /// Called after a device leaves the visible list. Matching on the
+    /// fingerprint hex is the whole of the rule: clearing unconditionally
+    /// would throw away an unrelated choice, and clearing by name would throw
+    /// away the wrong one. What it deliberately does *not* do is choose a
+    /// replacement — see [`crate::panel::model::Target`] for why the ambiguous
+    /// state is the one that asks.
+    pub fn forget_peer_choice(&self, fingerprint: &str) {
+        self.selection.forget_if(fingerprint);
+    }
+
     /// Redraws unconditionally, for a change [`Pages::render`] cannot see.
     ///
     /// `render` compares against the daemon's last answer, and the chosen

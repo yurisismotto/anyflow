@@ -27,6 +27,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -84,11 +85,29 @@ fun AnyFlowDeviceCard(
     batteryCharging: Boolean = false,
     batteryStale: Boolean = false,
     onClick: (() -> Unit)? = null,
+    /**
+     * A state announced alongside the card's own text, never instead of it.
+     *
+     * `stateDescription` rather than `contentDescription` on purpose: the
+     * second would *replace* the name, the platform and the badge with one
+     * string, and a card whose children had stopped speaking is the N3
+     * regression this project already paid for once. This is additive — the
+     * row still reads its name and its badge, and gains a state.
+     */
+    stateDescription: String? = null,
     footer: (@Composable () -> Unit)? = null,
 ) {
     val colors = AnyFlowTheme.colors
     AnyFlowCard(
-        modifier = modifier.then(
+        modifier = modifier
+            .then(
+                if (stateDescription != null) {
+                    Modifier.semantics { this.stateDescription = stateDescription }
+                } else {
+                    Modifier
+                },
+            )
+            .then(
             if (onClick != null) {
                 Modifier
                     .clip(RoundedCornerShape(AnyFlowRadius.large))

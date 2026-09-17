@@ -46,15 +46,42 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
     private val file = File(context.filesDir, FILE_NAME)
     private var state: JSONObject = load()
 
-    private val _peersFlow = MutableStateFlow(readPeers())
+    /**
+     * Every stored record, revoked and tombstoned ones included.
+     *
+     * The truth the two published views are derived from. Only
+     * [peerRecord] and the mutators read it: anything that decides whether
+     * something may happen asks [peers] or [peer], which exclude the revoked.
+     */
+    private var records: List<TrustedPeer> = readPeers()
+
+    private val _peersFlow = MutableStateFlow(trustedOf(records))
 
     /**
-     * Every known computer, republished on every change.
+     * Every **trusted** computer, republished on every change.
      *
      * The UI must observe this rather than calling [peers], so that a grant
      * or a clipboard policy changed on one screen is visible on every other.
+     *
+     * Revoked records are excluded. A screen that wants to show them — the
+     * device list, which is where they are removed from — collects
+     * [listedPeersFlow] instead, and is the only thing that does.
      */
     val peersFlow: StateFlow<List<TrustedPeer>> = _peersFlow.asStateFlow()
+
+    private val _listedPeersFlow = MutableStateFlow(listedOf(records))
+
+    /**
+     * What belongs in the device list: trusted computers, and revoked ones
+     * the person has not yet removed.
+     *
+     * Deliberately a second flow rather than a flag the screen filters on. A
+     * screen that filtered would be one forgotten `filter` away from offering
+     * a Connect button for a revoked computer; a screen that cannot see the
+     * trusted set and the listed set as the same thing cannot make that
+     * mistake by omission.
+     */
+    val listedPeersFlow: StateFlow<List<TrustedPeer>> = _listedPeersFlow.asStateFlow()
 
     private val _selectedPeerFlow = MutableStateFlow(readSelectedPeer())
 
@@ -88,6 +115,33 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
         val grantedCapabilities: Set<String>,
         val addresses: List<String>,
         /**
+         * Whether the person withdrew trust from this computer.
+         *
+         * Before this existed the only thing the phone could do was *delete*
+         * the record, and a deleted record is not a revocation: the same key
+         * became a computer this phone had never met, free to be paired again
+         * with nothing to say it had ever been thrown out, and with no trace
+         * of the decision for anyone to see. Revoking keeps the pinned
+         * identity and stops it being a destination.
+         *
+         * A revoked record is **not** a peer. [TrustStore.peers] and
+         * [TrustStore.peer] both exclude it, which is what makes every
+         * existing caller — the connection coordinator, [PeerTarget], the
+         * grant and policy lookups, the share sheet — fail closed without
+         * being changed.
+         */
+        val revoked: Boolean = false,
+        /**
+         * Whether the person also took the revoked record off the list — the
+         * *tombstone* half.
+         *
+         * Presentation, never admission. Hidden implies revoked, and
+         * [fromJson] decides that rather than believing the file: a record
+         * claiming to be out of sight and still trusted is the one
+         * combination that would be dangerous to read literally.
+         */
+        val hidden: Boolean = false,
+        /**
          * Per-peer `clipboard.v1` direction and automation settings.
          *
          * Stored next to the grant but deliberately separate from it: the
@@ -110,9 +164,144 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
          */
         val notificationPolicy: NotificationPolicy = NotificationPolicy(),
     ) {
-        fun allows(capabilityId: String): Boolean = capabilityId in grantedCapabilities
+        fun allows(capabilityId: String): Boolean =
+            !revoked && capabilityId in grantedCapabilities
+
+        /** Whether this record belongs in an ordinary device list. */
+        fun isListed(): Boolean = !hidden
+
+        /**
+         * The record with trust withdrawn.
+         *
+         * The grants and both policies go with it. They are inert while the
+         * grant is gone — every authorizer asks both — but leaving
+         * `allowMirror` or a twenty-application list behind on a record that
+         * can be paired again is a decision waiting to be resurrected, and
+         * this is the moment the person said no. The remembered addresses go
+         * too: they are a convenience for dialling something this phone has
+         * just decided not to dial.
+         *
+         * `DENIED` rather than a fresh default. The two are equivalent to
+         * every caller — nothing reads a policy without asking about the
+         * grant — but a *default* policy serializes as `allowMirror: true`,
+         * and `NotificationPolicy()`'s `knownApps` is the list of every
+         * application installed on this phone, cached for the picker. Neither
+         * belongs on the record of a computer the person just said no to, and
+         * the second is the one that matters: it is a few hundred package
+         * names, which is a fingerprint of the person's life.
+         */
+        fun asRevoked(): TrustedPeer = copy(
+            revoked = true,
+            hidden = false,
+            grantedCapabilities = emptySet(),
+            addresses = emptyList(),
+            clipboardPolicy = ClipboardPolicy.DENIED,
+            notificationPolicy = NotificationPolicy.DENIED,
+        )
+
+        /**
+         * The record reduced to the revocation itself.
+         *
+         * What survives is what the rules read: the pinned fingerprint, which
+         * *is* the identity, and `revoked`. The name, the device id, the
+         * pairing time, the addresses, the grants and the policies are facts
+         * about a relationship that has ended, and none of them is needed to
+         * keep refusing the key. Dropping them is both the privacy answer and
+         * the security one — a grant that is not stored cannot come back on a
+         * re-pair.
+         */
+        fun asTombstone(): TrustedPeer = TrustedPeer(
+            deviceId = "",
+            deviceName = "",
+            fingerprint = fingerprint,
+            pairedAtUnix = 0,
+            grantedCapabilities = emptySet(),
+            addresses = emptyList(),
+            revoked = true,
+            hidden = true,
+            clipboardPolicy = ClipboardPolicy.DENIED,
+            notificationPolicy = NotificationPolicy.DENIED,
+        )
+
+        /**
+         * One record, as it is written.
+         *
+         * Pure and beside [fromJson], so the two halves of the format can be
+         * read together and round-tripped in a JVM test. Nothing here can
+         * hold clipboard text, a notification's content, a pairing token or a
+         * proof — there is no field on this type that could.
+         */
+        fun toJson(): JSONObject = JSONObject().apply {
+            put(KEY_DEVICE_ID, deviceId)
+            put(KEY_DEVICE_NAME, sanitizeDeviceName(deviceName))
+            put(KEY_FINGERPRINT, fingerprint.toHex())
+            put(KEY_PAIRED_AT, pairedAtUnix)
+            put(KEY_GRANTS, JSONArray(grantedCapabilities.toList()))
+            put(KEY_ADDRESSES, JSONArray(addresses))
+            // Written only when true, so a file full of ordinary trusted
+            // computers is byte-for-byte what an older build wrote and an
+            // older build can still read it.
+            if (revoked) put(KEY_REVOKED, true)
+            if (hidden) put(KEY_HIDDEN, true)
+            // Settings, never content: the policy flags are stored, and no
+            // clipboard text ever reaches this file.
+            put(KEY_CLIPBOARD_POLICY, clipboardPolicy.toJson())
+            // Settings, never content: the flags and the list of package
+            // names the person chose. No notification title, body, subtext or
+            // platform key reaches this file, and there is no field here that
+            // could hold one.
+            put(KEY_NOTIFICATION_POLICY, notificationPolicy.toJson())
+        }
 
         companion object {
+            /**
+             * One record, as it is read — or null when it is not a record.
+             *
+             * A missing or malformed fingerprint is the one unrecoverable
+             * case: a record with no pinned key is not an identity, and
+             * guessing one would be worse than dropping it.
+             *
+             * Absent flags read false, which is the migration: a file written
+             * before this sprint has neither key, and every record in it is a
+             * trusted, visible one — which is exactly what it was. Nothing is
+             * hidden for anybody on upgrade.
+             */
+            fun fromJson(entry: JSONObject): TrustedPeer? {
+                val fingerprint = Fingerprint.fromHex(entry.optString(KEY_FINGERPRINT))
+                    ?: return null
+                val hidden = entry.optBoolean(KEY_HIDDEN, false)
+                return TrustedPeer(
+                    deviceId = entry.optString(KEY_DEVICE_ID),
+                    deviceName = entry.optString(KEY_DEVICE_NAME),
+                    fingerprint = fingerprint,
+                    pairedAtUnix = entry.optLong(KEY_PAIRED_AT),
+                    grantedCapabilities = entry.optJSONArray(KEY_GRANTS)
+                        ?.let { grants -> (0 until grants.length()).map { grants.getString(it) } }
+                        ?.toSet()
+                        ?: emptySet(),
+                    addresses = entry.optJSONArray(KEY_ADDRESSES)
+                        ?.let { list -> (0 until list.length()).map { list.getString(it) } }
+                        ?: emptyList(),
+                    // Hidden implies revoked, decided here rather than
+                    // believed from the file. A record that claims to be off
+                    // the list and still trusted is either hand-edited or
+                    // damaged, and believing it would mean a computer nobody
+                    // can see keeping its grants.
+                    revoked = hidden || entry.optBoolean(KEY_REVOKED, false),
+                    hidden = hidden,
+                    // A record written before this capability existed has no
+                    // policy object; `fromJson` supplies the documented
+                    // defaults rather than turning everything off — or, worse,
+                    // on.
+                    clipboardPolicy = ClipboardPolicy.fromJson(
+                        entry.optJSONObject(KEY_CLIPBOARD_POLICY),
+                    ),
+                    notificationPolicy = NotificationPolicy.fromJson(
+                        entry.optJSONObject(KEY_NOTIFICATION_POLICY),
+                    ),
+                )
+            }
+
             /**
              * What a record becomes when its computer is paired again.
              *
@@ -154,11 +343,38 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
                 // the caller looking the record up by fingerprint, because
                 // inheriting another computer's notification grant is the one
                 // mistake this function must be structurally unable to make.
-                if (existing == null || !existing.fingerprint.contentEquals(paired.fingerprint)) {
-                    return paired.copy(grantedCapabilities = grantable)
+                //
+                // `existing.revoked` joins that list, and it is the reason
+                // this sprint touched a function it otherwise would not have.
+                // A revoked record is a person who said "no longer" about
+                // *this* key; pairing it again is a fresh yes, and a fresh yes
+                // must not quietly restore the grants, the clipboard
+                // directions or the notification app list that the "no
+                // longer" took away. Without this line a tombstone would be a
+                // *better* place for a stale grant to hide than a deleted
+                // record was — invisible on screen and still inherited.
+                //
+                // It does not affect the case this merge was written for. A
+                // desktop-side revoke leaves the phone's own record untouched
+                // (`revoked` is false), so UX-DEBT-02 still holds: the
+                // person's local decisions survive somebody else's revoke and
+                // only their own erases them.
+                if (existing == null ||
+                    existing.revoked ||
+                    !existing.fingerprint.contentEquals(paired.fingerprint)
+                ) {
+                    return paired.copy(
+                        grantedCapabilities = grantable,
+                        // A pairing that succeeded is a visible, trusted row,
+                        // whatever was in its place a moment ago.
+                        revoked = false,
+                        hidden = false,
+                    )
                 }
 
                 return existing.copy(
+                    revoked = false,
+                    hidden = false,
                     // Facts about the session that just authenticated.
                     deviceId = paired.deviceId,
                     deviceName = paired.deviceName,
@@ -184,45 +400,43 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
         }
     }
 
+    /**
+     * The computers this phone trusts.
+     *
+     * Revoked records are **not** here, and that is the whole reason the
+     * revoked flag could be added without touching the connection
+     * coordinator, [PeerTarget], the share sheet, the clipboard tile or any
+     * capability lookup: every one of them asks this question and every one of
+     * them now fails closed on a revoked computer for free.
+     */
     fun peers(): List<TrustedPeer> = _peersFlow.value
+
+    /** Every stored record, revoked and tombstoned ones included. */
+    fun allRecords(): List<TrustedPeer> = records
 
     private fun readPeers(): List<TrustedPeer> {
         val array = state.optJSONArray(KEY_PEERS) ?: return emptyList()
         return (0 until array.length()).mapNotNull { index ->
-            val entry = array.optJSONObject(index) ?: return@mapNotNull null
-            val fingerprint = Fingerprint.fromHex(entry.optString(KEY_FINGERPRINT))
-                ?: return@mapNotNull null
-            TrustedPeer(
-                deviceId = entry.optString(KEY_DEVICE_ID),
-                deviceName = entry.optString(KEY_DEVICE_NAME),
-                fingerprint = fingerprint,
-                pairedAtUnix = entry.optLong(KEY_PAIRED_AT),
-                grantedCapabilities = entry.optJSONArray(KEY_GRANTS)
-                    ?.let { grants -> (0 until grants.length()).map { grants.getString(it) } }
-                    ?.toSet()
-                    ?: emptySet(),
-                addresses = entry.optJSONArray(KEY_ADDRESSES)
-                    ?.let { list -> (0 until list.length()).map { list.getString(it) } }
-                    ?: emptyList(),
-                // A record written before this capability existed has no
-                // policy object; `fromJson` supplies the documented defaults
-                // rather than turning everything off — or, worse, on.
-                clipboardPolicy = ClipboardPolicy.fromJson(
-                    entry.optJSONObject(KEY_CLIPBOARD_POLICY),
-                ),
-                notificationPolicy = NotificationPolicy.fromJson(
-                    entry.optJSONObject(KEY_NOTIFICATION_POLICY),
-                ),
-            )
+            array.optJSONObject(index)?.let { TrustedPeer.fromJson(it) }
         }
     }
 
+    /**
+     * One trusted computer, by pinned fingerprint.
+     *
+     * Revoked records are excluded, so the grant and policy lookups built on
+     * this return their DENIED defaults for one without any of them having to
+     * remember to ask a second question.
+     */
     fun peer(fingerprint: Fingerprint): TrustedPeer? =
         peers().firstOrNull { it.fingerprint.contentEquals(fingerprint) }
 
+    /** One record of any kind, revoked and tombstoned included. */
+    fun peerRecord(fingerprint: Fingerprint): TrustedPeer? =
+        records.firstOrNull { it.fingerprint.contentEquals(fingerprint) }
+
     fun addPeer(peer: TrustedPeer) {
-        val remaining = peers().filterNot { it.fingerprint.contentEquals(peer.fingerprint) }
-        writePeers(remaining + peer)
+        writePeers(upserted(records, peer))
     }
 
     /**
@@ -272,15 +486,64 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
         return merged
     }
 
-    /** Forgets a computer. It cannot reconnect without pairing again. */
-    fun removePeer(fingerprint: Fingerprint) {
-        // The choice goes with the computer. Leaving the hex behind would be a
+    /**
+     * Withdraws trust from a computer, keeping the record.
+     *
+     * This replaced `removePeer`, which deleted. The deletion was the defect:
+     * a deleted key is a computer this phone has never met, so nothing was
+     * left to say the person had thrown it out, nothing stopped it being
+     * paired again as an ordinary stranger, and the row simply vanished with
+     * no account of why. Now the row stays, says **Revoked**, and the person
+     * decides separately whether to take it off the list.
+     *
+     * Returns false when there is no such record. Revoking something already
+     * revoked is a no-op rather than a second write.
+     */
+    fun revokePeer(fingerprint: Fingerprint): Boolean {
+        val existing = peerRecord(fingerprint) ?: return false
+        if (existing.revoked) return true
+        // The choice goes with the trust. Leaving the hex behind would be a
         // dangling instruction to dial something that is no longer trusted —
         // harmless, because `PeerTarget.resolve` ignores an unmatched choice,
         // but it would silently re-target if the same key were ever paired
         // again, which is not a decision this method is entitled to make.
-        if (selectedPeerHex == fingerprint.toHex()) clearSelectedPeer()
-        writePeers(peers().filterNot { it.fingerprint.contentEquals(fingerprint) })
+        applySelectionAfterRemoval(fingerprint)
+        addPeer(existing.asRevoked())
+        return true
+    }
+
+    /**
+     * Takes one **already revoked** computer off the list, keeping the
+     * revocation.
+     *
+     * The record is replaced by [TrustedPeer.asTombstone] — the pinned
+     * fingerprint and `revoked`, nothing else. It is deliberately not a
+     * deletion: deleting would make the same key unknown, and an unknown key
+     * is one this phone would be willing to pair with as though nothing had
+     * happened, inheriting nothing but also warning nobody.
+     *
+     * Refuses a computer that is still trusted, and says so by returning
+     * false. Taking a row off a list must never be a way to withdraw trust
+     * without saying so — [revokePeer] is the deliberate act and it comes
+     * first.
+     *
+     * Purely local: nothing is sent, no session is needed, and there is no
+     * network dependency of any kind.
+     */
+    fun hideRevokedPeer(fingerprint: Fingerprint): Boolean {
+        val existing = peerRecord(fingerprint) ?: return false
+        if (!existing.revoked) return false
+        if (existing.hidden) return true
+        applySelectionAfterRemoval(fingerprint)
+        addPeer(existing.asTombstone())
+        return true
+    }
+
+    /** Applies [selectionAfterRemoval] to the stored choice. */
+    private fun applySelectionAfterRemoval(removed: Fingerprint) {
+        if (selectionAfterRemoval(selectedPeerHex, removed.toHex()) == null) {
+            clearSelectedPeer()
+        }
     }
 
     /** The chosen computer's fingerprint hex, or null when nobody has chosen. */
@@ -399,30 +662,18 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
     private fun writePeers(peers: List<TrustedPeer>) {
         val array = JSONArray()
         for (peer in peers) {
-            array.put(
-                JSONObject().apply {
-                    put(KEY_DEVICE_ID, peer.deviceId)
-                    put(KEY_DEVICE_NAME, sanitizeDeviceName(peer.deviceName))
-                    put(KEY_FINGERPRINT, peer.fingerprint.toHex())
-                    put(KEY_PAIRED_AT, peer.pairedAtUnix)
-                    put(KEY_GRANTS, JSONArray(peer.grantedCapabilities.toList()))
-                    put(KEY_ADDRESSES, JSONArray(peer.addresses))
-                    // Settings, never content: the policy flags are stored,
-                    // and no clipboard text ever reaches this file.
-                    put(KEY_CLIPBOARD_POLICY, peer.clipboardPolicy.toJson())
-                    // Settings, never content: the flags and the list of
-                    // package names the person chose. No notification title,
-                    // body, subtext or platform key reaches this file, and
-                    // there is no field here that could hold one.
-                    put(KEY_NOTIFICATION_POLICY, peer.notificationPolicy.toJson())
-                },
-            )
+            array.put(peer.toJson())
         }
         state.put(KEY_PEERS, array)
         persist()
+        // Re-read rather than assumed, so what is published is what the file
+        // now says — including the hidden-implies-revoked correction, which
+        // happens on the way in.
+        records = readPeers()
         // Published after the write, so an observer that reacts by reading
         // the file sees what was published.
-        _peersFlow.value = readPeers()
+        _peersFlow.value = trustedOf(records)
+        _listedPeersFlow.value = listedOf(records)
     }
 
     private fun load(): JSONObject {
@@ -464,6 +715,26 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
         private const val KEY_PAIRED_AT = "pairedAtUnix"
         private const val KEY_GRANTS = "grantedCapabilities"
         private const val KEY_ADDRESSES = "addresses"
+
+        /**
+         * Trust withdrawn, and taken off the list.
+         *
+         * Both additive and both optional, so [SCHEMA_VERSION] stays at 1 for
+         * the reason [KEY_SELECTED_PEER] did: a file written before they
+         * existed reads as "trusted and visible", which is exactly what those
+         * records were, and an older build reading a file that has them
+         * ignores keys it does not know rather than refusing the file. There
+         * is nothing to migrate in either direction.
+         *
+         * The one asymmetry worth naming: an older build reading a *revoked*
+         * record would read it as trusted. That is not a new exposure — the
+         * older build is the one that had no revoked state at all, and it can
+         * only appear by downgrading the app over its own data — and it is
+         * why the flags are written only when true, so the file an older build
+         * sees is unchanged for every record it could have written itself.
+         */
+        private const val KEY_REVOKED = "revoked"
+        private const val KEY_HIDDEN = "hiddenFromUi"
         private const val KEY_CLIPBOARD_POLICY = "clipboardPolicy"
         private const val KEY_NOTIFICATION_POLICY = "notificationPolicy"
         private const val KEY_NOTIFICATION_SECRET_GENERATION = "notificationSecretGeneration"
@@ -484,6 +755,46 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
 
         /** Duplicated from `NotificationsCapability.ID`, for the same reason. */
         const val NOTIFICATIONS_CAPABILITY_ID = "notifications.v1"
+
+        /**
+         * The record list with [peer] replacing whatever shared its key.
+         *
+         * Keyed on the fingerprint and on nothing else, which is what makes
+         * one cryptographic identity one row: two computers with the same
+         * name, the same device id and the same address are two rows, and the
+         * same key paired twice is one.
+         *
+         * Pure and here rather than inline in [addPeer] so the property can be
+         * tested without a `Context`.
+         */
+        fun upserted(
+            records: List<TrustedPeer>,
+            peer: TrustedPeer,
+        ): List<TrustedPeer> =
+            records.filterNot { it.fingerprint.contentEquals(peer.fingerprint) } + peer
+
+        /** The computers that may be connected to and granted things. */
+        fun trustedOf(records: List<TrustedPeer>): List<TrustedPeer> =
+            records.filterNot { it.revoked }
+
+        /** The rows a device list shows: trusted, plus revoked-but-not-removed. */
+        fun listedOf(records: List<TrustedPeer>): List<TrustedPeer> =
+            records.filter { it.isListed() }
+
+        /**
+         * What the chosen computer becomes when one is revoked or removed.
+         *
+         * The whole rule is the comparison. An unrelated choice survives, and
+         * **nothing is chosen in its place** — not the next computer, not the
+         * only one left, not one with the same name. Picking a replacement is
+         * the guess [PeerTarget] exists to refuse, and a removal is not a
+         * special case that earns one.
+         *
+         * Matching is on the fingerprint hex, the pinned identity, because
+         * that is the only thing that identifies a computer here.
+         */
+        fun selectionAfterRemoval(selectedHex: String?, removedHex: String): String? =
+            if (selectedHex == removedHex) null else selectedHex
 
         /** 128 random bits, hex. Not derived from any hardware identifier. */
         fun randomDeviceId(): String {

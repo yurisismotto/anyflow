@@ -92,12 +92,29 @@ object NotificationUiFixtures {
          * so a future multi-peer consent test can state its own choice.
          */
         selectedPeerHex: String? = null,
+        /**
+         * The rows the device list draws: trusted computers, plus revoked ones
+         * the person has not yet removed.
+         *
+         * Defaults to the same single peer as [peers], which is the truth for
+         * every consent test here — the fixture builds one *trusted* computer,
+         * and a trusted computer is both trusted and listed.
+         *
+         * It is a real value rather than an empty placeholder because the
+         * screens depend on it: `MainUiState.peerByHex` resolves against the
+         * listed set, so a fixture that left this empty would hand every
+         * consent screen a null peer and render "This device is no longer
+         * paired" instead of the thing under test. A parameter so a future
+         * test can state a revoked row of its own.
+         */
+        listedPeers: List<TrustStore.TrustedPeer> = listOf(peer),
     ): MainUiState = MainUiState(
         ownDeviceName = "Tablet",
         ownFingerprint = "0000 0000 0000 0000",
         keyBackingDescription = "Key stored in the hardware-backed keystore",
         connection = AnyFlowApp.ConnectionState.Connected("fedora", "7E63 7B4E 937B 7732"),
         peers = listOf(peer),
+        listedPeers = listedPeers,
         selectedPeerHex = selectedPeerHex,
         offers = emptyList(),
         transfers = emptyList(),
@@ -116,6 +133,20 @@ object NotificationUiFixtures {
         var settingsOpened = 0
         var appsLoaded = 0
 
+        /**
+         * Destructive trust actions a screen asked for.
+         *
+         * Recorded rather than swallowed by a no-op. No consent screen should
+         * ever ask for either of these, and a recorder is what lets a test say
+         * so — "the notification screen withdrew trust from a computer" is a
+         * failure worth being able to catch, and an empty lambda would hide
+         * it. They replace the single `onForget`, which deleted the record;
+         * the two now mirror the real lifecycle (revoke, then remove from the
+         * list).
+         */
+        val revoked = mutableListOf<TrustStore.TrustedPeer>()
+        val removedFromList = mutableListOf<TrustStore.TrustedPeer>()
+
         /** What the picker is handed. Deliberately not the real device's. */
         var apps: List<NotificationApp> = emptyList()
 
@@ -123,7 +154,8 @@ object NotificationUiFixtures {
             onPair = {},
             onConnect = {},
             onDisconnect = {},
-            onForget = {},
+            onRevoke = { peer -> revoked += peer },
+            onRemoveFromList = { peer -> removedFromList += peer },
             onSetFilesGrant = { _, _ -> },
             onSetClipboardGrant = { _, _ -> },
             onSetBatteryGrant = { _, _ -> },

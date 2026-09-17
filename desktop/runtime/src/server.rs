@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use anyflow_control::transport::ControlListener;
 use anyflow_core::qr::QrPayload;
+use anyflow_core::store::HideOutcome;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use crate::control::{
@@ -73,6 +74,14 @@ async fn serve_client<S: anyflow_control::transport::ControlStream>(
         }
         Request::Unpair { device } => {
             let response = do_unpair(&state, &device).await;
+            send(&mut write, &response).await?;
+        }
+        Request::HideRevokedDevice { fingerprint } => {
+            let response = do_hide_revoked(&state, &fingerprint).await;
+            send(&mut write, &response).await?;
+        }
+        Request::HideAllRevokedDevices => {
+            let response = do_hide_all_revoked(&state).await;
             send(&mut write, &response).await?;
         }
         Request::Confirm { .. } => {
@@ -232,7 +241,7 @@ async fn build_status(state: &Arc<DaemonState>) -> StatusReport {
         protocol_version_min: anyflow_core::session::PROTOCOL_VERSION_MIN,
         protocol_version_max: anyflow_core::session::PROTOCOL_VERSION_MAX,
         capabilities: state.registry.advertised(),
-        paired_devices: store.peers().filter(|p| !p.revoked).count(),
+        paired_devices: store.listed_peers().filter(|p| !p.revoked).count(),
         connections,
         devices,
         pairing_active: state.pairing_remaining().await.is_some(),
@@ -246,7 +255,10 @@ async fn build_devices(state: &Arc<DaemonState>) -> Vec<DeviceReport> {
     let mut rows = Vec::new();
     {
         let store = state.store.lock().await;
-        for p in store.peers() {
+        // `listed_peers`: a hidden tombstone is not a row. It is still in the
+        // store, still revoked, and still what `lookup_peer` answers from —
+        // it simply is not something a person is shown.
+        for p in store.listed_peers() {
             rows.push(p.clone());
         }
     }
@@ -339,39 +351,7 @@ async fn do_unpair(state: &Arc<DaemonState>, device: &str) -> Response {
 
     match revoked {
         Ok(true) => {
-            // Revocation must take effect now, not at the next reconnect:
-            // tear down any live session with that device.
-            //
-            // A data stream is a *separate* TCP connection and would survive
-            // the control session's death for as long as its copy loop ran,
-            // so in-flight transfers are stopped explicitly rather than left
-            // to the reaper. Done before the session is closed, so the peer
-            // still receives the cancellation.
-            if let Some(transfers) = state.transfers.clone() {
-                transfers
-                    .cancel_peer(
-                        &fingerprint,
-                        anyflow_capability_files::transfer::FailureReason::Revoked,
-                    )
-                    .await;
-            }
-            if let Some(handle) = state.session_for(&fingerprint).await {
-                handle.shutdown().await;
-            }
-            state.drop_session(&fingerprint).await;
-            // Any outstanding reconnect request dies with the pairing: there
-            // is nothing left to converge, and the peer must not be counted
-            // as mid-reconnect if it is ever paired again.
-            state.clear_renegotiation(&fingerprint).await;
-            // `clipboard.v1` has no second connection to tear down, so
-            // stopping it means the watcher must re-read who wants
-            // auto-send. Without this a revoked device would keep being
-            // pushed to until something else happened to bump the epoch.
-            state.notify_clipboard_policy_changed();
-            // And `notifications.v1` has state on the *screen*, which no
-            // session teardown removes. A revoked device's notifications come
-            // off it now.
-            state.notify_notifications_revoked(&fingerprint).await;
+            enforce_revocation(state, &fingerprint).await;
             Response::Ok {
                 message: format!("revoked {}", fingerprint.to_display_short()),
             }
@@ -381,6 +361,138 @@ async fn do_unpair(state: &Arc<DaemonState>, device: &str) -> Response {
         },
         Err(e) => Response::Error {
             message: format!("failed to persist revocation: {e}"),
+        },
+    }
+}
+
+/// Makes a revocation true of everything that is running, not only of the file.
+///
+/// Extracted from [`do_unpair`] so that the *one* way a revoked device is torn
+/// down has one implementation. "Remove from list" calls it too — not because
+/// a hidden tombstone is expected to have a session (revoking took it down
+/// already), but because the alternative is a second, subtly different kill
+/// path, and "which of the two ran?" is not a question a revocation should
+/// ever raise.
+async fn enforce_revocation(state: &Arc<DaemonState>, fingerprint: &anyflow_core::Fingerprint) {
+    // Revocation must take effect now, not at the next reconnect: tear down
+    // any live session with that device.
+    //
+    // A data stream is a *separate* TCP connection and would survive the
+    // control session's death for as long as its copy loop ran, so in-flight
+    // transfers are stopped explicitly rather than left to the reaper. Done
+    // before the session is closed, so the peer still receives the
+    // cancellation.
+    if let Some(transfers) = state.transfers.clone() {
+        transfers
+            .cancel_peer(
+                fingerprint,
+                anyflow_capability_files::transfer::FailureReason::Revoked,
+            )
+            .await;
+    }
+    if let Some(handle) = state.session_for(fingerprint).await {
+        handle.shutdown().await;
+    }
+    state.drop_session(fingerprint).await;
+    // Any outstanding reconnect request dies with the pairing: there is
+    // nothing left to converge, and the peer must not be counted as
+    // mid-reconnect if it is ever paired again.
+    state.clear_renegotiation(fingerprint).await;
+    // `clipboard.v1` has no second connection to tear down, so stopping it
+    // means the watcher must re-read who wants auto-send. Without this a
+    // revoked device would keep being pushed to until something else happened
+    // to bump the epoch.
+    state.notify_clipboard_policy_changed();
+    // And `notifications.v1` has state on the *screen*, which no session
+    // teardown removes. A revoked device's notifications come off it now.
+    state.notify_notifications_revoked(fingerprint).await;
+}
+
+/// "Remove from list" for one revoked device.
+///
+/// Addressed by full fingerprint hex, never by a selector: the record has no
+/// device id or name left to match on, and identity here must be the pinned
+/// key rather than anything two devices could share.
+async fn do_hide_revoked(state: &Arc<DaemonState>, fingerprint: &str) -> Response {
+    let Ok(fingerprint) = anyflow_core::Fingerprint::from_hex(fingerprint.trim()) else {
+        return Response::Error {
+            message: "that is not a device fingerprint".into(),
+        };
+    };
+
+    let outcome = {
+        let mut store = state.store.lock().await;
+        store.hide_revoked_peer(&fingerprint)
+    };
+
+    match outcome {
+        Ok(HideOutcome::Hidden) => {
+            enforce_revocation(state, &fingerprint).await;
+            // Non-secret metadata only: the short public fingerprint and the
+            // name of the action. This is the same shape the revocation above
+            // logs, and there is nothing else about a tombstone to say.
+            tracing::info!(
+                peer = %fingerprint.to_display_short(),
+                "removed a revoked device from the list; the revocation stands"
+            );
+            Response::Ok {
+                message: format!(
+                    "removed {} from the list; it stays revoked",
+                    fingerprint.to_display_short()
+                ),
+            }
+        }
+        Ok(HideOutcome::AlreadyHidden) => Response::Ok {
+            message: format!(
+                "{} was already off the list",
+                fingerprint.to_display_short()
+            ),
+        },
+        Ok(HideOutcome::NotRevoked) => Response::Error {
+            message: "that device is still paired; revoke it before removing it from the list"
+                .into(),
+        },
+        Ok(HideOutcome::NotFound) => Response::Error {
+            message: "no such device".into(),
+        },
+        Err(e) => Response::Error {
+            message: format!("failed to persist the change: {e}"),
+        },
+    }
+}
+
+/// "Remove all revoked devices".
+///
+/// Acts on the revoked *visible* records and on nothing else. A trusted device
+/// is not a candidate, a tombstone is already gone from the list, and no
+/// display name is compared anywhere in the path.
+async fn do_hide_all_revoked(state: &Arc<DaemonState>) -> Response {
+    let hidden = {
+        let mut store = state.store.lock().await;
+        store.hide_all_revoked_peers()
+    };
+
+    match hidden {
+        Ok(fingerprints) if fingerprints.is_empty() => Response::Ok {
+            message: "no revoked devices to remove".into(),
+        },
+        Ok(fingerprints) => {
+            for fp in &fingerprints {
+                enforce_revocation(state, fp).await;
+                tracing::info!(
+                    peer = %fp.to_display_short(),
+                    "removed a revoked device from the list; the revocation stands"
+                );
+            }
+            Response::Ok {
+                message: format!(
+                    "removed {} revoked device(s) from the list; they stay revoked",
+                    fingerprints.len()
+                ),
+            }
+        }
+        Err(e) => Response::Error {
+            message: format!("failed to persist the change: {e}"),
         },
     }
 }
@@ -623,7 +735,7 @@ async fn build_clipboard_status(state: &Arc<DaemonState>) -> ClipboardStatusRepo
 
     let rows: Vec<anyflow_core::store::TrustedPeer> = {
         let store = state.store.lock().await;
-        store.peers().cloned().collect()
+        store.listed_peers().cloned().collect()
     };
 
     let mut peers = Vec::with_capacity(rows.len());
@@ -1313,7 +1425,7 @@ async fn build_notifications_status(state: &Arc<DaemonState>) -> NotificationsSt
 
     let rows: Vec<anyflow_core::store::TrustedPeer> = {
         let store = state.store.lock().await;
-        store.peers().cloned().collect()
+        store.listed_peers().cloned().collect()
     };
 
     let mut peers = Vec::with_capacity(rows.len());

@@ -29,7 +29,24 @@ data class MainUiState(
     val ownFingerprint: String,
     val keyBackingDescription: String,
     val connection: AnyFlowApp.ConnectionState,
+    /**
+     * The computers this phone **trusts**.
+     *
+     * What every destination question resolves over. A revoked computer is
+     * not here, which is why nothing about targeting, quick actions or the
+     * share sheet had to learn about revocation.
+     */
     val peers: List<TrustStore.TrustedPeer>,
+    /**
+     * What the device list shows: the trusted computers, plus revoked ones
+     * the person has not yet removed.
+     *
+     * Separate from [peers] on purpose. A single list with a flag would put
+     * one forgotten `filter` between a revoked computer and a Connect button;
+     * with two, a screen that wants destinations cannot accidentally get
+     * something that is not one.
+     */
+    val listedPeers: List<TrustStore.TrustedPeer>,
     /**
      * The computer the person chose to connect to, as a fingerprint hex.
      *
@@ -94,8 +111,15 @@ data class MainUiState(
     fun isConnected(peer: TrustStore.TrustedPeer): Boolean =
         connectedFingerprintShort == peer.fingerprint.toDisplayShort()
 
+    /**
+     * One row from the device list, by fingerprint hex.
+     *
+     * Searches the *listed* set, so the detail screen can open a revoked
+     * computer — which is where it is removed from. What that screen may then
+     * offer is [UiMapping.deviceActions]'s decision, not this one's.
+     */
     fun peerByHex(hex: String): TrustStore.TrustedPeer? =
-        peers.firstOrNull { it.fingerprint.toHex() == hex }
+        listedPeers.firstOrNull { it.fingerprint.toHex() == hex }
 
     /** True when nothing at all is happening — what the Activity tab shows. */
     val hasActivity: Boolean
@@ -152,7 +176,24 @@ data class MainActions(
      */
     val onConnect: (Fingerprint) -> Unit,
     val onDisconnect: () -> Unit,
-    val onForget: (TrustStore.TrustedPeer) -> Unit,
+    /**
+     * Withdraws trust from a computer.
+     *
+     * This was `onForget`, and it deleted the record. Deleting is what made a
+     * revocation indistinguishable from never having met: the key became an
+     * ordinary stranger, free to be paired again with nothing to say it had
+     * been thrown out. It now revokes, and the row stays until the person
+     * removes it.
+     */
+    val onRevoke: (TrustStore.TrustedPeer) -> Unit,
+    /**
+     * Takes an already revoked computer off the list.
+     *
+     * Local, and nothing else: no message is sent, no session is needed, and
+     * the revocation it leaves behind is what keeps the key from coming back
+     * without a fresh pairing.
+     */
+    val onRemoveFromList: (TrustStore.TrustedPeer) -> Unit,
     val onSetFilesGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
     val onSetClipboardGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,
     val onSetBatteryGrant: (TrustStore.TrustedPeer, Boolean) -> Unit,

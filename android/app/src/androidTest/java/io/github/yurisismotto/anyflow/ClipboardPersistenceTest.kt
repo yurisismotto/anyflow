@@ -110,32 +110,78 @@ class ClipboardPersistenceTest {
         assertTrue(reloaded.clipboardPolicy.autoReceive)
         assertTrue(reloaded.allows(ClipboardCapability.ID))
 
-        // Clean up so a later run starts from a known state.
-        TrustStore(context).removePeer(peer)
+        // Clean up so a later run starts from a known state, through the
+        // lifecycle the product actually has: revoke, then take the row off
+        // the list. What is left is a tombstone — a fingerprint and two flags,
+        // with no name, no grant and no policy — which is harmless and
+        // invisible, and which `addPeer` replaces wholesale on the next run.
+        // There is deliberately no hard-delete API to call instead.
+        cleanUp(peer)
     }
 
+    /**
+     * Withdrawing trust takes the clipboard policy with it, on disk.
+     *
+     * This test used to be `a_forgotten_computer_leaves_no_clipboard_policy_behind`
+     * and it asserted that deleting the record left nothing behind. That is no
+     * longer how the product works, and the old shape would have been the weaker
+     * claim anyway: "the policy is gone because the whole record is gone" says
+     * nothing about a record that *stays*.
+     *
+     * The rule now is stronger and is what this asserts: **revoking scrubs the
+     * grants and both policies from the record itself**, and the record it
+     * leaves behind — revoked, then tombstoned — keeps answering `DENIED`
+     * without relying on the row having vanished. That matters precisely
+     * because the record survives: a stale `autoReceive` sitting on a revoked
+     * peer is consent waiting to be resurrected by a re-pair.
+     */
     @Test
-    fun a_forgotten_computer_leaves_no_clipboard_policy_behind() = runBlocking {
-        val store = TrustStore(context)
-        val peer = fingerprint(0x6d)
-        store.addPeer(
-            TrustStore.TrustedPeer(
-                deviceId = "forget-test-device",
-                deviceName = "Temporary",
-                fingerprint = peer,
-                pairedAtUnix = 1_700_000_000,
-                grantedCapabilities = setOf(ClipboardCapability.ID),
-                addresses = emptyList(),
-                clipboardPolicy = ClipboardPolicy(autoReceive = true, autoSend = true),
-            ),
-        )
-        assertTrue(store.clipboardPolicyFor(peer).mayAutoReceive())
+    fun revoking_a_computer_scrubs_its_clipboard_policy_and_the_tombstone_keeps_it_denied() =
+        runBlocking {
+            val store = TrustStore(context)
+            val peer = fingerprint(0x6d)
+            store.addPeer(
+                TrustStore.TrustedPeer(
+                    deviceId = "revoke-test-device",
+                    deviceName = "Temporary",
+                    fingerprint = peer,
+                    pairedAtUnix = 1_700_000_000,
+                    grantedCapabilities = setOf(ClipboardCapability.ID),
+                    addresses = emptyList(),
+                    clipboardPolicy = ClipboardPolicy(autoReceive = true, autoSend = true),
+                ),
+            )
+            assertTrue(store.clipboardPolicyFor(peer).mayAutoReceive())
 
-        store.removePeer(peer)
+            assertTrue("the record must be there to revoke", store.revokePeer(peer))
 
-        // Forgotten means denied, not "denied unless the record comes back".
-        assertEquals(ClipboardPolicy.DENIED, TrustStore(context).clipboardPolicyFor(peer))
-    }
+            // Denied, read back from a fresh store so the assertion is against
+            // the file rather than against anything held in memory.
+            val afterRevoke = TrustStore(context)
+            assertEquals(ClipboardPolicy.DENIED, afterRevoke.clipboardPolicyFor(peer))
+
+            // And denied because the policy was *scrubbed*, not merely gated
+            // behind the revoked flag. `peer()` excludes revoked records, so
+            // the stored record is read through `peerRecord`.
+            val record = afterRevoke.peerRecord(peer)!!
+            assertTrue("revoking keeps the record", record.revoked)
+            assertFalse("the row stays visible until the person removes it", record.hidden)
+            assertEquals(ClipboardPolicy.DENIED, record.clipboardPolicy)
+            assertFalse(record.clipboardPolicy.autoReceive)
+            assertFalse(record.clipboardPolicy.autoSend)
+            assertTrue(record.grantedCapabilities.isEmpty())
+
+            // Taking it off the list keeps every one of those answers.
+            assertTrue(afterRevoke.hideRevokedPeer(peer))
+            val afterRemove = TrustStore(context)
+            assertEquals(ClipboardPolicy.DENIED, afterRemove.clipboardPolicyFor(peer))
+            val tombstone = afterRemove.peerRecord(peer)!!
+            assertTrue("a tombstone is still a record, not a deletion", tombstone.revoked)
+            assertTrue(tombstone.hidden)
+            assertEquals("", tombstone.deviceName)
+            assertEquals(ClipboardPolicy.DENIED, tombstone.clipboardPolicy)
+            assertTrue(tombstone.grantedCapabilities.isEmpty())
+        }
 
     @Test
     fun a_peer_without_the_grant_is_denied_whatever_its_stored_policy_says() = runBlocking {
@@ -165,7 +211,23 @@ class ClipboardPersistenceTest {
             store.clipboardPolicyFor(peer),
         )
 
-        store.removePeer(peer)
+        cleanUp(peer)
+    }
+
+    /**
+     * Returns a temporary test peer to a harmless state.
+     *
+     * The lifecycle, not a hard delete: `revokePeer` clears the grants and both
+     * policies, `hideRevokedPeer` reduces what is left to a fingerprint and two
+     * flags. The record stays — that is the product's design, and the point of
+     * it — but it holds nothing, is invisible to every screen and to
+     * `TrustStore.peers`, and is replaced outright by `addPeer` if the test
+     * runs again.
+     */
+    private fun cleanUp(peer: Fingerprint) {
+        val store = TrustStore(context)
+        store.revokePeer(peer)
+        store.hideRevokedPeer(peer)
     }
 
     /** A clipboard that never touches the real one. */

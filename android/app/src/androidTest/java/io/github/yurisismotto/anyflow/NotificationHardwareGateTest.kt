@@ -98,7 +98,8 @@ class NotificationHardwareGateTest {
      *
      * It is not the maintainer's real pairing and does not disturb it: a
      * fingerprint of all-`0x7e` is not a key any device holds, so nothing can
-     * connect as it, and [tearDown] removes it whatever the outcome.
+     * connect as it, and [tearDown] takes it out of the trusted set whatever
+     * the outcome.
      */
     private val testPeer = Fingerprint(ByteArray(Fingerprint.LENGTH) { 0x7e })
 
@@ -123,10 +124,25 @@ class NotificationHardwareGateTest {
         )
     }
 
+    /**
+     * Takes the synthetic peer back out, through the lifecycle the product has.
+     *
+     * This used to be `removePeer`, a hard delete, which no longer exists —
+     * withdrawing trust on Android now keeps the record so that a revocation
+     * cannot be mistaken for never having met. What this needs is unchanged,
+     * and both steps deliver it: after `revokePeer` the fixture peer holds no
+     * `notifications.v1` grant and no policy, so it can neither be connected to
+     * nor be mirrored to, and after `hideRevokedPeer` it is off every screen.
+     *
+     * What remains is a tombstone — a fingerprint and two flags, for a key no
+     * device holds. It disturbs nothing, and `grantTheTestPeer` replaces it
+     * outright on the next run because `addPeer` writes the whole record.
+     */
     @After
     fun tearDown() {
         app.notifications.detachSession(testPeer)
-        app.trustStore.removePeer(testPeer)
+        app.trustStore.revokePeer(testPeer)
+        app.trustStore.hideRevokedPeer(testPeer)
     }
 
     /**

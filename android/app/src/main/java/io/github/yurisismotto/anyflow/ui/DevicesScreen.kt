@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -97,7 +98,7 @@ fun DevicesScreen(
             }
         }
 
-        if (state.peers.isEmpty()) {
+        if (state.listedPeers.isEmpty()) {
             item {
                 AnyFlowEmptyState(
                     title = "Connect your first device",
@@ -108,19 +109,41 @@ fun DevicesScreen(
                 )
             }
         } else {
-            items(state.peers, key = { UiMapping.peerKey(it.fingerprint.toHex()) }) { peer ->
-                val connected = state.isConnected(peer)
+            items(state.listedPeers, key = { UiMapping.peerKey(it.fingerprint.toHex()) }) { peer ->
+                val connected = !peer.revoked && state.isConnected(peer)
                 AnyFlowDeviceCard(
                     name = peer.deviceName,
                     platform = "Desktop · Linux",
-                    status = state.statusFor(peer),
+                    // A revoked computer says so in a word, in the same badge
+                    // every other state uses. Never a colour on its own.
+                    status = if (peer.revoked) AnyFlowStatus.Revoked else state.statusFor(peer),
                     deviceIcon = R.drawable.ic_device_desktop,
                     batteryPercent = if (connected) state.remoteBatteryPercent else null,
                     onClick = { onOpenPeer(peer.fingerprint.toHex()) },
+                    // Name and state announced together, in words, for anyone
+                    // who cannot see the red badge.
+                    stateDescription = if (peer.revoked) {
+                        UiMapping.deviceStateDescription(peer)
+                    } else {
+                        null
+                    },
                     footer = {
                         Column(verticalArrangement = Arrangement.spacedBy(AnyFlowSpacing.sm)) {
-                            CapabilityChips(peer)
-                            DeviceConnectAction(peer, state, actions)
+                            if (peer.revoked) {
+                                // No chips and no Connect. A revoked row is
+                                // not a destination, and offering the button
+                                // would be offering something that cannot
+                                // work. `UiMapping.deviceActions` is where
+                                // that rule is stated and tested.
+                                Text(
+                                    stringResource(R.string.device_revoked_explanation),
+                                    style = AnyFlowType.caption,
+                                    color = colors.textSecondary,
+                                )
+                            } else {
+                                CapabilityChips(peer)
+                                DeviceConnectAction(peer, state, actions)
+                            }
                         }
                     },
                 )
@@ -128,6 +151,9 @@ fun DevicesScreen(
         }
 
         // --- quick actions ------------------------------------------------
+        // `peers`, not `listedPeers`: a revoked row is on the list above but
+        // is not a destination, so it must not be what makes the quick
+        // actions appear either.
         if (state.peers.isNotEmpty()) {
             // The computer the person chose, never `peers.first()`. With
             // several trusted and none chosen there is no target, the tiles

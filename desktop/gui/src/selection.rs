@@ -114,6 +114,30 @@ impl Selection {
         self.persist();
     }
 
+    /// Forgets the choice **only** if it names `fingerprint`.
+    ///
+    /// What "the device I had chosen just left the list" does. The whole rule
+    /// is the comparison: an unrelated choice is left alone, and nothing is
+    /// chosen in its place. Choosing a replacement — the next peer, the only
+    /// peer, the one with the same name — is precisely the guess
+    /// [`crate::panel::model::Target`] exists to refuse, and a removal is not
+    /// a special case that earns one.
+    ///
+    /// Returns whether the choice was dropped, so a caller can say so.
+    pub fn forget_if(&self, fingerprint: &str) -> bool {
+        let Some(hex) = normalise(fingerprint) else {
+            // Not a fingerprint, so it cannot be what is stored — the stored
+            // value is normalised on the way in. Refusing to act on it is the
+            // same fail-safe `choose` applies.
+            return false;
+        };
+        if self.current.borrow().as_deref() != Some(hex.as_str()) {
+            return false;
+        }
+        self.clear();
+        true
+    }
+
     /// Forgets the choice, returning the panel to asking.
     pub fn clear(&self) {
         if self.current.borrow().is_none() {
@@ -258,6 +282,74 @@ mod tests {
         ] {
             assert_eq!(parse(text), None, "{text:?} should not yield a choice");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // D7 / D8 — what a removal does to the chosen device, and what it does not
+    // -----------------------------------------------------------------------
+
+    /// D7: removing the chosen device clears the choice.
+    #[test]
+    fn removing_the_chosen_device_clears_the_choice() {
+        let path = temp("forget-self");
+        let selection = Selection::at(path.clone());
+        selection.choose("ab12cd34");
+
+        assert!(selection.forget_if("AB12CD34"), "spelling is not identity");
+        assert_eq!(selection.current(), None);
+        // And it stayed cleared: a choice that came back on restart would
+        // re-aim the Quick Panel at a device that is no longer listed.
+        assert_eq!(Selection::at(path.clone()).current(), None);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// D8: removing some *other* device changes nothing.
+    ///
+    /// The half that matters more, because the failure is silent: a cleanup
+    /// that dropped the choice would send the next file to whatever the panel
+    /// resolved to instead.
+    #[test]
+    fn removing_another_device_leaves_the_choice_alone() {
+        let path = temp("forget-other");
+        let selection = Selection::at(path.clone());
+        selection.choose("ab12cd34");
+
+        assert!(!selection.forget_if("ffffffff"));
+        assert_eq!(selection.current().as_deref(), Some("ab12cd34"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Nothing here can *make* a choice — there is no path from a removal to
+    /// a selection, which is what "does not auto-select another peer" means at
+    /// this layer. With the choice gone, `Target::resolve` is the only thing
+    /// that decides, and with several peers it asks.
+    #[test]
+    fn forgetting_never_selects_anything() {
+        let path = temp("forget-nothing");
+        let selection = Selection::at(path.clone());
+        assert!(!selection.forget_if("ab12cd34"));
+        assert_eq!(selection.current(), None);
+
+        selection.choose("ab12cd34");
+        selection.forget_if("ab12cd34");
+        assert_eq!(
+            selection.current(),
+            None,
+            "cleared means cleared, not re-pointed"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_value_that_is_not_a_fingerprint_never_clears_a_choice() {
+        let path = temp("forget-garbage");
+        let selection = Selection::at(path.clone());
+        selection.choose("ab12cd34");
+        for bad in ["", "   ", "not-hex", "../../etc/passwd"] {
+            assert!(!selection.forget_if(bad), "{bad:?}");
+        }
+        assert_eq!(selection.current().as_deref(), Some("ab12cd34"));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

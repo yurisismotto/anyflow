@@ -18,9 +18,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +55,7 @@ import io.github.yurisismotto.anyflow.ui.components.NoticeTone
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowIconSize
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowRadius
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowSpacing
+import io.github.yurisismotto.anyflow.ui.theme.AnyFlowStatus
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowTheme
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowType
 import io.github.yurisismotto.anyflow.ui.theme.MinTouchTarget
@@ -80,6 +87,15 @@ fun PeerDetailScreen(
         Column(modifier.fillMaxSize().padding(AnyFlowSpacing.md)) {
             Text("This device is no longer paired.", style = AnyFlowType.body, color = colors.textSecondary)
         }
+        return
+    }
+
+    // A revoked computer gets its own screen, not the ordinary one with
+    // switches greyed out. There is nothing here to configure: the grants are
+    // gone, the policies are back at their defaults, and the only thing left
+    // to decide is whether the row stays on the list.
+    if (peer.revoked) {
+        RevokedPeerDetail(peer = peer, actions = actions, onBack = onBack, modifier = modifier)
         return
     }
 
@@ -262,19 +278,155 @@ fun PeerDetailScreen(
         }
 
         // Set apart from everything else, and never beside a confirming
-        // button: forgetting a device destroys the pairing and costs a QR
-        // scan to undo.
+        // button: revoking a device ends the pairing and costs a QR scan to
+        // undo.
         Spacer(Modifier.height(AnyFlowSpacing.md))
+        var confirmRevoke by remember { mutableStateOf(false) }
         AnyFlowDestructiveButton(
-            text = "Forget this device",
-            icon = R.drawable.ic_trash,
-            onClick = {
-                actions.onForget(peer)
-                onBack()
-            },
+            text = stringResource(R.string.device_revoke_action),
+            icon = R.drawable.ic_shield_off,
+            onClick = { confirmRevoke = true },
         )
+        if (confirmRevoke) {
+            ConfirmDialog(
+                title = stringResource(R.string.device_revoke_confirm_title, peer.deviceName),
+                body = stringResource(R.string.device_revoke_confirm_body),
+                confirmLabel = stringResource(R.string.device_revoke_confirm_button),
+                onDismiss = { confirmRevoke = false },
+                onConfirm = {
+                    confirmRevoke = false
+                    actions.onRevoke(peer)
+                    onBack()
+                },
+            )
+        }
         Spacer(Modifier.height(AnyFlowSpacing.xxl))
     }
+}
+
+/**
+ * One revoked computer: who it was, and the one thing left to do about it.
+ *
+ * Deliberately not the ordinary screen with everything disabled. A row of
+ * greyed-out switches invites the question "can I turn these back on?", and
+ * the answer — pair it again from a fresh code — is not something a switch
+ * can say. What is here instead is the state in words, the fingerprint that
+ * is still pinned against it, and "Remove from list".
+ */
+@Composable
+private fun RevokedPeerDetail(
+    peer: io.github.yurisismotto.anyflow.store.TrustStore.TrustedPeer,
+    actions: MainActions,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AnyFlowTheme.colors
+    var confirmRemove by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = AnyFlowSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(AnyFlowSpacing.sm),
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(vertical = AnyFlowSpacing.md),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(AnyFlowSpacing.xs),
+        ) {
+            Box(
+                Modifier
+                    .size(72.dp)
+                    .background(colors.accentRed.copy(alpha = 0.10f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_shield_off),
+                    contentDescription = null,
+                    tint = colors.accentRed,
+                    modifier = Modifier.size(AnyFlowIconSize.xlarge),
+                )
+            }
+            Text(peer.deviceName, style = AnyFlowType.title, color = colors.textPrimary)
+            AnyFlowStatusBadge(AnyFlowStatus.Revoked)
+            Text(
+                stringResource(R.string.device_revoked_explanation),
+                style = AnyFlowType.body,
+                color = colors.textSecondary,
+            )
+        }
+
+        AnyFlowSectionLabel("Security")
+        AnyFlowCard {
+            Text("Device fingerprint", style = AnyFlowType.label, color = colors.textSecondary)
+            AnyFlowFingerprint(peer.fingerprint.toDisplayShort())
+            Spacer(Modifier.height(AnyFlowSpacing.xxs))
+            Text(
+                stringResource(R.string.device_revoked_pin_note),
+                style = AnyFlowType.caption,
+                color = colors.textSecondary,
+            )
+        }
+
+        Spacer(Modifier.height(AnyFlowSpacing.md))
+        AnyFlowDestructiveButton(
+            text = stringResource(R.string.device_remove_from_list_action),
+            icon = R.drawable.ic_trash,
+            onClick = { confirmRemove = true },
+        )
+        if (confirmRemove) {
+            ConfirmDialog(
+                title = stringResource(
+                    R.string.device_remove_from_list_confirm_title,
+                    peer.deviceName,
+                ),
+                body = stringResource(R.string.device_remove_from_list_confirm_body),
+                confirmLabel = stringResource(R.string.device_remove_from_list_confirm_button),
+                onDismiss = { confirmRemove = false },
+                onConfirm = {
+                    confirmRemove = false
+                    actions.onRemoveFromList(peer)
+                    onBack()
+                },
+            )
+        }
+        Spacer(Modifier.height(AnyFlowSpacing.xxl))
+    }
+}
+
+/**
+ * The confirmation in front of anything destructive.
+ *
+ * Material's own dialog, so it is focusable, dismissable and announced the way
+ * every other dialog on the device is. Cancel is the dismiss action *and* the
+ * one a tap outside gives, which is the platform convention and means the safe
+ * answer is what a mistimed tap produces.
+ */
+@Composable
+private fun ConfirmDialog(
+    title: String,
+    body: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val colors = AnyFlowTheme.colors
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, style = AnyFlowType.subtitle) },
+        text = { Text(body, style = AnyFlowType.body, color = colors.textSecondary) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(confirmLabel, color = colors.accentRed)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel), color = colors.textSecondary)
+            }
+        },
+    )
 }
 
 /**
