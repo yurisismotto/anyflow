@@ -1,9 +1,14 @@
 # U2 Post-Certification Hardening — Test / CI
 
-**Branch:** `fix/u2-test-ci-hardening`
+**Implementation branch:** `fix/u2-test-ci-hardening` — merged to `develop` as
+**PR #29** (`fb9d4b7`)
 **Base:** `develop` @ `70a30e3`
+**Evidence commit:** `d94f4a1` — the commit all four GitHub Actions runs
+executed against
+**Closeout branch:** `docs/u2-test-ci-final-evidence` — documentation only, no
+code, test or workflow change
 **Date:** 2026-09-16
-**Status:** local pass; GitHub Actions evidence pending (§20)
+**Status:** **FINAL PASS** — GitHub Actions evidence recorded (§24), verdict in §25
 
 ---
 
@@ -52,7 +57,7 @@ $ git status --short
 
 `LINUX-UBUNTU-DEBIAN-COMPAT-U2.md` — the historical U2 evidence — was untracked
 at the start of this branch and is **untracked, unmodified and unstaged** at the
-end of it (§21). Its mtime is unchanged at `2026-09-15 23:16`.
+end of it (§22). Its mtime is unchanged at `2026-09-15 23:16`.
 
 ### Host
 
@@ -211,7 +216,7 @@ nine tests still run.
 ## 5. TC1 — mutation evidence
 
 All mutations were temporary, run one at a time, and **reverted**; `git diff`
-over `src/` is empty (§21).
+over `src/` is empty (§22).
 
 The unsupported host was simulated faithfully rather than mocked: a wrapper
 `wl-copy` early on `PATH` that filters `--sensitive` out of `--help` and rejects
@@ -974,7 +979,7 @@ The Android `What ran` step was extracted from the parsed YAML and run verbatim
 against `app/build/test-results/`, confirming the embedded Python heredoc
 survives GitHub's block-scalar dedent and produces the 41-suite / 581-test table.
 
-GitHub Actions remains the source of truth (§20).
+GitHub Actions remains the source of truth — and has since spoken (§24).
 
 ---
 
@@ -1057,7 +1062,11 @@ Recorded, not fixed — each deliberately out of scope for this branch.
 
 ---
 
-## 22. Git
+## 22. Git — pre-push working tree
+
+*This section records the working tree as it stood **before** the branch was
+pushed. It has since been committed and merged as PR #29 (§24); the statement
+below about nothing being staged describes that moment, not today.*
 
 ```
 $ git status --short
@@ -1086,13 +1095,19 @@ M	desktop/capabilities/clipboard/tests/sensitive_capability.rs
 M	desktop/capabilities/notifications/tests/real_dbus.rs
 ```
 
-Nothing was staged, committed, pushed, or turned into a pull request.
-`git add .` was never used. `LINUX-UBUNTU-DEBIAN-COMPAT-U2.md` remains untracked
-and unmodified.
+At that point nothing was staged, committed, pushed, or turned into a pull
+request. `git add .` was never used. `LINUX-UBUNTU-DEBIAN-COMPAT-U2.md` remained
+untracked and unmodified — and still is, through the merge and through this
+documentation closeout.
 
 ---
 
-## 23. Pre-push verdict
+## 23. Pre-push verdict — historical, superseded by §25
+
+> Recorded **before** the branch was pushed, and kept verbatim as the honest
+> state of the work at that moment. It is **no longer this report's verdict**:
+> the four GitHub Actions runs in §24 discharge the condition it names, and the
+> current verdict is §25.
 
 ```
 U2 TEST/CI HARDENING: LOCAL PASS
@@ -1102,38 +1117,334 @@ DESKTOP CLIPPY CI: IMPLEMENTED — AWAITING GITHUB
 ANDROID CI: IMPLEMENTED — AWAITING GITHUB
 ```
 
-This is **not** a final pass. Two of the four deliverables are GitHub Actions
-workflows that have never executed on GitHub, and no claim about them is made
-beyond static validation and local execution of their individual commands.
+That verdict was correct when written. Two of the four deliverables were GitHub
+Actions workflows that had never executed on GitHub, and no claim was made about
+them beyond static validation (§19) and local execution of their individual
+commands (§16–§18).
+
+Both have since executed on GitHub, on a clean runner, and both concluded
+`success` (§24).
 
 ---
 
-## POST-PUSH CI EVIDENCE — PENDING
+## 24. Post-push CI evidence — GitHub Actions
 
-*Nothing below this line may be filled in until the workflows have actually run
-on GitHub. Do not fabricate run IDs.*
+The branch was committed, pushed, and opened as **PR #29**, which merged into
+`develop` as `fb9d4b7`. All four workflows executed against the PR head commit:
+
+```
+d94f4a1cf7f6e425105c1908d485abaf0b976ab4
+  test(ci): harden clipboard notifications and automated gates
+```
+
+### Run table
 
 | workflow | run ID | conclusion | duration |
 |---|---|---|---|
-| Desktop quality · fmt + clippy | _pending_ | _pending_ | _pending_ |
-| Android · build + unit tests | _pending_ | _pending_ | _pending_ |
-| Linux distro compatibility (regression) | _pending_ | _pending_ | _pending_ |
-| Portable core · Windows MSVC (regression) | _pending_ | _pending_ | _pending_ |
+| Desktop quality · fmt + clippy | `35161504194` | **success** | 1m38s |
+| Android · build + unit tests | `35161504190` | **success** | 4m54s |
+| Portable core · Windows MSVC *(regression)* | `35161504162` | **success** | 3m39s |
+| Linux distro compatibility · build only *(regression)* | `35161504128` | **success** | 4m38s |
 
-**To confirm after the first PR run:**
+Four workflows, four `success`, one commit. The first two rows are the gates
+this branch created, executing on GitHub for the first time. The last two are
+pre-existing gates carried byte-identical from `develop` (§20), recorded here as
+regression evidence.
 
-- [ ] `desktop-quality` goes green on a desktop-only change.
-- [ ] `android-ci` goes green on an Android-only change, and is the **only**
-      workflow that runs for one.
-- [ ] `android-ci` reports `41 suites, 581 tests, 0 failures` (or a number the
-      task itself produces — the workflow hard-codes none).
-- [ ] The Java-level guard, the `compileSdk` derivation and the
-      `rust-toolchain.toml` channel guard all pass on a clean runner.
-- [ ] `sdkmanager` is present at the assumed path on `ubuntu-24.04`, and
-      `platforms;android-35` installs.
-- [ ] `portable-windows-msvc` goes **green** — it is red on `develop` today, and
-      §4's classification fix is the reason to expect it to recover. If it is
-      still red, the remaining cause is something this branch did not find.
-- [ ] A documentation-only PR triggers none of the four.
+### How these findings are read — and their limit
 
-**Verdict to be issued only after the above:** _pending_
+Neither new workflow contains `continue-on-error`, no step in either is
+optional, and `linux-distro-compat.yml` states the same of its own matrix rows.
+A `success` conclusion therefore means **every step of that job passed**, and
+that is what the per-workflow findings below are derived from: the run
+conclusion, joined to the step list committed in the workflow file.
+
+Per-step **log text was not downloaded**. So no figure below is quoted from a
+run log unless this report already measured it locally and says where. Where a
+green tells us a step passed but not what it printed, that is stated rather than
+filled in.
+
+### 24.1 Desktop quality · fmt + clippy — `35161504194`, success, 1m38s
+
+CI-003 (§8, §9) ran on a clean `ubuntu-24.04` runner and proved, on a machine
+with none of this laptop's state:
+
+* the **committed `Cargo.lock` resolves** — `cargo metadata --locked` succeeded
+  with no network-side surprise and no lockfile mutation;
+* **`cargo fmt --all --check`** passes on what is committed, not on what happens
+  to be in someone's working tree;
+* **`cargo clippy --locked --workspace --all-targets --all-features -D warnings`**
+  is clean — twelve crates, every target, every feature, warnings denied;
+* the **toolchain identity** step printed its four version lines;
+* the **channel-drift guard** passed: `desktop/rust-toolchain.toml` still names a
+  moving channel, so this job is still answering the question it exists to answer
+  (§9).
+
+The two load-bearing flags did their work. `--all-targets` reaches `tests/`,
+where both U2 defects lived; `--all-features` reaches the `linux-dbus` half of
+the notifications crate, without which the TC2 surface compiles to an empty
+binary and **the defect would have been invisible to the gate built to catch it**
+(§9). This run is the first evidence that combination is green on a runner and
+not merely on Fedora 44.
+
+The MSRV question stays where it belongs — the `msrv` job of
+`linux-distro-compat.yml`, pinned to the declared `rust-version = "1.88"`, green
+in run `35161504128`. `rust-version` was not raised (§9).
+
+### 24.2 Android · build + unit tests — `35161504190`, success, 4m54s
+
+CI-004 (§10, §11) ran on a clean `ubuntu-24.04` runner. Before this file, a pull
+request touching only `android/**` ran **zero** GitHub checks. Every step passed:
+
+* **JDK 17 setup** — `actions/setup-java@v4`, the level the module declares and
+  the minimum AGP 8.8 accepts (§11);
+* **declared Java-level guard** — `sourceCompatibility`, `kotlinOptions.jvmTarget`
+  and the installed JDK re-read at run time and found to agree. Nothing was
+  pinned from memory;
+* **Gradle wrapper setup** — the SHA-256-pinned distribution with
+  `validateDistributionUrl=true` fetched and validated, which is why no separate
+  wrapper-validation action was introduced (§11);
+* **`compileSdk` derivation** — parsed out of `android/app/build.gradle.kts` at
+  run time, not hard-coded, and non-empty;
+* **Android SDK platform installation** — `platforms;android-35` installed
+  through the SDK's own `sdkmanager`, present at the assumed path on
+  `ubuntu-24.04`. This was the assumption in the branch's checklist with the
+  least local evidence behind it; it now has runner evidence;
+* **`:app:assembleDebug`** and **`:fixture:assembleDebug`** — the compilation
+  gate, including the module that `settings.gradle.kts` includes beside `:app`
+  and that nothing else ever compiles;
+* **`:app:assembleDebugAndroidTest`** — instrumented test **sources** compile.
+  This is the step that caught `NotificationUiFixtures.kt` (§15): TC4's thesis
+  demonstrated on itself, now enforced on every Android pull request rather than
+  on one person's laptop;
+* **`:app:testDebugUnitTest`** — the JVM suites, green;
+* **the `What ran` reporting step** — the JUnit-XML parser survived GitHub's
+  block-scalar dedent on a real runner, as §19 predicted from local extraction.
+
+The JVM total recorded for this work remains the one measured in §12 and §17,
+from a forced fresh local run:
+
+```
+41 suites, 581 tests, 0 failures, 0 errors, 0 skipped
+```
+
+Two separate facts, kept separate. The green `:app:testDebugUnitTest` proves
+**0 failures and 0 errors on the runner** — that is what a passing Gradle test
+task means. The suite and test *counts* above are this report's local
+measurement; the workflow hard-codes no number and prints whatever the task
+produces, which is exactly why adding a suite needs no workflow edit and deleting
+one cannot be hidden (§12). No count has been invented or adjusted to match.
+
+**No emulator, no device, no `connectedAndroidTest`** — by instruction and by the
+workflow's own header. §24.6 keeps that boundary.
+
+### 24.3 Portable core · Windows MSVC — `35161504162`, success, 3m39s
+
+This is the run that matters most beyond its own tick, and it needs its history
+stated straight rather than tidied:
+
+**Before this remediation, this gate was red on `develop`.** §4 measured it
+against the untouched baseline:
+
+```
+$ git stash push -- capabilities/*/tests     # the untouched U2 baseline
+$ cargo test --locked --no-run --no-default-features -p anyflow-capability-clipboard
+error[E0432]: unresolved import `anyflow_capability_clipboard::backend::wayland`
+note: the item is gated behind the `linux-backends` feature
+```
+
+The cause was a **misclassified test file**: `sensitive_capability.rs` imported
+`backend::wayland::WaylandBackend` and used `std::os::unix::fs::PermissionsExt`
+while carrying no `cfg` gate, so it could not compile with
+`--no-default-features` — the exact configuration this workflow builds. The fix
+was the classification `real_dbus.rs` already used:
+
+```rust
+#![cfg(all(unix, feature = "linux-backends"))]
+```
+
+The workflow's **`Portable test targets compile — MSVC`** step runs precisely the
+invocation that failed:
+
+```
+cargo test --locked --no-run --no-default-features --target x86_64-pc-windows-msvc `
+  -p anyflow-proto -p anyflow-control -p anyflow-capability-clipboard `
+  -p anyflow-capability-files -p anyflow-capability-battery `
+  -p anyflow-capability-notifications
+```
+
+That step is inside a job that concluded `success`. **The GitHub run is therefore
+direct evidence that the classification/gating fix restored the portable Windows
+gate**, on a real `windows-latest` MSVC runner rather than by local cross-check
+alone (§16).
+
+To be unambiguous about the sequence, because a green tick invites a tidier story
+than the true one:
+
+1. the gate was **broken on `develop` before this branch**, and was broken by a
+   test-file classification defect this branch found while doing TC1;
+2. it is **green after this remediation**, on `d94f4a1`;
+3. the workflow file itself was **not modified** to achieve that — `git diff
+   --name-only .github/` over the pre-existing workflows is empty (§20). The
+   source was fixed; the gate was not relaxed.
+
+The rest of the job — the MSVC-not-GNU toolchain identity check, the portable
+package-set check, `cargo check` and full `cargo build` under
+`--no-default-features`, the dependency-boundary check against the resolved graph
+(no Linux platform crate, no unified platform feature), the unsafe-policy check
+(ARCH-010), and both test-file classification guards — also passed, since the job
+concluded `success`.
+
+One debt is unchanged by this green and is **not** retired: that job still has no
+classification guard for `capabilities/clipboard/tests`, which is why this
+misclassification went unnoticed in the first place. See §21 item 2.
+
+### 24.4 Linux distro compatibility · build only — `35161504128`, success, 4m38s
+
+Carried unmodified (§20) and recorded here as **regression evidence for this
+branch's desktop test changes**. The job concluded `success` across its MSRV row
+and all three distro container rows — `fail-fast: false` is set, so a red row
+could not have been hidden by another, and the file states plainly that no row is
+optional and no `continue-on-error` appears in it:
+
+| row | image |
+|---|---|
+| MSRV · rustc 1.88, `--locked` | `ubuntu-24.04` runner |
+| Ubuntu 24.04 LTS · native GTK 4.14 / libadwaita 1.5 | `ubuntu:24.04` |
+| Ubuntu 26.04 LTS · native GTK 4.22 / libadwaita 1.9 | `ubuntu:26.04` |
+| Debian 13 trixie · native GTK 4.18 / libadwaita 1.7 | `debian:trixie` |
+
+The specific value here is the package list in its
+`cargo test · portable and Linux-generic suites` step, which includes
+`-p anyflow-capability-clipboard`. The distro rows therefore **executed the
+modified clipboard suite**, including the two contract tests added in §4
+(`the_sensitive_contract_holds_where_the_flag_exists` and
+`…_where_the_flag_is_missing`), inside **the three distributions where U2
+observed the TC1 failure in the first place**. Those tests drive `#!/bin/sh`
+fakes on `PATH` rather than the host's real tool, so they assert the same
+sentence on every row — and the rows are green.
+
+`anyflow-capability-notifications` is **not** in that package list; the distro
+rows say nothing about TC2. TC2's contract is covered by the desktop clippy gate
+(§24.1) and by the `#[ignore]`d `real_dbus` suite run locally against a real
+GNOME session (§7, §16B).
+
+**This is not a U2 runtime re-certification, and must not be read as one.** No
+U2 VM was booted for this hardening work. `anyflow-u2404`, `anyflow-d13` and
+`anyflow-u2604` remain powered off and preserved (§2). The workflow makes the
+same refusal in its own voice, in the step it ends each row with:
+
+> This is NOT desktop runtime certification. No compositor, no session bus, no
+> logind session, no notification server and no link-local network took part in
+> it. Clipboard, notifications, lock detection, GUI rendering and mDNS are
+> certified in a real GNOME session or not at all.
+
+What this run is: **build, unit and portable-suite regression evidence** that the
+desktop test changes did not break the three V1 Linux targets, and that the
+declared MSRV still builds what is committed. That is the whole claim.
+
+### 24.5 Path-filter behaviour actually observed
+
+PR #29 changed `.github/workflows/**`, `android/**` **and** `desktop/**` — a
+mixed pull request. All four workflows ran, and all four have distinct
+`concurrency.group` values with no workflow running twice.
+
+That confirms exactly one row of the §14 matrix from live evidence:
+
+| scenario | §14 prediction | observed on PR #29 |
+|---|---|---|
+| Mixed Android + desktop PR | all four | **all four ran** ✔ |
+
+The remaining rows of §14 — Android-only, desktop-only, documentation-only, and
+each single-workflow-file change — are **static design facts derived from the
+parsed YAML (§19), not GitHub observations.** No Android-only, desktop-only or
+documentation-only pull request has been run through GitHub yet, and none is
+claimed. The selectivity half of §14 stands on its path filters being read
+correctly, which §19 verified by parsing the actual files; it does not yet stand
+on a GitHub run, and this report does not pretend otherwise.
+
+### 24.6 Checklist
+
+Carried over from the pre-push section and resolved against the four runs. Items
+that the runs did **not** settle are left unticked, with the reason.
+
+- [x] **`desktop-quality` goes green** — run `35161504194`, `success`.
+      *Qualifier:* PR #29 was a mixed PR, not a desktop-only one, so the green is
+      the workflow's; the "on a desktop-only change" half is §14 static (§24.5).
+- [x] **`android-ci` goes green** — run `35161504190`, `success`.
+- [ ] **…and is the only workflow that runs for an Android-only change** — **not
+      observed.** PR #29 touched `desktop/**` and `.github/workflows/**` too, so
+      all four ran, correctly. This remains a §14 static expectation (§24.5).
+- [x] **`android-ci` reports 0 failures / 0 errors on a clean runner** —
+      `:app:testDebugUnitTest` green, `What ran` step green. Counts remain the
+      locally measured `41 suites, 581 tests, 0 failures, 0 errors, 0 skipped`
+      (§12, §17); the workflow hard-codes no number (§24.2).
+- [x] **The Java-level guard, the `compileSdk` derivation and the
+      `rust-toolchain.toml` channel guard all pass on a clean runner** — all
+      three are steps inside green jobs (§24.1, §24.2).
+- [x] **`sdkmanager` is present at the assumed path on `ubuntu-24.04`, and
+      `platforms;android-35` installs** — the step passed (§24.2).
+- [x] **`portable-windows-msvc` goes green** — run `35161504162`, `success`. It
+      was red on `develop` before this remediation; §4's classification fix is
+      the reason it recovered (§24.3).
+- [x] **`linux-distro-compat` stays green** — run `35161504128`, `success`,
+      across MSRV and all three distro rows (§24.4).
+- [ ] **A documentation-only PR triggers none of the four** — **not executed.**
+      Kept as the static design fact established in §14/§19. No documentation-only
+      GitHub run exists, and none is asserted here.
+
+---
+
+## 25. Final verdict
+
+```
+U2 TEST/CI HARDENING: FINAL PASS
+TC1 CLIPBOARD CAPABILITY-AWARE TEST: PASS
+TC2 NOTIFICATION TEST QUALITY DEFECT: PASS
+DESKTOP CLIPPY CI: PASS
+ANDROID CI: PASS
+LINUX DISTRO COMPATIBILITY REGRESSION: PASS
+PORTABLE WINDOWS MSVC REGRESSION: PASS
+```
+
+TC2 is named **test quality defect** rather than *clippy test defect*, which is
+what §6 actually measured: the tautology had to go because it asserted nothing —
+proved by mutation N1, where it passed against a completely broken capability set
+— and not because a particular clippy version objected. The clippy half was never
+reproduced locally and is not claimed.
+
+### What this verdict does and does not say
+
+* **No production behaviour changed in this hardening.** No file under any
+  `src/` directory was modified. The change set is three desktop test files, one
+  Android test fixture, and two new workflow files (§15).
+* **P1 (Android multi-peer routing), P2 (Linux battery absence) and P3
+  (notification role convergence) remain untouched**, and their suites still pass
+  (§12). The P3 test-file classification guard is intact and still lists
+  `convergence.rs` (§20).
+* **No U2 VM was booted for Test/CI Hardening.** `anyflow-u2404`, `anyflow-d13`
+  and `anyflow-u2604` are powered off and preserved. §24.4 is CI build/test
+  regression evidence, **not** a new U2 runtime certification, and the
+  distro workflow says so in its own output.
+* **Android lint remains recorded debt and is not silently reclassified as
+  pass.** `:app:lintDebug` still reports **1 error and 47 warnings**. The error is
+  a false positive on a correctly version-gated `startActivityAndCollapse` call,
+  and every route to green is a suppression, a baseline, or a Quick Settings
+  product change (§11). Lint is **not** a gate in `android-ci.yml`, and no
+  baseline or global suppression was added.
+* **Instrumented Android tests are compiled but never executed in CI.**
+  `:app:assembleDebugAndroidTest` gates the sources; behaviour is certified on
+  hardware. No emulator, no device, no `connectedAndroidTest`.
+* **The `#[ignore]`d real-session desktop tests remain certification/manual
+  gates.** `real_backend.rs`, `real_dbus.rs` and `real_lock.rs` need a live
+  Wayland session, session bus and notification server; no CI job executes them.
+  TC1's contract is mirrored into the CI-runnable `sensitive_capability.rs`
+  (§4, §24.4); TC2's is not, and is linted but not executed in CI (§21 item 3).
+* **§21 stands unchanged.** Seven CI/test debts remain recorded and open. A green
+  run closes none of them; §24.3 explicitly declines to retire item 2.
+* **No claim is made that future pull requests are green.** These four runs
+  describe one commit, `d94f4a1`. A moving toolchain channel is deliberate (§9),
+  which means a future stable release can introduce a lint that turns
+  `desktop-quality` red — that is the gate working, not failing.
+
+**The four deliverables of §1 are complete and evidenced on GitHub Actions.**
