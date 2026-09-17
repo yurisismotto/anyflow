@@ -70,6 +70,32 @@ pub struct TrustedPeer {
     /// recognisable and cannot silently re-pair without the user noticing.
     #[serde(default)]
     pub revoked: bool,
+    /// Whether the user has taken this revoked record out of the ordinary
+    /// device lists — the *tombstone* half of a revocation.
+    ///
+    /// Presentation, never admission. A hidden record is invisible to
+    /// [`Store::listed_peers`] and therefore to Settings, the CLI device list
+    /// and every selector, and it is still returned by
+    /// [`Store::peer_record`], which is what [`crate::session`] asks when it
+    /// decides whether to admit a handshake. Deleting the record instead
+    /// would turn `REVOKED` into `UNKNOWN`: the same key would be greeted
+    /// with `PAIRING_REQUIRED` and this daemon's capability list rather than
+    /// `REJECTED`, and nothing would remain to say it had ever been thrown
+    /// out.
+    ///
+    /// `#[serde(default)]` for the reason every other flag here has one: a
+    /// trust store written before this field existed has no such key, and
+    /// every record in it is a *visible* one. Migration is therefore the
+    /// absence of a decision, which is right — hiding somebody's revoked
+    /// devices without being asked is not a migration, it is a change of
+    /// meaning.
+    ///
+    /// Hidden implies revoked, and [`Store::load`] enforces that on the way
+    /// in rather than trusting the file: a record that says hidden but not
+    /// revoked is the one combination that would be dangerous to believe, so
+    /// it is read as revoked.
+    #[serde(default)]
+    pub hidden: bool,
     /// Per-peer `clipboard.v1` direction and automation settings.
     ///
     /// Stored next to the grant but deliberately separate from it: the grant
@@ -109,6 +135,68 @@ impl TrustedPeer {
                 .get(capability_id)
                 .unwrap_or(&false)
     }
+
+    /// Whether this record belongs in an ordinary device list.
+    ///
+    /// The one place the question is answered, so that a screen, a report and
+    /// a selector cannot disagree about it.
+    pub fn is_listed(&self) -> bool {
+        !self.hidden
+    }
+
+    /// The record reduced to the revocation itself.
+    ///
+    /// What survives is what admission reads: the pinned fingerprint, which
+    /// *is* the identity, and `revoked`. Everything else is a fact about a
+    /// relationship that has ended — the name shown in a list, the device id,
+    /// the platform, when it was paired, what it was once allowed, the
+    /// clipboard and notification settings someone chose for it — and none of
+    /// it is needed to keep refusing the key. Dropping it is both the privacy
+    /// answer and the security one: a grant that is not stored cannot come
+    /// back on a re-pair.
+    fn into_tombstone(self) -> Self {
+        Self {
+            device_id: String::new(),
+            device_name: String::new(),
+            platform: 0,
+            fingerprint: self.fingerprint,
+            paired_at_unix: 0,
+            granted_capabilities: BTreeMap::new(),
+            last_protocol_version: 0,
+            revoked: true,
+            hidden: true,
+            // `DENIED`, not `default()`. Functionally the same — every
+            // authorizer asks `trusted_peer` first and a tombstone is never
+            // trusted — but `ClipboardPolicy::default()` serializes as
+            // `allow_send: true` and `NotificationPolicy::default()` as
+            // `allow_mirror: true`, because a policy's defaults are written
+            // for a device somebody has granted something to. A tombstone
+            // whose line in `state.json` reads `allow_mirror: true` is a
+            // sentence an auditor has to reason their way out of, and one
+            // that would become true if any future path ever read a policy
+            // without asking about the grant. Writing the denied value costs
+            // nothing and means the file says what is the case.
+            clipboard_policy: ClipboardPolicy::DENIED,
+            notification_policy: NotificationPolicy::DENIED,
+        }
+    }
+}
+
+/// What [`Store::hide_revoked_peer`] did.
+///
+/// Three outcomes rather than a `bool`, because "there is no such device" and
+/// "that device is still trusted" need different words on screen and the
+/// second must never be answered by hiding anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HideOutcome {
+    /// The record was revoked and is now a hidden tombstone.
+    Hidden,
+    /// Nothing is stored under that fingerprint.
+    NotFound,
+    /// The device is still trusted. Revoking is a separate, deliberate act.
+    NotRevoked,
+    /// It was already hidden. Nothing was written.
+    AlreadyHidden,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -357,7 +445,17 @@ impl Store {
         let peers = state
             .peers
             .into_iter()
-            .map(|p| (p.fingerprint, p))
+            .map(|mut p| {
+                // Hidden implies revoked, decided here rather than believed
+                // from the file. A record that claims to be out of the list
+                // but still trusted is the one combination that would let a
+                // hand-edited or truncated store admit a device nobody can
+                // see, so it is read the safe way round.
+                if p.hidden {
+                    p.revoked = true;
+                }
+                (p.fingerprint, p)
+            })
             .collect();
 
         Ok(Self {
@@ -415,8 +513,31 @@ impl Store {
         &self.settings
     }
 
+    /// Every stored record, hidden tombstones included.
+    ///
+    /// The security view. Callers that decide *admission* or *authorisation*
+    /// want this one; callers that draw a list want [`Self::listed_peers`].
     pub fn peers(&self) -> impl Iterator<Item = &TrustedPeer> {
         self.peers.values()
+    }
+
+    /// The records that belong in an ordinary device list.
+    ///
+    /// Everything a person is shown, and everything a device selector may
+    /// resolve, comes through here. Tombstones are absent by construction, so
+    /// no screen has to remember to filter them and no CLI selector can name
+    /// one.
+    pub fn listed_peers(&self) -> impl Iterator<Item = &TrustedPeer> {
+        self.peers.values().filter(|p| p.is_listed())
+    }
+
+    /// Visible records whose pairing has been revoked.
+    ///
+    /// What "Remove all revoked devices" would act on, and — because it is
+    /// the same iterator — what decides whether that action is offered at
+    /// all.
+    pub fn revoked_listed_peers(&self) -> impl Iterator<Item = &TrustedPeer> {
+        self.peers.values().filter(|p| p.revoked && p.is_listed())
     }
 
     /// Looks up a peer by pinned fingerprint. Revoked peers are *not*
@@ -449,10 +570,99 @@ impl Store {
             Some(p) => {
                 p.revoked = true;
                 p.granted_capabilities.clear();
+                // The policies go with the grants. They are inert while the
+                // grant is gone — every authorizer asks both — but leaving
+                // `allow_mirror` behind on a record that can be paired again
+                // is a decision waiting to be resurrected by a re-pair, and
+                // this is the moment the person said no.
+                //
+                // `DENIED` rather than `default()` for the reason
+                // [`TrustedPeer::into_tombstone`] uses it: a policy's default
+                // is written for a device somebody has granted something to,
+                // and serializes as `allow_send`/`allow_mirror` true.
+                p.clipboard_policy = ClipboardPolicy::DENIED;
+                p.notification_policy = NotificationPolicy::DENIED;
                 self.persist()?;
                 Ok(true)
             }
             None => Ok(false),
+        }
+    }
+
+    /// Takes one revoked device out of the visible lists, keeping the
+    /// revocation.
+    ///
+    /// The record is replaced by [`TrustedPeer::into_tombstone`] — the pinned
+    /// fingerprint and `revoked`, and nothing else — so what remains is
+    /// exactly what [`Self::peer_record`] needs to keep answering
+    /// [`crate::session::PeerStatus::Revoked`]. It is deliberately not a
+    /// deletion: deleting would make the same key unknown, and an unknown key
+    /// is greeted differently from a rejected one.
+    ///
+    /// Refuses a device that is still trusted. Removing something from a list
+    /// is a tidying-up action and must never be a way to withdraw trust
+    /// without saying so — [`Self::revoke_peer`] is the deliberate act, and
+    /// it comes first.
+    pub fn hide_revoked_peer(&mut self, fp: &Fingerprint) -> Result<HideOutcome> {
+        let outcome = match self.peers.get(fp) {
+            None => HideOutcome::NotFound,
+            Some(p) if !p.revoked => HideOutcome::NotRevoked,
+            Some(p) if p.hidden => HideOutcome::AlreadyHidden,
+            Some(_) => HideOutcome::Hidden,
+        };
+        if outcome != HideOutcome::Hidden {
+            return Ok(outcome);
+        }
+
+        let mut next = self.peers.clone();
+        if let Some(p) = next.remove(fp) {
+            next.insert(*fp, p.into_tombstone());
+        }
+        self.commit(next)?;
+        Ok(HideOutcome::Hidden)
+    }
+
+    /// Takes *every* visible revoked device out of the lists at once.
+    ///
+    /// One write for the whole set rather than one per device: the store is a
+    /// single document, and a per-device loop that failed halfway would leave
+    /// the file describing a state nobody asked for. Returns the fingerprints
+    /// that were hidden, in store order, so the caller can report a count and
+    /// clear a selection that pointed at one of them.
+    ///
+    /// Trusted devices are not candidates and are not rewritten. Hidden ones
+    /// are already hidden. Nothing here matches on a display name.
+    pub fn hide_all_revoked_peers(&mut self) -> Result<Vec<Fingerprint>> {
+        let targets: Vec<Fingerprint> =
+            self.revoked_listed_peers().map(|p| p.fingerprint).collect();
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut next = self.peers.clone();
+        for fp in &targets {
+            if let Some(p) = next.remove(fp) {
+                next.insert(*fp, p.into_tombstone());
+            }
+        }
+        self.commit(next)?;
+        Ok(targets)
+    }
+
+    /// Swaps in a new peer map, and only keeps it if it reached the disk.
+    ///
+    /// Without this a failed write would leave the process believing
+    /// something the file does not say — which for a trust store means the
+    /// in-memory answer to "is this device revoked?" could outlive a restart
+    /// in one direction and not the other.
+    fn commit(&mut self, peers: BTreeMap<Fingerprint, TrustedPeer>) -> Result<()> {
+        let previous = std::mem::replace(&mut self.peers, peers);
+        match self.persist() {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.peers = previous;
+                Err(e)
+            }
         }
     }
 

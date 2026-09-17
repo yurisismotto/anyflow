@@ -733,6 +733,53 @@ fn a_revoked_device_is_not_in_the_panel_or_the_target_set() {
     assert_eq!(m.target, Target::OnlyTrustedPeer("aa11".into()));
 }
 
+/// D8, at the layer that decides: with the choice cleared and more than one
+/// peer left, the panel **asks**.
+///
+/// The removal itself clears the choice (`Selection::forget_if`) and does
+/// nothing else. This is the other half — that "nothing else" really does
+/// leave the panel in the state that asks, rather than falling through to
+/// whatever is left. A cleanup that quietly re-aimed the Send button would be
+/// the "fallback to another peer" this model was built to refuse, and it would
+/// look identical on screen to a deliberate choice.
+#[test]
+fn clearing_the_choice_asks_again_rather_than_picking_a_survivor() {
+    let peers = [device("Tablet", "aa11"), device("Laptop", "bb22")];
+
+    // Before: a real choice, honoured.
+    assert_eq!(
+        model(&peers, Some("bb22")).target,
+        Target::Selected("bb22".into())
+    );
+
+    // After a removal cleared it: no destination, and nothing chosen for the
+    // person.
+    let m = model(&peers, None);
+    assert_eq!(
+        m.target,
+        Target::MustChoose {
+            stale_choice: false
+        }
+    );
+    assert_eq!(m.target.fingerprint(), None);
+    assert!(!m.send_file.is_ready(), "and the actions say so");
+    assert!(!m.send_clipboard.is_ready());
+}
+
+/// And a removal that clears the choice must not be confusable with a *stale*
+/// one: a device that is gone from the list is gone, and the panel says
+/// "choose", not "the device you chose has gone".
+#[test]
+fn a_tombstoned_choice_reads_as_a_stale_choice_until_it_is_cleared() {
+    let peers = [device("Tablet", "aa11"), device("Laptop", "bb22")];
+    // The fingerprint was removed from the list but the choice still names
+    // it — the state between the daemon agreeing and the choice being
+    // dropped. It must not resolve to anything.
+    let m = model(&peers, Some("cc33"));
+    assert_eq!(m.target, Target::MustChoose { stale_choice: true });
+    assert_eq!(m.target.fingerprint(), None);
+}
+
 /// Connected rows sort above offline ones, and ties break on something
 /// stable rather than on arrival order.
 #[test]

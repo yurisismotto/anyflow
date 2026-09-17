@@ -398,8 +398,16 @@ impl DaemonState {
         let store = self.store.lock().await;
         let needle = selector.trim().to_ascii_lowercase();
 
-        if let Some(p) = store.peers().find(|p| p.device_id == needle) {
-            return Ok(p.fingerprint);
+        // `listed_peers`, so a hidden tombstone can never be named by a
+        // selector: it has no device id and no name to match on, it is not on
+        // any screen a person could read a prefix off, and every command that
+        // takes a selector is one that would make no sense against it.
+        // The empty-id guard matters because a tombstone's device id *is*
+        // empty — an empty selector must not resolve to one.
+        if !needle.is_empty() {
+            if let Some(p) = store.listed_peers().find(|p| p.device_id == needle) {
+                return Ok(p.fingerprint);
+            }
         }
 
         if needle.len() < 8 {
@@ -410,7 +418,7 @@ impl DaemonState {
         }
 
         let matches: Vec<&TrustedPeer> = store
-            .peers()
+            .listed_peers()
             .filter(|p| p.fingerprint.to_hex().starts_with(&needle))
             .collect();
 
@@ -614,6 +622,12 @@ impl SessionHost for DaemonState {
             granted_capabilities: granted,
             last_protocol_version: protocol_version,
             revoked: false,
+            // A fresh pairing is always a visible record. Pairing over a
+            // hidden tombstone therefore brings the device back into the
+            // list, and brings back nothing else: this literal is the whole
+            // record, so no grant, policy or name from the old relationship
+            // can survive here.
+            hidden: false,
             // Safe defaults. `clipboard.v1` is not in `auto_grant`, so every
             // flag here is inert until someone grants the capability by hand
             // — and even then the two automatic directions stay off.

@@ -236,6 +236,10 @@ class MainActivity : ComponentActivity() {
         // invisible until the screen was recreated.
         val connection by app.connectionState.collectAsState()
         val peers by app.trustStore.peersFlow.collectAsState()
+        // The second view of the same records: what the list draws, revoked
+        // rows included. Collected beside the trusted set rather than derived
+        // from it, because the two answer different questions.
+        val listedPeers by app.trustStore.listedPeersFlow.collectAsState()
         // Observed for the same reason the peer list is: the connection
         // service and the share sheet both write the choice, so a value read
         // once here would go stale the moment either of them re-pointed the
@@ -262,6 +266,7 @@ class MainActivity : ComponentActivity() {
             },
             connection = connection,
             peers = peers,
+            listedPeers = listedPeers,
             selectedPeerHex = selectedPeerHex,
             offers = offers,
             transfers = transfers,
@@ -282,11 +287,21 @@ class MainActivity : ComponentActivity() {
         // action used to take nothing, and the service picked a peer itself.
         onConnect = { peer -> ConnectionService.start(this, peer) },
         onDisconnect = { ConnectionService.stop(this) },
-        onForget = { peer ->
-            // `removePeer` drops the choice with the computer, so the next
-            // connection cannot be aimed at something no longer trusted.
-            app.trustStore.removePeer(peer.fingerprint)
+        onRevoke = { peer ->
+            // `revokePeer` drops the choice with the trust, so the next
+            // connection cannot be aimed at something no longer trusted, and
+            // nothing is chosen in its place.
+            app.trustStore.revokePeer(peer.fingerprint)
             ConnectionService.stop(this)
+        },
+        onRemoveFromList = { peer ->
+            // Refused by the store for anything still trusted, so this cannot
+            // become a quiet second way to revoke. The connection is stopped
+            // for the same reason the revoke does it: the row is going, and a
+            // service still dialling on its behalf would outlive it.
+            if (app.trustStore.hideRevokedPeer(peer.fingerprint)) {
+                ConnectionService.stop(this)
+            }
         },
         onSetFilesGrant = { peer, granted ->
             app.trustStore.setGrant(peer.fingerprint, FilesCapability.ID, granted)

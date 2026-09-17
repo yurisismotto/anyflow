@@ -188,6 +188,7 @@ fn peer(fingerprint: Fingerprint, name: &str) -> TrustedPeer {
         granted_capabilities: [("battery.v1".to_string(), true)].into_iter().collect(),
         last_protocol_version: 1,
         revoked: false,
+        hidden: false,
         clipboard_policy: ClipboardPolicy::default(),
         notification_policy: NotificationPolicy::default(),
     }

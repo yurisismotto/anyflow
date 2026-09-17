@@ -299,6 +299,7 @@ impl SessionHost for PhoneHost {
             granted_capabilities: capabilities.iter().map(|c| (c.clone(), true)).collect(),
             last_protocol_version: version,
             revoked: false,
+            hidden: false,
             clipboard_policy: Default::default(),
             notification_policy: Default::default(),
         })

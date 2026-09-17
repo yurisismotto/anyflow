@@ -39,6 +39,24 @@ enum Command {
     /// Round-trip a PING over the live session with a device.
     Ping { device: String },
 
+    /// Take a revoked device out of the device list, keeping the revocation.
+    ///
+    /// The device stays revoked: it is still refused if it connects, and it
+    /// still has to pair again from scratch to come back. This only stops it
+    /// being listed.
+    ///
+    /// Addressed by **full fingerprint hex**, not by a device id or a prefix.
+    /// A revoked record about to be removed has had its name and id cleared,
+    /// and identity here has to be the pinned key rather than anything two
+    /// devices could share.
+    RemoveFromList {
+        /// Full device fingerprint hex. Omit when using --all.
+        fingerprint: Option<String>,
+        /// Remove every revoked device that is still listed.
+        #[arg(long)]
+        all: bool,
+    },
+
     /// Allow a device to use a capability.
     ///
     /// Pairing says who a device is; this says what it may do. `files.v1` is
@@ -245,6 +263,18 @@ async fn main() -> anyhow::Result<()> {
         Command::Devices => simple(stream, Request::Devices).await,
         Command::Ping { device } => simple(stream, Request::Ping { device }).await,
         Command::Unpair { device } => simple(stream, Request::Unpair { device }).await,
+        Command::RemoveFromList { fingerprint, all } => match (fingerprint, all) {
+            (Some(_), true) => {
+                anyhow::bail!("give a fingerprint or --all, not both")
+            }
+            (None, false) => {
+                anyhow::bail!("give a device fingerprint, or --all to remove every revoked device")
+            }
+            (Some(fingerprint), false) => {
+                simple(stream, Request::HideRevokedDevice { fingerprint }).await
+            }
+            (None, true) => simple(stream, Request::HideAllRevokedDevices).await,
+        },
         Command::Pair { ttl } => pair(stream, ttl).await,
         Command::Grant { device, capability } => {
             simple(

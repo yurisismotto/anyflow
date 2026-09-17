@@ -50,6 +50,29 @@ pub enum Request {
     Confirm { accept: bool },
     /// Revokes a pairing by device id or fingerprint prefix.
     Unpair { device: String },
+
+    /// Takes one **already revoked** device out of the visible device lists,
+    /// keeping the revocation itself.
+    ///
+    /// Named by full fingerprint hex and by nothing else. Every other
+    /// device-addressed request here takes a `device` *selector* — a device
+    /// id or a fingerprint prefix — which is right for a command a person
+    /// types and wrong for this one: the record being addressed has had its
+    /// device id and display name cleared, and the whole point of the
+    /// operation is that it acts on one cryptographic identity and not on
+    /// whatever else shares a name with it.
+    ///
+    /// Purely local. It sends nothing to the device, needs no session, and is
+    /// refused for a device that is still trusted — revoking is a separate,
+    /// deliberate act and this is not a shortcut to it.
+    HideRevokedDevice { fingerprint: String },
+
+    /// Takes every currently visible revoked device out of the lists.
+    ///
+    /// One request rather than a loop of the above, because the trust store
+    /// is a single document and the operation should reach the disk once. The
+    /// reply reports how many were hidden.
+    HideAllRevokedDevices,
     /// Round-trips a PING over the live session with a device.
     Ping { device: String },
 
