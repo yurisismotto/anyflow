@@ -235,8 +235,13 @@ class FileTransferManager(
             )
         }
 
-        val idBytes = ByteArray(StreamAuth.TRANSFER_ID_LENGTH).also { random.nextBytes(it) }
-        val id = idBytes.joinToString("") { "%02x".format(it) }
+        // A fresh identity for every attempt, minted from randomness alone.
+        // Nothing about the file — its name, its URI, its digest — feeds into
+        // it, so re-offering the same file after a decline produces a
+        // genuinely new transfer that the desktop must approve on its own
+        // merits. See [StreamAuth.newTransferId].
+        val idBytes = StreamAuth.newTransferId(random)
+        val id = StreamAuth.toHex(idBytes)
 
         val transfer = Transfer(
             id = id,
@@ -762,7 +767,7 @@ class FileTransferManager(
         sending: Boolean,
     ): Transfer? {
         if (rawId.size != StreamAuth.TRANSFER_ID_LENGTH) return null
-        val id = rawId.joinToString("") { "%02x".format(it) }
+        val id = StreamAuth.toHex(rawId)
         val transfer = transfers[id] ?: return null
         if (!transfer.peer.contentEquals(peer)) return null
         if (transfer.sending != sending) return null

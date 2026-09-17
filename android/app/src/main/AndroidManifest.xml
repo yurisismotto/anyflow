@@ -169,6 +169,43 @@
             tools:replace="android:screenOrientation" />
 
         <!--
+          The scanner AnyFlow actually launches (ANDROID-UX-SCANNER-INSETS-01).
+
+          `PairingCaptureActivity` is the library's `CaptureActivity` with one
+          thing added: an inset handler that keeps the prompt out from under
+          the navigation bar. The library's screen lays that prompt against
+          the bottom of the window, and since API 35 the bottom of the window
+          is behind the bar — measured on the certification hardware as
+          `zxing_status_view [623,2842][1176,2880]` inside `navigationBars
+          [0,2784][1800,2880]`.
+
+          The attributes below are the library's own, copied deliberately
+          rather than inherited: a subclass gets a *separate* manifest entry,
+          so anything the library declares for its activity has to be said
+          again here or it is silently lost. `zxing_CaptureTheme` is the
+          fullscreen capture theme, `clearTaskOnLaunch` and `stateNotNeeded`
+          are what stop a scanner surviving into a later task, and
+          `stateAlwaysHidden` keeps the keyboard away from a camera screen.
+
+          `screenOrientation="unspecified"` is the same value and the same
+          reason as the declaration above it: the platform default, meaning
+          Android applies the user's own orientation policy. It needs no
+          `tools:replace` because nothing else declares this class. A custom
+          activity must not be how `sensorLandscape` creeps back in.
+
+          Not exported: it is launched by `ScanContract` from inside this app
+          and by nothing else.
+        -->
+        <activity
+            android:name=".ui.PairingCaptureActivity"
+            android:exported="false"
+            android:clearTaskOnLaunch="true"
+            android:screenOrientation="unspecified"
+            android:stateNotNeeded="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
+
+        <!--
           The Sharesheet entry point: Gallery / Files / Browser -> Share ->
           AnyFlow. Exported because that is what makes it appear in the
           chooser; it accepts only a shared stream and does nothing with an

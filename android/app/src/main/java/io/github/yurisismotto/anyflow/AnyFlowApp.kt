@@ -7,6 +7,7 @@ import io.github.yurisismotto.anyflow.capability.CapabilityRegistry
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
 import io.github.yurisismotto.anyflow.capability.FilesCapability
 import io.github.yurisismotto.anyflow.capability.NotificationsCapability
+import io.github.yurisismotto.anyflow.capability.SensitiveCapabilities
 import io.github.yurisismotto.anyflow.clipboard.ClipboardNotifications
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
 import io.github.yurisismotto.anyflow.clipboard.SystemClipboard
@@ -362,12 +363,81 @@ class AnyFlowApp : Application() {
     )
 
     /**
+     * The computer a scanned code is currently proving a token for.
+     *
+     * Read by [ConnectionService] through [PairingGate] so the tokenless
+     * reconnect dialer holds off for exactly as long as a pairing is in
+     * flight, and for exactly that one computer. See [PairingGate] for the
+     * defect this closes, and why it is a hold rather than a stop.
+     *
+     * A hex string rather than a `Fingerprint`, for the reason
+     * `selectedPeerFlow` gives: `Fingerprint` wraps a `ByteArray` whose
+     * `equals` is identity.
+     */
+    private val pairingInFlight = java.util.concurrent.atomic.AtomicReference<String?>(null)
+
+    /** Null when no scanned code is being proved. */
+    val pairingInFlightHex: String? get() = pairingInFlight.get()
+
+    /**
+     * How a scanned code resolved.
+     *
+     * [provedToken] is the difference between "this computer demanded the
+     * QR's token and got it" and "this computer already trusted this phone
+     * and asked for nothing". Both are legitimate answers to a scan — the
+     * responder decides what it requires — and they are different events, so
+     * they are not collapsed into one word on the screen.
+     */
+    data class PairOutcome(
+        val peer: TrustStore.TrustedPeer,
+        val provedToken: Boolean,
+    )
+
+    /**
      * Completes pairing from a scanned QR code.
      *
      * The desktop's fingerprint comes from the QR and is pinned before the
      * socket opens, so there is no window in which an impostor could answer.
+     *
+     * ## UX-DEBT-02 — a scan is an instruction about this computer
+     *
+     * Scanning is explicit, so for the length of the attempt this is the only
+     * thing allowed to dial that computer ([pairingInFlight]). Without it the
+     * reconnect coordinator's *tokenless* dial could reach a desktop waiting
+     * for a pairing proof, stop at `PairingRequired` without sending one, and
+     * be declared terminal — while the person was mid-way through re-pairing.
+     *
+     * Nothing about trust is decided here. The desktop decides whether a
+     * proof is required, verifies it, and asks a human; this function only
+     * makes sure the right connection is the one carrying the token, and
+     * writes the result down without trampling settings that were already
+     * there ([TrustStore.upsertPairedPeer]).
+     *
+     * On every failure path the trust store is left exactly as it was: no
+     * record is created, none is deleted, no grant moves and the chosen
+     * computer is unchanged. Trust is written in one place below, after the
+     * session is established.
      */
-    suspend fun pair(payload: QrPayload): Result<TrustStore.TrustedPeer> {
+    suspend fun pair(payload: QrPayload): Result<PairOutcome> {
+        val targetHex = payload.fingerprint.toHex()
+        // Also the guard against two scans at once: a second one finds the
+        // slot taken rather than racing the first for the same window.
+        if (!pairingInFlight.compareAndSet(null, targetHex)) {
+            return Result.failure(
+                IllegalStateException("a pairing code is already being proved"),
+            )
+        }
+        try {
+            return pairWithToken(payload, targetHex)
+        } finally {
+            pairingInFlight.set(null)
+        }
+    }
+
+    private suspend fun pairWithToken(
+        payload: QrPayload,
+        targetHex: String,
+    ): Result<PairOutcome> {
         _connectionState.value = ConnectionState.Connecting
 
         val addresses = Endpoints.order(
@@ -400,23 +470,26 @@ class AnyFlowApp : Application() {
                         pairedAtUnix = System.currentTimeMillis() / 1000,
                         // What the desktop advertises is what both sides
                         // *support*, not what either has authorized. The
-                        // clipboard grant is withheld here and turned on from
-                        // the device card, because a computer that can write
-                        // this phone's clipboard can also see what is pasted
-                        // next — a side effect that needs its own yes.
-                        // `notifications.v1` is withheld here for a stronger
-                        // version of the clipboard's reason: a computer that
-                        // can see this phone's notifications sees banking
-                        // alerts, 2FA codes and message previews, and on the
-                        // certification hardware the platform's own OTP
-                        // redaction did not fire at all. It is never in
-                        // `auto_grant` (ADR-0015 §4) and is turned on per peer,
-                        // deliberately, from the device card.
+                        // sensitive capabilities — `clipboard.v1` and
+                        // `notifications.v1` — are withheld here and turned on
+                        // per peer from the device card; see
+                        // [SensitiveCapabilities] for what makes each of them
+                        // sensitive and why the set is named rather than
+                        // subtracted inline, as it was here.
+                        //
+                        // This is no longer the only thing standing between a
+                        // negotiation and a grant: `mergePairing` applies the
+                        // same set where the union happens, so a re-pair
+                        // cannot escalate even if this line is one day wrong.
                         grantedCapabilities = connection.negotiatedCapabilities
-                            .toSet() - ClipboardCapability.ID - NotificationsCapability.ID,
+                            .toSet() - SensitiveCapabilities.NEVER_AUTO_GRANTED,
                         addresses = listOf(Endpoints.format(address)),
                     )
-                    trustStore.addPeer(peer)
+                    // Merged, not replaced: a computer paired again keeps
+                    // the grants and policies the person set for it. See
+                    // `TrustStore.upsertPairedPeer` — and note this is the
+                    // only line in this function that writes trust.
+                    val stored = trustStore.upsertPairedPeer(peer)
                     connection.disconnect()
                     // `files.v1` is granted here because the person just
                     // paired this computer by hand, and every incoming file
@@ -424,9 +497,16 @@ class AnyFlowApp : Application() {
                     // revocable from the device card, and revoking it takes
                     // effect immediately.
                     _connectionState.value = ConnectionState.Idle
-                    return Result.success(peer)
+                    return Result.success(
+                        PairOutcome(stored, provedToken = result.provedPairing),
+                    )
                 }
-                is ConnectResult.PairingRequired -> lastError = "the computer declined"
+                // Unreachable from here — a scanned payload always carries a
+                // token, and this is what `PeerConnection` returns when there
+                // is none to offer — but stated honestly rather than as "the
+                // computer declined", which it never was.
+                is ConnectResult.PairingRequired ->
+                    lastError = "no pairing code was offered to the computer"
                 is ConnectResult.Failed -> lastError = result.reason
             }
         }

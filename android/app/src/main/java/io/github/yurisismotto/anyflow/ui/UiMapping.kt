@@ -5,6 +5,7 @@ import io.github.yurisismotto.anyflow.capability.ClipboardCapability
 import io.github.yurisismotto.anyflow.capability.FilesCapability
 import io.github.yurisismotto.anyflow.clipboard.ClipboardCapabilities
 import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
+import io.github.yurisismotto.anyflow.files.FileTransferManager
 import io.github.yurisismotto.anyflow.files.TransferState
 import io.github.yurisismotto.anyflow.store.TrustStore
 import io.github.yurisismotto.anyflow.ui.theme.AnyFlowStatus
@@ -122,9 +123,9 @@ object UiMapping {
      *
      * The Sharesheet screen has no second chance to explain itself: it is a
      * modal over someone else's app, and when it is wrong the person's only
-     * recourse is to close it and guess. So a send has exactly three
-     * observable outcomes and no fourth, silent one — which is what issue #12
-     * was. [Sending] must always be replaced, never merely entered.
+     * recourse is to close it and guess. So a send has only observable
+     * outcomes and no silent one — which is what issue #12 was. [Sending]
+     * must always be replaced, never merely entered.
      */
     sealed interface SendAttempt {
         /** Nothing started, or a failure the user may retry from. */
@@ -133,14 +134,38 @@ object UiMapping {
         /** The offer is out and no answer has come back. */
         data object Sending : SendAttempt
 
-        /** The offer was accepted for transfer; progress takes over. */
+        /**
+         * Shared text reached the computer. Terminal, and the screen closes.
+         *
+         * A clipboard update is delivered by the time `sendText` returns.
+         * There is no transfer to follow, which is exactly what separates it
+         * from [Offered].
+         */
         data object Sent : SendAttempt
+
+        /**
+         * A file offer is out, and [transferId] is the attempt it created.
+         *
+         * The id is the load-bearing field and the whole of UX-DEBT-01. This
+         * screen used to find "its" transfer by matching the display
+         * filename against every transfer the app had ever seen, so a file
+         * that had once been declined could never be offered again — see
+         * [sendSurface]. `files.offer` has always returned the id of the
+         * transfer it minted; it was simply thrown away here.
+         */
+        data class Offered(val transferId: String) : SendAttempt
 
         /** Terminal for this attempt, and retryable. */
         data class Failed(val message: String) : SendAttempt
 
-        /** Whether the Send button may be pressed. */
-        val canSend: Boolean get() = this !is Sending && this !is Sent
+        /**
+         * Whether the Send button may be pressed.
+         *
+         * A whitelist rather than a list of exclusions: a state added later
+         * is not sendable until somebody says it is, which is the safe
+         * direction for a button that starts a transfer.
+         */
+        val canSend: Boolean get() = this is Idle || this is Failed
     }
 
     /**
@@ -153,7 +178,7 @@ object UiMapping {
      */
     fun sendButtonLabel(attempt: SendAttempt): String = when (attempt) {
         is SendAttempt.Idle -> "Send"
-        is SendAttempt.Sending, is SendAttempt.Sent -> "Sending…"
+        is SendAttempt.Sending, is SendAttempt.Sent, is SendAttempt.Offered -> "Sending…"
         is SendAttempt.Failed -> "Try again"
     }
 
@@ -168,9 +193,145 @@ object UiMapping {
      * nothing.
      */
     fun sendOutcome(result: Result<String>): SendAttempt = result.fold(
-        onSuccess = { SendAttempt.Sent },
+        // The success value is the transfer id, and it is kept. Discarding it
+        // is what forced the screen to identify its own transfer by filename.
+        onSuccess = { SendAttempt.Offered(it) },
         onFailure = { SendAttempt.Failed(sendFailureMessage(it)) },
     )
+
+    /**
+     * What the file half of the Sharesheet should be showing.
+     *
+     * ## UX-DEBT-01
+     *
+     * The screen used to decide this with
+     *
+     * ```kotlin
+     * val mine = transfers.filter { it.sending && it.filename == name }
+     * ```
+     *
+     * and show the Send button only when that came back empty. Three things
+     * made that a dead end rather than a nicety:
+     *
+     *  * `files.visible` is every transfer of the process, terminal ones
+     *    included — `FileTransferManager` never prunes its map, deliberately,
+     *    because the Activity screen is a history;
+     *  * so one decline left a permanent row for that display name, and the
+     *    Send button never came back. Re-sharing the same file showed
+     *    "declined" and nothing to press, for the life of the app. The
+     *    previous sprint had to use a second filename to test an Accept;
+     *  * and a *display name* is not an identity. Two different URIs that
+     *    happen to be called `photo.jpg` aliased onto each other, and a
+     *    transfer to one computer hid the Send button for another.
+     *
+     * The fix is to stop guessing. `files.offer` mints a fresh random id per
+     * attempt and returns it; [SendAttempt.Offered] keeps it, and this
+     * function follows *that* transfer and no other. A screen that has not
+     * offered anything shows the button, whatever history holds.
+     *
+     * Presentation identity and protocol identity are now the same value,
+     * which is safe precisely because the value is the protocol's — minted
+     * from randomness, never derived from the file.
+     */
+    sealed interface SendSurface {
+        /** No attempt from this screen is outstanding: offer the button. */
+        data object Offer : SendSurface
+
+        /**
+         * This screen's attempt is running.
+         *
+         * [transfer] is null only in the instant between `offer` returning an
+         * id and its row reaching the UI flow. Neither a button nor a row is
+         * right in that instant, and showing the button would be how a
+         * double tap becomes two transfers.
+         */
+        data class InFlight(val transfer: FileTransferManager.TransferUi?) : SendSurface
+
+        /**
+         * This screen's attempt reached a terminal state — declined, failed,
+         * cancelled or completed. The row says which, and a retry is offered
+         * beside it.
+         */
+        data class Ended(val transfer: FileTransferManager.TransferUi) : SendSurface
+    }
+
+    fun sendSurface(
+        attempt: SendAttempt,
+        transfers: List<FileTransferManager.TransferUi>,
+    ): SendSurface = when (attempt) {
+        is SendAttempt.Offered -> {
+            // By id alone. Not by filename, not by peer, not by position.
+            val mine = transfers.firstOrNull { it.transferId == attempt.transferId }
+            when {
+                mine == null -> SendSurface.InFlight(null)
+                mine.state.isTerminal -> SendSurface.Ended(mine)
+                else -> SendSurface.InFlight(mine)
+            }
+        }
+        // Idle, Sending, Failed and the text-only Sent have no transfer to
+        // follow, so the button is the whole screen.
+        else -> SendSurface.Offer
+    }
+
+    /**
+     * Whether a tap may start a new attempt right now.
+     *
+     * The one gate, so "can this start a transfer" has a single answer rather
+     * than one per button. A settled attempt is always restartable — that is
+     * the point of UX-DEBT-01 — and a running one never is, which is what
+     * stops repeated taps turning into a pile of concurrent offers.
+     */
+    fun canStartSend(attempt: SendAttempt, surface: SendSurface): Boolean = when (surface) {
+        is SendSurface.Offer -> attempt.canSend
+        is SendSurface.Ended -> true
+        is SendSurface.InFlight -> false
+    }
+
+    /**
+     * What the button under a settled attempt says.
+     *
+     * A completed send is not a failure and must not be offered as one:
+     * "Try again" over a file that arrived intact would read as though it had
+     * not.
+     */
+    fun retryButtonLabel(state: TransferState): String = when (state) {
+        TransferState.COMPLETED -> "Send again"
+        else -> "Try again"
+    }
+
+    /**
+     * The computers a file may actually be offered to.
+     *
+     * Stated here rather than inline in the screen so that a retry and a
+     * first attempt cannot drift apart: both ask this, both at the moment of
+     * the tap, so a grant withdrawn between the decline and the retry removes
+     * the destination instead of being carried over from the earlier attempt.
+     */
+    fun fileDestinations(
+        peers: List<TrustStore.TrustedPeer>,
+    ): List<TrustStore.TrustedPeer> = peers.filter { it.allows(FilesCapability.ID) }
+
+    /**
+     * What a completed scan is called.
+     *
+     * A scan has two honest endings and they are not the same event:
+     *
+     *  * the computer demanded the code's single-use token, this phone proved
+     *    it, and a person at the keyboard confirmed the fingerprint — trust
+     *    was established, or re-established after a revoke;
+     *  * the computer already trusted this phone and asked for nothing, so
+     *    the code was not spent and nothing about trust changed.
+     *
+     * Reporting the second as the first is what let UX-HARDENING §20 test 8a
+     * record a reconnection as a fresh pairing. The wording here is the only
+     * thing that tells them apart on screen.
+     */
+    fun pairedMessage(deviceName: String, provedToken: Boolean): String =
+        if (provedToken) {
+            "Paired with $deviceName."
+        } else {
+            "$deviceName already trusts this device. Reconnected; the code was not used."
+        }
 
     /**
      * Turns a failed `files.offer` into something safe to put on a screen.

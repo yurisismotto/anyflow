@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
-import io.github.yurisismotto.anyflow.capability.FilesCapability
 import io.github.yurisismotto.anyflow.clipboard.ClipboardText
 import io.github.yurisismotto.anyflow.files.SharedFile
 import io.github.yurisismotto.anyflow.service.ConnectionService
@@ -298,7 +297,11 @@ private fun SendScreen(
     // A computer without the `files.v1` grant is not a destination, however
     // well paired it is. Narrowing here rather than letting `offer` refuse
     // later means the screen never offers a Send that cannot work.
-    val eligible = peers.filter { it.allows(FilesCapability.ID) }
+    //
+    // Re-derived on every recomposition, which is what makes a Retry respect
+    // a grant withdrawn since the attempt it is retrying: the destination is
+    // recomputed at the moment of the tap, never carried over.
+    val eligible = UiMapping.fileDestinations(peers)
     val destination = PeerTarget.resolve(eligible, selectedHex)
     val peer = destination.peerOrNull()
 
@@ -358,25 +361,53 @@ private fun SendScreen(
                     DestinationPicker(eligible, peer.fingerprint.toHex(), onChoose)
                 }
 
-                val mine = transfers.filter { it.sending && it.filename == name }
-                if (mine.isEmpty()) {
-                    // The failure is stated above the button rather than in a
-                    // toast: a toast on a Sharesheet is gone before the person
-                    // has finished reading it, and the button beneath it is
-                    // the retry.
-                    (attempt as? UiMapping.SendAttempt.Failed)?.let {
-                        Text(it.message, color = MaterialTheme.colorScheme.error)
+                // UX-DEBT-01: this screen follows the transfer *it* started,
+                // by the id `offer` returned, and never a transfer that
+                // merely shares a display name. See `UiMapping.sendSurface`.
+                val surface = UiMapping.sendSurface(attempt, transfers)
+
+                // Re-read from the live state rather than from the captured
+                // composition, so two taps landing before a recomposition
+                // cannot both start an attempt.
+                val start = {
+                    val now = UiMapping.sendSurface(attempt, transfers)
+                    if (UiMapping.canStartSend(attempt, now)) {
+                        attempt = UiMapping.SendAttempt.Sending
+                        onSend(peer, uri) { outcome -> attempt = outcome }
                     }
-                    Button(
-                        enabled = attempt.canSend,
-                        onClick = {
-                            attempt = UiMapping.SendAttempt.Sending
-                            onSend(peer, uri) { outcome -> attempt = outcome }
-                        },
-                    ) { Text(UiMapping.sendButtonLabel(attempt)) }
-                } else {
-                    for (transfer in mine) {
-                        TransferRow(transfer)
+                }
+
+                when (surface) {
+                    is UiMapping.SendSurface.Offer -> {
+                        // The failure is stated above the button rather than
+                        // in a toast: a toast on a Sharesheet is gone before
+                        // the person has finished reading it, and the button
+                        // beneath it is the retry.
+                        (attempt as? UiMapping.SendAttempt.Failed)?.let {
+                            Text(it.message, color = MaterialTheme.colorScheme.error)
+                        }
+                        Button(
+                            enabled = UiMapping.canStartSend(attempt, surface),
+                            onClick = start,
+                        ) { Text(UiMapping.sendButtonLabel(attempt)) }
+                    }
+
+                    is UiMapping.SendSurface.InFlight ->
+                        // Null for the instant between `offer` returning and
+                        // its row arriving. No button either way: an offer is
+                        // already out.
+                        surface.transfer?.let { TransferRow(it) }
+
+                    is UiMapping.SendSurface.Ended -> {
+                        TransferRow(surface.transfer)
+                        // The whole of UX-DEBT-01. A declined, failed,
+                        // cancelled or completed attempt is history; this
+                        // starts a *new* one, with a new transfer id, through
+                        // the same path the first attempt took. Never
+                        // automatic, and never in the background.
+                        Button(onClick = start) {
+                            Text(UiMapping.retryButtonLabel(surface.transfer.state))
+                        }
                     }
                 }
             }

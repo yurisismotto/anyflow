@@ -78,8 +78,18 @@ class MainActivity : ComponentActivity() {
                 // and it is what makes pairing a second desktop work: without
                 // it the new peer would be trusted and unreachable behind
                 // whichever entry the store happened to hold first.
-                .onSuccess { peer ->
-                    ConnectionService.start(this@MainActivity, peer.fingerprint)
+                .onSuccess { outcome ->
+                    ConnectionService.start(this@MainActivity, outcome.peer.fingerprint)
+                    // Says which of the two things happened. A scan against a
+                    // computer that still trusts this phone is a reconnection
+                    // and no token was spent; calling that "paired" is what
+                    // made UX-HARDENING §20 test 8a read as more than it was.
+                    showError(
+                        UiMapping.pairedMessage(
+                            outcome.peer.deviceName,
+                            outcome.provedToken,
+                        ),
+                    )
                 }
                 .onFailure { showError(it.message ?: "Pairing failed.") }
         }

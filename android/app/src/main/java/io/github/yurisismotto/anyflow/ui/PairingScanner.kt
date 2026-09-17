@@ -33,6 +33,15 @@ import io.github.yurisismotto.anyflow.pairing.QrPayload
  * removed the activity is `unspecified`, which is Android applying the user's
  * own policy: rotation locked to portrait stays portrait, auto-rotate on
  * follows the device.
+ *
+ * ## ANDROID-UX-SCANNER-INSETS-01
+ *
+ * Unlocking the orientation made portrait usable for the first time, and that
+ * exposed a layout defect underneath it: the library's prompt strip lays out
+ * against the bottom of an edge-to-edge window, which on API 35+ is behind
+ * the navigation bar. [options] therefore launches
+ * [PairingCaptureActivity] — the library's own screen plus an inset handler —
+ * rather than the library's `CaptureActivity` directly. See [ScannerInsets].
  */
 object PairingScanner {
 
@@ -54,6 +63,11 @@ object PairingScanner {
         // See the class docs. The library's default is `true`, which pins the
         // activity to its launch orientation for as long as the camera is up.
         .setOrientationLocked(false)
+        // ANDROID-UX-SCANNER-INSETS-01. Without this the contract launches
+        // the library's own `CaptureActivity`, whose prompt lays out behind
+        // the navigation bar. Ours is that activity plus an inset handler and
+        // nothing else; see `PairingCaptureActivity`.
+        .setCaptureActivity(PairingCaptureActivity::class.java)
 
     /**
      * What a finished scan means.

@@ -1,6 +1,7 @@
 package io.github.yurisismotto.anyflow.store
 
 import android.content.Context
+import io.github.yurisismotto.anyflow.capability.SensitiveCapabilities
 import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.identity.Fingerprint
 import io.github.yurisismotto.anyflow.notifications.NotificationPolicy
@@ -110,6 +111,77 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
         val notificationPolicy: NotificationPolicy = NotificationPolicy(),
     ) {
         fun allows(capabilityId: String): Boolean = capabilityId in grantedCapabilities
+
+        companion object {
+            /**
+             * What a record becomes when its computer is paired again.
+             *
+             * Pure, and separate from the store, so the rule can be read and
+             * tested without a device. [TrustStore.upsertPairedPeer] is its
+             * only caller and the reason it exists is written there.
+             *
+             *  * `existing == null`, or a record for a different key —
+             *    nothing is known about this fingerprint, so [paired] is the
+             *    record. Normal new-peer semantics, whatever the QR was
+             *    scanned over, and nothing is inherited from another key.
+             *  * otherwise — facts refresh, decisions persist.
+             *
+             * And in every branch: **a pairing never grants a sensitive
+             * capability.** Preserving a grant the person made is the point;
+             * inventing one because the fresh negotiation advertised it is
+             * the thing this must not do. See [SensitiveCapabilities].
+             */
+            fun mergePairing(
+                existing: TrustedPeer?,
+                paired: TrustedPeer,
+                maxAddresses: Int,
+            ): TrustedPeer {
+                // The non-escalation boundary, applied once and used by both
+                // branches: a pairing may never be the thing that grants a
+                // sensitive capability. Negotiating one only means both sides
+                // *support* it. See [SensitiveCapabilities] for why this is
+                // enforced here rather than left to the caller — it used to
+                // be, in a different file, and that made a real property an
+                // accident of where a line happened to live.
+                val grantable =
+                    paired.grantedCapabilities - SensitiveCapabilities.NEVER_AUTO_GRANTED
+
+                // Nothing is known about this key, or the record offered is a
+                // *different* key's. Either way this is a new peer and there
+                // is nothing to inherit: grants, policies and pairing time all
+                // come from the pairing, and never from another fingerprint's
+                // record. The fingerprint check is belt and braces on top of
+                // the caller looking the record up by fingerprint, because
+                // inheriting another computer's notification grant is the one
+                // mistake this function must be structurally unable to make.
+                if (existing == null || !existing.fingerprint.contentEquals(paired.fingerprint)) {
+                    return paired.copy(grantedCapabilities = grantable)
+                }
+
+                return existing.copy(
+                    // Facts about the session that just authenticated.
+                    deviceId = paired.deviceId,
+                    deviceName = paired.deviceName,
+                    pairedAtUnix = paired.pairedAtUnix,
+                    // The address that answered first, then what was already
+                    // remembered. Never fewer places to look than before.
+                    addresses = (paired.addresses + existing.addresses)
+                        .distinct()
+                        .take(maxAddresses),
+                    // Decisions the person made about this fingerprint.
+                    //
+                    // Unioned, so an auto-grantable capability this pairing
+                    // negotiated is added and one they had already allowed is
+                    // not removed. A *sensitive* capability is in this result
+                    // if and only if `existing` already held it — which is to
+                    // say, if and only if the person granted it themselves.
+                    grantedCapabilities = existing.grantedCapabilities + grantable,
+                    // clipboardPolicy and notificationPolicy are `existing`'s
+                    // by virtue of `copy`, and that is the point: they are
+                    // settings, not facts about the handshake.
+                )
+            }
+        }
     }
 
     fun peers(): List<TrustedPeer> = _peersFlow.value
@@ -151,6 +223,53 @@ class TrustStore(context: Context) : NotificationSecret.Metadata {
     fun addPeer(peer: TrustedPeer) {
         val remaining = peers().filterNot { it.fingerprint.contentEquals(peer.fingerprint) }
         writePeers(remaining + peer)
+    }
+
+    /**
+     * Records a pairing that has just been proved, keeping what the person
+     * already decided about this computer.
+     *
+     * ## UX-DEBT-02
+     *
+     * [addPeer] replaces a record wholesale, which is right for a computer
+     * being met for the first time and wrong for one being paired *again*.
+     * A desktop that revoked this phone and was then re-paired from a fresh
+     * QR came back as a brand-new row: the clipboard grant the person had
+     * turned on was off, the notification app list they had chosen was empty,
+     * and nothing said so. Re-pairing is not a reason to undo somebody's
+     * settings.
+     *
+     * The rule, stated once here rather than at the call site:
+     *
+     *  * **facts refresh.** Device id, display name, the address that just
+     *    answered and the pairing time come from the session that has this
+     *    moment authenticated, because that is what they are *about*;
+     *  * **decisions persist.** Capability grants, the clipboard policy and
+     *    the notification policy are the phone owner's, about this
+     *    fingerprint, and a re-pair of the same fingerprint does not revisit
+     *    them. Grants are unioned, so a capability this pairing negotiated is
+     *    added and one the person had already allowed is not taken away.
+     *
+     * Safe because the fingerprint is the anchor: it is the pinned SPKI the
+     * TLS handshake was checked against and the identity the proof was bound
+     * to, so "the same fingerprint" means the same key, not the same name and
+     * not the same address. A *different* fingerprint matches nothing here
+     * and takes the ordinary new-peer path through [addPeer].
+     *
+     * Called only after a proof succeeded or the desktop declared this device
+     * already trusted. Nothing in this class is what decides that.
+     */
+    fun upsertPairedPeer(peer: TrustedPeer): TrustedPeer {
+        // Looked up by fingerprint and by nothing else: the pinned SPKI is
+        // the anchor, so a changed device id, display name or address updates
+        // a record while a changed key is simply a different computer.
+        val merged = TrustedPeer.mergePairing(
+            existing = peer(peer.fingerprint),
+            paired = peer,
+            maxAddresses = MAX_REMEMBERED_ADDRESSES,
+        )
+        addPeer(merged)
+        return merged
     }
 
     /** Forgets a computer. It cannot reconnect without pairing again. */
