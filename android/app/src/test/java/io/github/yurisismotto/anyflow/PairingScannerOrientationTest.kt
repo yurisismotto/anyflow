@@ -1,5 +1,6 @@
 package io.github.yurisismotto.anyflow
 
+import io.github.yurisismotto.anyflow.ui.PairingCaptureActivity
 import io.github.yurisismotto.anyflow.ui.PairingScanner
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -149,9 +150,47 @@ class PairingScannerOrientationTest {
             .toList()
 
         assertEquals(
-            "exactly one screenOrientation declaration is expected, on the scanner: $orientations",
-            listOf("unspecified"),
+            "both scanner activities must declare an orientation, and both " +
+                "must defer to the user: $orientations",
+            listOf("unspecified", "unspecified"),
             orientations,
+        )
+    }
+
+    /**
+     * ANDROID-UX-SCANNER-INSETS-01 introduced AnyFlow's own capture activity,
+     * and a subclass gets a *separate* manifest entry: nothing is inherited
+     * from the library's declaration. So the orientation guarantee has to be
+     * restated on it, or a custom activity becomes how `sensorLandscape`
+     * creeps back in.
+     */
+    @Test
+    fun `AnyFlow's own scanner activity is declared unspecified too`() {
+        val declaration = declarationFor(".ui.PairingCaptureActivity")
+        assertTrue(
+            "AnyFlow's capture activity must declare screenOrientation=" +
+                "\"unspecified\": $declaration",
+            declaration.contains("android:screenOrientation=\"unspecified\""),
+        )
+        assertFalse(
+            "it is launched by ScanContract from inside this app and by " +
+                "nothing else: $declaration",
+            declaration.contains("android:exported=\"true\""),
+        )
+        assertTrue(
+            "the library's capture theme has to be restated, not inherited: $declaration",
+            declaration.contains("android:theme=\"@style/zxing_CaptureTheme\""),
+        )
+    }
+
+    /** And it is the one the scan request actually launches. */
+    @Test
+    fun `the scan request launches AnyFlow's capture activity`() {
+        assertEquals(
+            "without this the contract launches the library's own screen, " +
+                "whose prompt lays out behind the navigation bar",
+            PairingCaptureActivity::class.java,
+            PairingScanner.options().captureActivity,
         )
     }
 
@@ -249,6 +288,16 @@ class PairingScannerOrientationTest {
             "a scanned code may contain a pairing token and must never be echoed",
             outcome.toString().contains(tokenBase32),
         )
+    }
+
+    /** Extracts the `<activity>` element naming [name]. */
+    private fun declarationFor(name: String): String {
+        val manifest = manifestDeclarations
+        val start = manifest.indexOf("android:name=\"$name\"")
+        assertTrue("the app manifest must declare $name", start >= 0)
+        val open = manifest.lastIndexOf("<activity", start)
+        val close = manifest.indexOf(">", start)
+        return manifest.substring(open, close + 1)
     }
 
     /** Extracts the `<activity>` element for the zxing capture screen. */

@@ -128,10 +128,16 @@ class HostDrivenCertificationHarness {
         say("pair payload-parsed fingerprint=${payload!!.fingerprint.toDisplayShort()}")
 
         val result = runBlocking { app.pair(payload) }
-        val peer = result.getOrNull()
+        val outcome = result.getOrNull()
         assertTrue("pairing failed: ${result.exceptionOrNull()?.message}", result.isSuccess)
-        assertNotNull(peer)
-        say("pair ok device=${peer!!.deviceId} fingerprint=${peer.fingerprint.toDisplayShort()}")
+        assertNotNull(outcome)
+        val peer = outcome!!.peer
+        say("pair ok device=${peer.deviceId} fingerprint=${peer.fingerprint.toDisplayShort()}")
+        // UX-DEBT-02: whether the QR's token was actually proved is now a
+        // fact the handshake reports rather than something inferred from
+        // success. A scan against a computer that already trusts this device
+        // is a reconnection, and saying so is the point.
+        say("pair proved-token=${outcome.provedToken}")
 
         // Pairing grants nothing it should not: ADR-0015 §4 keeps
         // `notifications.v1` out of the automatic set, and this is where a

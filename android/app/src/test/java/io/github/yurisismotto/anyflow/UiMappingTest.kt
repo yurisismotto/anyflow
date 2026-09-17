@@ -301,7 +301,9 @@ class UiMappingTest {
     @Test
     fun `a successful offer leaves the sending state`() {
         val outcome = UiMapping.sendOutcome(Result.success("0123abcd"))
-        assertEquals(UiMapping.SendAttempt.Sent, outcome)
+        // UX-DEBT-01: the id `offer` returned is kept, because that is what
+        // the screen follows instead of matching on the display filename.
+        assertEquals(UiMapping.SendAttempt.Offered("0123abcd"), outcome)
         assertNotEquals(UiMapping.SendAttempt.Sending, outcome)
     }
 
@@ -328,10 +330,12 @@ class UiMappingTest {
 
     @Test
     fun `an attempt in flight cannot be started a second time`() {
-        // Double-tap and re-entry: only Sending and Sent hold the button.
+        // Double-tap and re-entry: only Idle and Failed release the button.
         assertFalse(UiMapping.SendAttempt.Sending.canSend)
         assertFalse(UiMapping.SendAttempt.Sent.canSend)
+        assertFalse(UiMapping.SendAttempt.Offered("0123abcd").canSend)
         assertTrue(UiMapping.SendAttempt.Idle.canSend)
+        assertTrue(UiMapping.SendAttempt.Failed("nope").canSend)
     }
 
     @Test
@@ -357,7 +361,8 @@ class UiMappingTest {
             )
             assertTrue(
                 "a $result must reach a state the user can see",
-                outcome is UiMapping.SendAttempt.Sent || outcome is UiMapping.SendAttempt.Failed,
+                outcome is UiMapping.SendAttempt.Offered ||
+                    outcome is UiMapping.SendAttempt.Failed,
             )
         }
     }

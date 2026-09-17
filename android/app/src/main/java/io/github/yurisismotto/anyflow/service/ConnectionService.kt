@@ -26,6 +26,7 @@ import io.github.yurisismotto.anyflow.net.Endpoints
 import io.github.yurisismotto.anyflow.net.FailureKind
 import io.github.yurisismotto.anyflow.net.LinkState
 import io.github.yurisismotto.anyflow.net.PeerConnection
+import io.github.yurisismotto.anyflow.pairing.PairingGate
 import io.github.yurisismotto.anyflow.store.TrustStore
 import io.github.yurisismotto.anyflow.ui.MainActivity
 import kotlinx.coroutines.launch
@@ -227,6 +228,17 @@ class ConnectionService : LifecycleService() {
         val resolution = app.targetResolution()
         val peer = resolution.peerOrNull()
             ?: return DialResult.Terminal(resolution.blockedReason() ?: "no paired computer")
+
+        // UX-DEBT-02. `app.connect` carries no pairing token, by design. If a
+        // scanned code is being proved for this same computer right now, a
+        // tokenless connection would land on a desktop that is waiting for a
+        // PAIR_REQUEST, never send one, and be declared terminal underneath a
+        // pairing the person is in the middle of. Transient on purpose: the
+        // loop backs off and comes straight back, so a pairing that fails
+        // leaves the link where it was. See PairingGate.
+        PairingGate.holdFor(peer.fingerprint.toHex(), app.pairingInFlightHex)?.let {
+            return DialResult.Transient(it)
+        }
 
         return when (val result = app.connect(peer, address)) {
             is ConnectResult.Established -> DialResult.Established {

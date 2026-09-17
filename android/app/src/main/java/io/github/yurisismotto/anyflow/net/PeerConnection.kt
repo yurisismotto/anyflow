@@ -35,7 +35,27 @@ import javax.net.ssl.SSLSocket
 
 /** Outcome of an attempt to reach a desktop. */
 sealed interface ConnectResult {
-    data class Established(val connection: PeerConnection) : ConnectResult
+    /**
+     * The session is up.
+     *
+     * [provedPairing] says *how* it came up: true when the responder
+     * demanded a pairing proof and this connection produced one from a
+     * scanned token, false when the responder already knew this device and
+     * answered `HELLO_STATUS_TRUSTED`.
+     *
+     * It is a fact about the handshake that just happened, not an
+     * assumption, and it exists because the caller cannot otherwise tell
+     * them apart: a scan of a fresh QR against a computer that still trusts
+     * this phone resolves as an ordinary reconnection and the QR's
+     * single-use token is never used. That is correct — the responder
+     * decides what it requires — but it must not be *reported* as a fresh
+     * pairing, and the previous sprint recorded exactly that confusion
+     * (UX-HARDENING §20, test 8a).
+     */
+    data class Established(
+        val connection: PeerConnection,
+        val provedPairing: Boolean,
+    ) : ConnectResult
 
     /** The desktop does not know us and we had no pairing token to offer. */
     data object PairingRequired : ConnectResult
@@ -399,9 +419,13 @@ class PeerConnection private constructor(
                         return ConnectResult.Failed("desktop selected an unsupported version")
                     }
                     factory.protocolVersion = version
+                    // The desktop already knows this device, so it asked for
+                    // no proof and none was given — whether or not this dial
+                    // was carrying a freshly scanned token.
                     return established(
                         socket, input, output, factory, guard, registry, pinned,
                         ack.device, registry.negotiate(ack.capabilitiesList), version,
+                        provedPairing = false,
                     )
                 }
                 HelloStatus.HELLO_STATUS_PAIRING_REQUIRED -> Unit
@@ -467,9 +491,13 @@ class PeerConnection private constructor(
                 )
             }
 
+            // Reached only after the proof was sent, PAIR_RESPONSE came back
+            // accepted, and the responder's own confirmation verified. Every
+            // one of those is above; none of them is skippable.
             return established(
                 socket, input, output, factory, guard, registry, pinned,
                 ack.device, registry.negotiate(ack.capabilitiesList), version,
+                provedPairing = true,
             )
         }
 
@@ -485,6 +513,7 @@ class PeerConnection private constructor(
             device: DeviceInfo,
             capabilities: List<String>,
             version: Int,
+            provedPairing: Boolean,
         ): ConnectResult {
             // An idle connection is normal, so the timeout is not a deadline
             // for useful traffic — it is a liveness bound. The desktop probes
@@ -498,6 +527,7 @@ class PeerConnection private constructor(
                     socket, input, output, factory, guard, registry,
                     peer, device, capabilities, version,
                 ),
+                provedPairing,
             )
         }
 

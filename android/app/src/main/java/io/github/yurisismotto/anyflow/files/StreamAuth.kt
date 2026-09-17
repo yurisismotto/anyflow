@@ -44,6 +44,25 @@ object StreamAuth {
     const val CHALLENGE_LENGTH = 32
 
     /**
+     * A fresh transfer id.
+     *
+     * Random, and derived from nothing: not the filename, not the URI, not a
+     * counter, not the clock. That is what makes every attempt at sending a
+     * file a *new* transfer rather than a resumption of an old one — a
+     * retry after a decline shares a name with what was declined and must
+     * share nothing else, because the id is what the stream challenge is
+     * bound to (see [compute]) and what the peer answers about.
+     *
+     * The generator is a parameter so the property can be tested without a
+     * device; production always passes a `SecureRandom`.
+     */
+    fun newTransferId(random: java.util.Random): ByteArray =
+        ByteArray(TRANSFER_ID_LENGTH).also { random.nextBytes(it) }
+
+    /** Lowercase hex, which is how a transfer id is spelled everywhere else. */
+    fun toHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
+
+    /**
      * @param challenge the single-use secret the acceptor sent over the
      *   control session. Never logged and never persisted.
      * @param acceptor the device that accepts data streams and issued the
