@@ -347,6 +347,29 @@ async fn main() -> anyhow::Result<()> {
     state.set_listen_port(bound_port);
     state.set_listen_families(bound.families);
 
+    // ---- the desktop shell ------------------------------------------------
+    //
+    // A `StatusNotifierItem` on the session bus, which is how KDE Plasma shows
+    // an application in its system tray. The daemon owns it because the daemon
+    // is the process that is always here: the GUI is two windows a person
+    // opens and closes, and keeping one alive forever to hold an icon would
+    // have made AnyFlow a product with two resident processes.
+    //
+    // Held, never awaited, and deliberately **not** in the `select!` below.
+    // Everything in that race is load-bearing — the network listener, the
+    // control server, the interrupt — and the first of them to finish ends the
+    // process. A tray icon is not in that class: if the session has no tray
+    // host, or the shell restarts, or the item cannot be published at all, the
+    // right outcome is a log line and a daemon that goes on moving files.
+    // `tray::spawn` supervises its own task so that even a panic is written
+    // down rather than swallowed.
+    //
+    // On a session with no `org.kde.StatusNotifierWatcher` — every GNOME
+    // session, which is most of them — this publishes the item, finds no host,
+    // says so once, and then waits event-driven for one to appear. It never
+    // polls.
+    let _tray = anyflow_linux::tray::spawn(anyflow_linux::tray::ActivatorChoice::SessionBus);
+
     let net = tokio::spawn(listener::run(bound.listeners, acceptor, Arc::clone(&state)));
     let ctl = tokio::spawn(server::run(control_listener, Arc::clone(&state)));
 
