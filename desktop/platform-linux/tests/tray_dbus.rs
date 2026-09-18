@@ -2,15 +2,10 @@
 //!
 //! # The fixture
 //!
-//! Every test in this file raises its **own** `dbus-daemon`, from a
-//! configuration written here, with **no service directories at all**. Two
-//! consequences, both deliberate:
-//!
-//! * nothing in these tests can reach the developer's session — no real
-//!   Plasma, no real GNOME, and above all no real `anyflow-gui`, which a bus
-//!   with the normal service directories would happily start;
-//! * nothing is activatable, so a test that expected D-Bus activation to
-//!   rescue it would fail rather than quietly succeed for the wrong reason.
+//! Every test in this file raises its **own** `dbus-daemon` with **no service
+//! directories at all**, from [`common::TestBus`] — shared with
+//! `tray_gnome.rs`, which puts a different host on the same kind of bus. That
+//! file's header explains what the absence of service directories buys.
 //!
 //! The fake watcher serves `org.kde.StatusNotifierWatcher` with the
 //! signatures from KDE's own `org.kde.StatusNotifierWatcher.xml`, and — like
@@ -22,8 +17,6 @@
 #![cfg(feature = "tray")]
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -35,101 +28,14 @@ use anyflow_linux::tray::{publish, PublishedItem};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 // ===========================================================================
-// A private session bus
+// The bus fixture
 // ===========================================================================
 
-struct TestBus {
-    child: Child,
-    address: String,
-    _dir: tempfile::TempDir,
-}
-
-impl TestBus {
-    fn start() -> TestBus {
-        let dir = tempfile::tempdir().expect("a temporary directory for the bus");
-        let config = dir.path().join("bus.conf");
-        // No `<servicedir>`: this bus can start nothing. `<listen>` uses a
-        // short path under /tmp because a Unix socket address is bounded by
-        // `sun_path`, and a temporary directory deep under a home directory
-        // will exceed it.
-        std::fs::write(
-            &config,
-            r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
- "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
-<busconfig>
-  <type>session</type>
-  <listen>unix:tmpdir=/tmp</listen>
-  <policy context="default">
-    <allow send_destination="*" eavesdrop="true"/>
-    <allow eavesdrop="true"/>
-    <allow own="*"/>
-  </policy>
-</busconfig>
-"#,
-        )
-        .expect("writing the bus configuration");
-
-        let mut child = Command::new("dbus-daemon")
-            .arg("--nofork")
-            .arg("--print-address")
-            .arg(format!("--config-file={}", config.display()))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("dbus-daemon should be installed");
-        let stdout = child.stdout.take().expect("the bus prints its address");
-        let mut line = String::new();
-        BufReader::new(stdout)
-            .read_line(&mut line)
-            .expect("reading the bus address");
-        let address = line.trim().to_string();
-        assert!(
-            address.starts_with("unix:"),
-            "unexpected bus address {address:?}"
-        );
-        TestBus {
-            child,
-            address,
-            _dir: dir,
-        }
-    }
-
-    async fn connect(&self) -> zbus::Connection {
-        zbus::conn::Builder::address(self.address.as_str())
-            .expect("the address parses")
-            .build()
-            .await
-            .expect("connecting to the private bus")
-    }
-}
-
-impl Drop for TestBus {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-/// Waits for `check` to hold, or fails. Nothing here sleeps for a fixed time
-/// and then asserts: that is how a suite becomes flaky on a loaded machine.
-async fn until<F: FnMut() -> bool>(what: &str, mut check: F) {
-    for _ in 0..600 {
-        if check() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("timed out waiting for {what}");
-}
-
-/// Holds for the whole window, rather than merely at the end of it.
-async fn stays<F: FnMut() -> bool>(what: &str, window: Duration, mut check: F) {
-    let deadline = std::time::Instant::now() + window;
-    while std::time::Instant::now() < deadline {
-        assert!(check(), "{what} stopped holding");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
+// The private `dbus-daemon`, and the two waiting helpers, live in
+// `tests/common/mod.rs` because `tray_gnome.rs` raises the same bus under a
+// different host. See that file for why it has no service directories.
+mod common;
+use common::{stays, until, TestBus};
 
 // ===========================================================================
 // The fake watcher — the real signatures, and the real verification
