@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The Flowing Ribbon: AnyFlow's product / connection mark.
-  Two endpoints joined by one continuous flow. Used for the app icon, the app
-  bar, transfer motifs and empty states. The institutional mark is the
-  Flowing A (logo_flowing_a.xml) — see docs/design/BRAND.md.
+  Two endpoints joined by one continuous flow. Used for the app bar, transfer
+  motifs and empty states. The institutional mark is the Flow A
+  (logo_flow_a.xml) — see docs/design/BRAND.md.
+
+  It is no longer the app icon. The launcher wore this mark until the Flow A
+  branding sprint moved `app-icon.svg` — and with it the desktop and now
+  Android — onto the identity mark.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"

@@ -72,7 +72,7 @@ class NotificationNavigationTest {
     @Test
     fun the_roots_have_no_parent_and_therefore_no_back_arrow() {
         assertNull(Screen.Devices.parent)
-        assertNull(Screen.Activity.parent)
+        assertNull(Screen.Files.parent)
         assertNull(Screen.Settings.parent)
     }
 

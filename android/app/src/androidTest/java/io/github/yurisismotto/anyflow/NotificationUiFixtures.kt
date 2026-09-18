@@ -174,6 +174,8 @@ object NotificationUiFixtures {
             onDismissClip = {},
             onRespondToOffer = { _, _ -> },
             onCancelTransfer = {},
+            onOpenTransfer = {},
+            onRefreshOpenTargets = {},
             onPickFileFor = {},
             readClipboardPreview = { null },
         )

@@ -89,7 +89,7 @@ fun AnyFlowStatusBadge(
  * The Flowing Ribbon, at whatever size the caller needs.
  *
  * The product mark: app bar, transfer motifs, empty states. The institutional
- * mark is the Flowing A ([AnyFlowBrandMark]).
+ * mark is the Flow A ([AnyFlowBrandMark]).
  */
 @Composable
 fun AnyFlowGradientMark(
@@ -105,7 +105,13 @@ fun AnyFlowGradientMark(
     )
 }
 
-/** The Flowing A. Institutional: About, onboarding, the empty first run. */
+/**
+ * The Flow A. Institutional: About, onboarding, the empty first run.
+ *
+ * The same mark the launcher icon wears and the same one the desktop wears —
+ * see `logo_flow_a.xml`. It drew the older Flowing A until this sprint, which
+ * meant the About screen and the app icon were two different identities.
+ */
 @Composable
 fun AnyFlowBrandMark(
     modifier: Modifier = Modifier,
@@ -113,7 +119,7 @@ fun AnyFlowBrandMark(
     contentDescription: String? = null,
 ) {
     Icon(
-        painter = painterResource(R.drawable.logo_flowing_a),
+        painter = painterResource(R.drawable.logo_flow_a),
         contentDescription = contentDescription,
         tint = Color.Unspecified,
         modifier = modifier.size(size),

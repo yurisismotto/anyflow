@@ -1,28 +1,68 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Adaptive icon foreground. The 108x108 canvas has a 72x72 safe zone; the
-  ribbon is scaled and centred to sit inside it, so no launcher mask can clip
-  a terminal node off.
+  The launcher icon's foreground layer: the Flow A.
+
+  ## Generated from the canonical mark, not redrawn
+
+  `pathData` and `strokeWidth` below are byte-for-byte the `d` and
+  `stroke-width` of `docs/design/assets/logo-flow-a.svg`, which is the same
+  geometry `docs/design/assets/app-icon.svg` carries and the same one
+  `desktop/gui/tests/brand_assets.rs` pins for the desktop. One mark, one path,
+  three platforms. `BrandingResourcesTest` asserts the equality, so the two
+  cannot drift a curve at a time.
+
+  ## Why the group only moves it
+
+  An adaptive icon is drawn on a 108x108 canvas of which a launcher may show
+  as little as the inner 72x72 square — or, for a round mask, only a 66-unit
+  circle about the centre. The mark is 55.78 x 56.00 units wide once its
+  8-unit round-capped stroke is counted, which fits inside *both* of those at
+  its native size, so this group scales by exactly 1 and does nothing but
+  translate.
+
+  That is worth more than it looks. At scale 1 the numbers in this file are
+  the numbers in the SVG: the stroke is 8 units here and 8 units there, so
+  "the stroke weight is the family" (BRAND.md) is preserved by arithmetic
+  rather than by someone remembering to rescale it.
+
+  ## The placement, and how it was chosen
+
+  The ink's minimum enclosing circle has its centre at (32.81, 36.24) on the
+  64-unit grid and a radius of 32.25 — *not* the centre of the bounding box,
+  because the A's apex and its out-flung crossbar terminal are not
+  symmetrical. Translating by (21.2, 17.8) lands that circle's centre on the
+  canvas centre (54, 54), which is the placement that buys the most clearance
+  from a round mask:
+
+      66-unit round safe zone   r_max 32.29 of 33      0.71 to spare
+      72x72 square safe zone    ink [21.80, 82.20]     3.80 to spare
+
+  Both are asserted by `BrandingResourcesTest`, recomputed from this file's
+  own path and group rather than trusted from this comment.
+
+  The Android 12+ splash screen inherits the same margin for free: it shows
+  the inner two thirds of this foreground, which is the same 72-of-108 the
+  square safe zone already answers for.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <group android:pivotX="32" android:pivotY="32"
-        android:scaleX="1.15" android:scaleY="1.15"
-        android:translateX="22" android:translateY="22">
-        <path android:pathData="M14,44 C 30,44 24,21 50,22"
-            android:strokeWidth="6.5" android:strokeLineCap="round">
+    <group android:translateX="21.2" android:translateY="17.8">
+        <path
+            android:pathData="M 53 56 C 50 41 43 22 32 8 C 22 21 15 36 10 47 C 7.5 52.5 11.5 56.5 15.5 52 C 22 43.5 33 38 45 37.5 C 50 37.3 54 38 57 39"
+            android:strokeWidth="8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round">
             <aapt:attr name="android:strokeColor">
                 <gradient android:type="linear"
-                    android:startX="12" android:startY="46" android:endX="52" android:endY="20">
+                    android:startX="10" android:startY="56"
+                    android:endX="54" android:endY="8">
                     <item android:offset="0" android:color="#FF16B8A6" />
                     <item android:offset="0.5" android:color="#FF4F7CFF" />
                     <item android:offset="1" android:color="#FF8B5CF6" />
                 </gradient>
             </aapt:attr>
         </path>
-        <path android:pathData="M14,44m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" android:fillColor="#FF16B8A6" />
-        <path android:pathData="M50,22m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" android:fillColor="#FF8B5CF6" />
     </group>
 </vector>

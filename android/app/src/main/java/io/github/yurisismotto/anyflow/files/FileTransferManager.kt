@@ -1,6 +1,8 @@
 package io.github.yurisismotto.anyflow.files
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import com.google.protobuf.ByteString
@@ -64,6 +66,16 @@ class FileTransferManager(
     /** Live transfers, by lowercase-hex transfer id. */
     private val transfers = ConcurrentHashMap<String, Transfer>()
 
+    /**
+     * Hands out the ordering ordinals in [TransferUi.sequence].
+     *
+     * A counter rather than a clock: `System.currentTimeMillis()` can repeat
+     * or go backwards, and two transfers offered in the same millisecond —
+     * which the share sheet's multi-select does routinely — would then have
+     * no defined order at all.
+     */
+    private val sequencer = AtomicLong(0)
+
     /** Where to reach the desktop for a data stream. Set once connected. */
     @Volatile
     private var transport: Transport? = null
@@ -101,21 +113,90 @@ class FileTransferManager(
         internal val answer: CompletableDeferred<Boolean>,
     )
 
-    /** One transfer, as the UI sees it. */
+    /**
+     * One transfer, as the UI sees it.
+     *
+     * ## What is deliberately not here
+     *
+     * No `Uri`, in either direction. The Files screen is built entirely from
+     * this type, so anything in it can reach a row, a log line or a
+     * screenshot — and a `content://` URI is a capability that routinely
+     * carries a document id or an account name inside it. What the screen
+     * needs to know is whether opening is *possible* ([hasOpenTarget]), which
+     * is a boolean; the URI itself stays inside the manager and is fetched by
+     * [resolveOpen] at the instant of a tap, when the answer is still true.
+     *
+     * No SHA-256 either. The digest is how the bytes were verified, not
+     * something a person needs, and a hash of a file the user chose is an
+     * identifier for that file.
+     */
     data class TransferUi(
         val transferId: String,
+        /** The computer at the other end. Identity, not decoration. */
+        val peer: Fingerprint,
         val filename: String,
         val sizeBytes: Long,
         val bytesTransferred: Long,
         val sending: Boolean,
         val state: TransferState,
         val failure: FailureReason?,
+        /**
+         * What the file was actually saved as, when that differs from what
+         * was offered.
+         *
+         * MediaStore renames a second `photo.jpg` to `photo (1).jpg` rather
+         * than overwriting, and a row that kept showing the offered name
+         * would send someone looking for a file that is not there.
+         */
+        val savedName: String? = null,
+        /** Peer-supplied for an incoming file; the provider's for an outgoing one. */
+        val mimeType: String = "",
+        /**
+         * Whether AnyFlow still holds something it could open.
+         *
+         * Structural only — that a target was retained, not that it still
+         * resolves. [resolveOpen] is what asks the platform.
+         */
+        val hasOpenTarget: Boolean = false,
+        /**
+         * Set once a check has *proved* the target unreachable: a lapsed URI
+         * grant, or a received file that has since been deleted.
+         *
+         * Never inferred. A row does not get to claim a file is missing
+         * because nobody has looked yet.
+         */
+        val accessLost: Boolean = false,
+        /**
+         * Creation order within this process, from a monotonic counter.
+         *
+         * Ordering is by this and never by filename, timestamp or map
+         * iteration: two files called `report.pdf` must sort stably, a
+         * `HashMap` has no order to offer, and a wall clock can go backwards.
+         */
+        val sequence: Long = 0,
+        /** The same counter, stamped when the transfer became terminal. */
+        val settledSequence: Long? = null,
     ) {
         /** Null for a zero-byte file, where a percentage means nothing. */
         val percentage: Int?
             get() = if (sizeBytes == 0L) null else {
                 ((bytesTransferred.coerceAtMost(sizeBytes) * 100) / sizeBytes).toInt()
             }
+
+        /** What the person should be shown this file is called. */
+        val displayName: String get() = savedName ?: filename
+
+        /** Whether, and how, this row may be opened. */
+        val openAction: OpenAction
+            get() = FilesOpen.decide(sending, state, hasOpenTarget, accessLost)
+    }
+
+    /** What [resolveOpen] found when it actually looked. */
+    sealed interface OpenResolution {
+        /** Hand these to Android. Valid as of a moment ago, not forever. */
+        data class Ready(val uri: Uri, val mimeType: String) : OpenResolution
+
+        data class Unavailable(val action: OpenAction) : OpenResolution
     }
 
     private inner class Transfer(
@@ -149,7 +230,43 @@ class FileTransferManager(
         /** Receiving only: the invisible entry bytes are streaming into. */
         @Volatile var pending: Downloads.Pending? = null
 
-        fun ui() = TransferUi(id, filename, sizeBytes, bytes.get(), sending, state, failure)
+        /**
+         * What Open would open, or null when there is nothing.
+         *
+         * Sending: the URI the user shared in. Holding it is not holding a
+         * permission — the grant it arrived with has its own lifetime and is
+         * re-checked before every use. Receiving: the published MediaStore
+         * item, which exists only after the hash matched.
+         */
+        @Volatile var openUri: Uri? = if (sending) source else null
+
+        /** What MediaStore actually called the file, once it is published. */
+        @Volatile var savedName: String? = null
+
+        /** Set only by a check that looked and failed. See [resolveOpen]. */
+        @Volatile var accessLost: Boolean = false
+
+        /** Creation order. See [TransferUi.sequence]. */
+        val sequence: Long = sequencer.incrementAndGet()
+
+        @Volatile var settledSequence: Long? = null
+
+        fun ui() = TransferUi(
+            transferId = id,
+            peer = peer,
+            filename = filename,
+            sizeBytes = sizeBytes,
+            bytesTransferred = bytes.get(),
+            sending = sending,
+            state = state,
+            failure = failure,
+            savedName = savedName,
+            mimeType = mimeType,
+            hasOpenTarget = openUri != null,
+            accessLost = accessLost,
+            sequence = sequence,
+            settledSequence = settledSequence,
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -623,6 +740,16 @@ class FileTransferManager(
         // Verified. Only now does it become a file the user can see.
         withContext(Dispatchers.IO) { downloads.publish(pending) }
         val actualName = downloads.displayName(pending.uri) ?: transfer.filename
+        transfer.savedName = actualName
+        // The published item is what Open opens. It is kept *because* it is
+        // now published: before this line it was a pending row that no other
+        // app could see and that `finish` would have deleted, and offering to
+        // open unverified bytes is the thing IS_PENDING exists to prevent.
+        //
+        // Keeping it is not a new permission. AnyFlow inserted this row, so
+        // MediaStore already lets it read the item back; nothing is granted
+        // here that was not true while the bytes were being written.
+        transfer.openUri = pending.uri
         transfer.pending = null
 
         if (!transition(transfer, TransferState.COMPLETED)) return
@@ -665,6 +792,136 @@ class FileTransferManager(
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Opening a finished transfer
+    // -----------------------------------------------------------------------
+
+    /**
+     * Works out, *now*, whether this transfer can be handed to Android to
+     * open, and with what.
+     *
+     * ## Why this is asked at the tap and not at the draw
+     *
+     * Both answers can stop being true while a row is on screen. A received
+     * file can be deleted from the Files app; an outgoing file's read grant
+     * can lapse when the Activity that received the share goes away. A URI
+     * captured when the list was built would be a stale answer that fails —
+     * or, far worse, succeeds against something else — at the moment it is
+     * used. So the row carries only [TransferUi.hasOpenTarget] and this
+     * function does the real work against the live platform.
+     *
+     * ## The two checks are deliberately different
+     *
+     * *Sending* asks `checkUriPermission`, because the question is about a
+     * **grant**: the file belongs to another app and AnyFlow's access to it
+     * has a lifetime it does not control. This is the check that must never
+     * be skipped, and the failure it reports is
+     * [OpenAction.SourceUnavailable] — not "file missing", because the file
+     * is almost certainly still there and AnyFlow simply may not look at it.
+     *
+     * *Receiving* asks MediaStore whether the item still exists, because
+     * AnyFlow inserted that row and needs no grant to read it. The only way
+     * it goes away is that somebody deleted the file, which is
+     * [OpenAction.FileMissing].
+     *
+     * Neither check opens the file, and neither reads a byte of it.
+     *
+     * A proven failure is recorded on the transfer, so the row stops offering
+     * a button that has just been shown not to work. It is never recorded
+     * from a guess.
+     */
+    suspend fun resolveOpen(transferId: String): OpenResolution = withContext(Dispatchers.IO) {
+        val transfer = transfers[transferId]
+            ?: return@withContext OpenResolution.Unavailable(OpenAction.NotApplicable)
+
+        val structural = FilesOpen.decide(
+            sending = transfer.sending,
+            state = transfer.state,
+            hasTarget = transfer.openUri != null,
+            accessLost = transfer.accessLost,
+        )
+        if (structural != OpenAction.Available) {
+            return@withContext OpenResolution.Unavailable(structural)
+        }
+
+        val uri = transfer.openUri
+            ?: return@withContext OpenResolution.Unavailable(
+                FilesOpen.decide(transfer.sending, transfer.state, hasTarget = false),
+            )
+
+        if (!reachable(transfer.sending, uri)) {
+            markAccessLost(transfer)
+            return@withContext OpenResolution.Unavailable(
+                if (transfer.sending) OpenAction.SourceUnavailable else OpenAction.FileMissing,
+            )
+        }
+
+        // Most trustworthy first: what the provider says about the item as it
+        // is stored now, then what the transfer recorded. A peer's claim is
+        // never used raw — see [MimeTypes].
+        val declared = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        OpenResolution.Ready(uri, MimeTypes.firstUsable(declared, transfer.mimeType))
+    }
+
+    /**
+     * Re-checks every finished transfer that still offers an Open, and marks
+     * the ones that no longer do.
+     *
+     * Called when the Files screen comes back into view, which is when a
+     * stale row would be seen. That is an event, not a timer: nothing here
+     * polls, and a screen that is not being looked at costs nothing.
+     */
+    suspend fun refreshOpenTargets() = withContext(Dispatchers.IO) {
+        var changed = false
+        for (transfer in transfers.values) {
+            if (!transfer.state.isTerminal || transfer.accessLost) continue
+            val uri = transfer.openUri ?: continue
+            if (!reachable(transfer.sending, uri)) {
+                markAccessLost(transfer)
+                changed = true
+            }
+        }
+        if (changed) publishState()
+    }
+
+    /**
+     * Whether the target behind [uri] can still be reached.
+     *
+     * Deliberately conservative in one direction only: an exception means
+     * "could not establish that it is there", which is reported as not
+     * reachable. Claiming reachability off a failed check is what would put a
+     * button on a row that cannot work.
+     */
+    private fun reachable(sending: Boolean, uri: android.net.Uri): Boolean = runCatching {
+        if (sending) {
+            context.checkUriPermission(
+                uri,
+                android.os.Process.myPid(),
+                android.os.Process.myUid(),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            // Ask for the cheapest column there is. A deleted item returns no
+            // row; nothing is read and no stream is opened.
+            context.contentResolver
+                .query(uri, arrayOf(android.provider.MediaStore.MediaColumns._ID), null, null, null)
+                ?.use { it.moveToFirst() } == true
+        }
+    }.getOrDefault(false)
+
+    private fun markAccessLost(transfer: Transfer) {
+        if (transfer.accessLost) return
+        transfer.accessLost = true
+        // No URI, no filename, no path: which transfer and which direction is
+        // everything a log needs to explain a row that stopped offering Open.
+        Log.i(
+            TAG,
+            "open target for ${transfer.id.take(8)} is no longer reachable " +
+                "(${if (transfer.sending) "sent" else "received"})",
+        )
+        publishState()
+    }
+
     /** Drops finished transfers from the list the UI shows. */
     fun clearFinished() {
         transfers.entries.removeAll { it.value.state.isTerminal }
@@ -689,6 +946,7 @@ class FileTransferManager(
                 return false
             }
             transfer.state = next
+            if (next.isTerminal) transfer.settledSequence = sequencer.incrementAndGet()
         }
         publishState()
         return true
@@ -699,14 +957,37 @@ class FileTransferManager(
             if (!transfer.state.canTransitionTo(next)) return
             transfer.state = next
             if (reason != null) transfer.failure = reason
+            if (next.isTerminal) transfer.settledSequence = sequencer.incrementAndGet()
         }
         transfer.cancelled.set(true)
         transfer.challenge = null
+
+        // An offer card for a transfer that has already ended is a prompt
+        // nobody can answer. It used to survive its own transfer: `_pending`
+        // was cleared only when the person answered or the two-minute timeout
+        // fired, so a session that dropped while an offer was on screen left
+        // "Accept / Reject" sitting above a row that already said
+        // Disconnected — two statements about one file, one of them false.
+        //
+        // Answering it was never dangerous: `transition` refuses to leave a
+        // terminal state, so the accept failed closed. It was simply untrue,
+        // and the Files screen shows both halves at once, which is where it
+        // became visible. Withdrawing the card here also releases the
+        // coroutine that was waiting on it.
+        _pending.value.firstOrNull { it.transferId == transfer.id }?.let { offer ->
+            _pending.value = _pending.value.filterNot { it.transferId == transfer.id }
+            offer.answer.complete(false)
+        }
 
         // An unpublished entry is unverified peer data. It must not survive as
         // an invisible row nobody can find or delete.
         transfer.pending?.let { pending ->
             transfer.pending = null
+            // And it must not survive as something Open could reach: the two
+            // are the same URI, and discarding the bytes while leaving a row
+            // offering to open them is the one way this screen could point at
+            // data that failed its hash check.
+            if (transfer.openUri == pending.uri) transfer.openUri = null
             runCatching { downloads.discard(pending) }
         }
 
@@ -778,8 +1059,17 @@ class FileTransferManager(
     private fun activeCount(peer: Fingerprint): Int =
         transfers.values.count { it.peer.contentEquals(peer) && it.state.isActive }
 
+    /**
+     * Republishes the whole list.
+     *
+     * Ordered by [TransferUi.sequence], newest first. It used to be ordered
+     * by filename, which put two unrelated transfers next to each other
+     * because they happened to be called the same thing, and made the
+     * position of a row change when an unrelated one arrived. Order is now a
+     * property of when a transfer happened, which is what "Recent" means.
+     */
     private fun publishState() {
-        _transfers.value = transfers.values.map { it.ui() }.sortedBy { it.filename }
+        _transfers.value = transfers.values.map { it.ui() }.sortedByDescending { it.sequence }
     }
 
     /**

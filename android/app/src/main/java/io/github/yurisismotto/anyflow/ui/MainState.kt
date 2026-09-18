@@ -148,7 +148,7 @@ data class MainUiState(
     fun peerByHex(hex: String): TrustStore.TrustedPeer? =
         listedPeers.firstOrNull { it.fingerprint.toHex() == hex }
 
-    /** True when nothing at all is happening — what the Activity tab shows. */
+    /** True when something is in flight or waiting on someone. */
     val hasActivity: Boolean
         get() = offers.isNotEmpty() || transfers.isNotEmpty() || pendingClips.isNotEmpty()
 
@@ -258,6 +258,23 @@ data class MainActions(
     val onDismissClip: (Fingerprint) -> Unit,
     val onRespondToOffer: (String, Boolean) -> Unit,
     val onCancelTransfer: (String) -> Unit,
+    /**
+     * Opens a finished transfer's file with whatever Android resolves for it.
+     *
+     * Takes the transfer id and nothing else. Not a `Uri`, and not a
+     * filename: the URI is looked up inside the manager at the moment of the
+     * tap, because a grant can lapse between a row being drawn and somebody
+     * pressing it, and because a filename is not an identity — two transfers
+     * called `report.pdf` are two transfers (UX-DEBT-01).
+     */
+    val onOpenTransfer: (String) -> Unit,
+    /**
+     * Re-checks which finished transfers can still be opened.
+     *
+     * Nothing calls back when a file is deleted or a URI grant expires, so
+     * this runs when the Files screen appears — an event, not a poll.
+     */
+    val onRefreshOpenTargets: suspend () -> Unit,
     val onPickFileFor: (Fingerprint) -> Unit,
     /**
      * Reads the clipboard for the send screen's preview.

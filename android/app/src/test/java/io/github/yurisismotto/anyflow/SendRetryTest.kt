@@ -57,6 +57,9 @@ class SendRetryTest {
 
     private val name = "holiday.jpg"
 
+    /** One peer for the fixtures below; see [transfer]. */
+    private val somePeer = Fingerprint(ByteArray(32) { it.toByte() })
+
     private fun transfer(
         id: String,
         filename: String = name,
@@ -65,6 +68,10 @@ class SendRetryTest {
         sending: Boolean = true,
     ) = FileTransferManager.TransferUi(
         transferId = id,
+        // Every transfer has a peer. Which one is irrelevant to these tests —
+        // they are about a filename never being an identity — so they all
+        // share one rather than pretending the distinction matters here.
+        peer = somePeer,
         filename = filename,
         sizeBytes = 1024,
         bytesTransferred = 0,

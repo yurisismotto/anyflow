@@ -1,6 +1,7 @@
 package io.github.yurisismotto.anyflow.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -22,6 +23,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.journeyapps.barcodescanner.ScanContract
 import io.github.yurisismotto.anyflow.AnyFlowApp
+import io.github.yurisismotto.anyflow.R
 import io.github.yurisismotto.anyflow.capability.BatteryCapability
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
 import io.github.yurisismotto.anyflow.capability.FilesCapability
@@ -32,6 +34,8 @@ import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSendFailed
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
 import io.github.yurisismotto.anyflow.clipboard.SystemClipboard
+import io.github.yurisismotto.anyflow.files.FileTransferManager
+import io.github.yurisismotto.anyflow.files.OpenAction
 import io.github.yurisismotto.anyflow.identity.Fingerprint
 import io.github.yurisismotto.anyflow.notifications.InstalledApps
 import io.github.yurisismotto.anyflow.notifications.NotificationAccess
@@ -397,6 +401,8 @@ class MainActivity : ComponentActivity() {
         },
         onRespondToOffer = { transferId, accept -> app.files.respondToOffer(transferId, accept) },
         onCancelTransfer = { transferId -> app.files.cancel(transferId) },
+        onOpenTransfer = { transferId -> openTransfer(transferId) },
+        onRefreshOpenTargets = { app.files.refreshOpenTargets() },
         onPickFileFor = { peer ->
             pendingFileTarget = peer
             // ACTION_OPEN_DOCUMENT, exactly like the Sharesheet path: the URI
@@ -406,6 +412,89 @@ class MainActivity : ComponentActivity() {
         },
         readClipboardPreview = ::readClipboardPreview,
     )
+
+    /**
+     * Hands a finished transfer's file to Android to open.
+     *
+     * ## What "open" means here, and what it deliberately does not mean
+     *
+     * It means `ACTION_VIEW` with a `content://` URI and a read grant for
+     * that one item, resolved through a chooser. AnyFlow does not run
+     * anything, does not decide whether the file is safe, and does not treat
+     * an extension as evidence about either. Whatever Android would do with
+     * this file from the Files app is what happens, with the same consent
+     * prompts in the same places.
+     *
+     * ## Three rules the URI obeys
+     *
+     * *It is never a `file://` URI.* Passing one to another app throws
+     * `FileUriExposedException` on every API level this app supports, and the
+     * reason it does is that a path is not a permission: the receiving app
+     * would need its own access to the file, which on shared storage means a
+     * storage permission that AnyFlow deliberately does not hold. The
+     * received-file URI is MediaStore's own; the sent-file URI is the one the
+     * person shared in. Neither is ever converted to a path.
+     *
+     * *It is fetched now, not when the row was drawn.* [FileTransferManager.resolveOpen]
+     * re-checks the grant or the item's existence at this instant, so a lapsed
+     * permission is reported rather than acted on. See its documentation for
+     * why the two directions are checked differently.
+     *
+     * *It is granted, not assumed.* `FLAG_GRANT_READ_URI_PERMISSION` passes
+     * AnyFlow's own read access to whichever app the person picks, for that
+     * URI alone and for the life of that activity. Read, not write: opening a
+     * file is not permission to change it.
+     *
+     * Every failure has its own sentence, because "it did not open" is four
+     * different pieces of news and only one of them is worth going to look in
+     * Downloads for.
+     */
+    private fun openTransfer(transferId: String) {
+        lifecycleScope.launch {
+            when (val resolution = app.files.resolveOpen(transferId)) {
+                is FileTransferManager.OpenResolution.Ready -> launchViewer(resolution)
+                is FileTransferManager.OpenResolution.Unavailable ->
+                    showError(openFailureMessage(resolution.action))
+            }
+        }
+    }
+
+    private fun launchViewer(ready: FileTransferManager.OpenResolution.Ready) {
+        val view = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(ready.uri, ready.mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // The chooser is a separate task; without this it would be
+            // launched into AnyFlow's, and backing out of the viewer would
+            // land somewhere in the middle of this app.
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        // A chooser rather than whatever happens to be default: a file that
+        // arrived from another machine is exactly the case where a person may
+        // want to choose, and it also means no silent hand-off to an app that
+        // was made default for an unrelated reason.
+        val chooser = Intent.createChooser(view, null).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(chooser)
+        } catch (e: ActivityNotFoundException) {
+            // Truthful, and specifically not "the file is missing": the file
+            // is there and this device simply has nothing that reads it.
+            showError(getString(R.string.files_open_no_viewer))
+        }
+    }
+
+    /** The sentence for each way opening does not happen. */
+    private fun openFailureMessage(action: OpenAction): String = when (action) {
+        OpenAction.FileMissing -> getString(R.string.files_open_file_missing)
+        OpenAction.SourceUnavailable -> getString(R.string.files_open_source_unavailable)
+        OpenAction.NoViewer -> getString(R.string.files_open_no_viewer)
+        // Neither should reach a person: the button is not drawn for a
+        // transfer that cannot be opened. If one does, saying the file is not
+        // there is the honest answer, because AnyFlow cannot reach it.
+        OpenAction.NotApplicable, OpenAction.Available ->
+            getString(R.string.files_open_file_missing)
+    }
 
     /**
      * Reads the clipboard so the send screen can show what is about to leave.
