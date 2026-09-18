@@ -666,3 +666,180 @@ fn strip_comments(source: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+// ===========================================================================
+// KDE-SNI-01 — the D-Bus activation metadata
+// ===========================================================================
+//
+// `DBusActivatable=true` has been in the desktop entry since the Quick Panel
+// sprint and it is not, on its own, enough to start anything. It is a promise
+// read by things that launch desktop entries; the message bus reads a service
+// file instead, and there was none. Measured before this sprint added one:
+//
+//     $ gdbus call --session --dest io.github.yurisismotto.anyflow … \
+//           --method org.freedesktop.Application.ActivateAction quick-panel '[]' '{}'
+//     Error: org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable
+//
+// The KDE tray item needs the cold case to work, so the service file is now
+// installed beside the other two. These pin the four strings that have to
+// agree for it to: the bus name, the entry's basename, the binary, and the
+// flag that keeps a cold start from opening a window nobody asked for.
+
+/// The D-Bus activation template. `.in`, because one line has to be derived
+/// from the install prefix.
+fn dbus_service_template() -> String {
+    std::fs::read_to_string(data().join(format!("{}.service.in", app_id_from_source())))
+        .expect("the D-Bus service template is readable")
+}
+
+/// One key from the `[D-BUS Service]` group of the template.
+fn dbus_service_key(key: &str) -> Option<String> {
+    let text = dbus_service_template();
+    let mut in_group = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_group = line == "[D-BUS Service]";
+            continue;
+        }
+        if !in_group || line.starts_with('#') {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix(&format!("{key}=")) {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+/// The bus name the service file claims is the application id, and the file
+/// is named after it.
+#[test]
+fn the_dbus_activation_entry_claims_the_application_id() {
+    let app_id = app_id_from_source();
+    let template = data().join(format!("{app_id}.service.in"));
+    assert!(
+        template.is_file(),
+        "no D-Bus activation template at {} — without one the bus cannot start \
+         AnyFlow, and the tray's cold-start path does not exist",
+        template.display()
+    );
+    assert_eq!(
+        dbus_service_key("Name").as_deref(),
+        Some(app_id.as_str()),
+        "the service file claims a bus name that is not the application id"
+    );
+}
+
+/// The `Exec` line: the same binary the desktop entry launches, in service
+/// mode, from a prefix rather than from anywhere in this checkout.
+#[test]
+fn the_dbus_activation_entry_starts_the_gui_in_service_mode() {
+    let exec = dbus_service_key("Exec").expect("the service file declares Exec");
+
+    // `--gapplication-service` is what stops a cold activation opening a
+    // window the person did not ask for: without it the bus starts the binary
+    // with no arguments, which is a bare launch, which opens Settings — and
+    // then the activation message arrives and opens the Quick Panel too.
+    assert!(
+        exec.ends_with(" --gapplication-service"),
+        "Exec is {exec:?}; a cold activation would open an unasked-for window"
+    );
+
+    // Derived from the prefix, and never from a developer's home directory or
+    // a repository path. `@BINDIR@` is the only variable part.
+    assert!(
+        exec.starts_with("@BINDIR@/"),
+        "Exec is {exec:?}; a D-Bus service file's Exec must be absolute, and the \
+         only honest source of an absolute path is the install prefix"
+    );
+    for wrong in ["/home/", "Sandbox", "target/debug", "..", "~"] {
+        assert!(
+            !exec.contains(wrong),
+            "Exec contains {wrong:?}, which is a path from somebody's machine"
+        );
+    }
+
+    // The same program the desktop entry runs.
+    let desktop_exec = desktop_entry_key("Exec").expect("the desktop entry declares Exec");
+    let program = |line: &str| {
+        line.split_whitespace()
+            .next()
+            .expect("a program")
+            .rsplit('/')
+            .next()
+            .expect("a basename")
+            .to_string()
+    };
+    assert_eq!(
+        program(&exec),
+        program(&desktop_exec),
+        "the bus would start a different program than the launcher does"
+    );
+
+    // And the entry still declares itself activatable, which is the half of
+    // the pair that things launching desktop entries read.
+    assert_eq!(
+        desktop_entry_key("DBusActivatable").as_deref(),
+        Some("true"),
+        "the desktop entry no longer declares itself D-Bus activatable"
+    );
+}
+
+/// The installer puts it where the bus looks, substitutes the prefix and not
+/// the staging root, and takes it away again.
+#[test]
+fn the_installer_handles_the_activation_entry_like_the_other_two() {
+    let app_id = app_id_from_source();
+    let installer = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/install-desktop-metadata.sh"),
+    )
+    .expect("the installer is readable");
+
+    assert!(
+        installer.contains("share/dbus-1/services"),
+        "the installer does not write into a D-Bus service directory"
+    );
+    assert!(
+        installer.contains("$APP_ID.service"),
+        "the installer does not name the service file after the application id"
+    );
+    assert!(
+        installer.contains("$APP_ID.service.in") || installer.contains("DBUS_SRC="),
+        "the installer does not read the template"
+    );
+
+    // The substitution takes `$prefix`, the path the file will be read at, and
+    // never `$destdir`, which is a staging root that does not exist on the
+    // machine that ends up reading it. Getting this backwards produces a
+    // package whose service file points into a buildroot.
+    assert!(
+        installer.contains(r#"s|@BINDIR@|$prefix/bin|g"#),
+        "the installer does not substitute @BINDIR@ from the install prefix"
+    );
+    assert!(
+        !installer.contains("@BINDIR@|$destdir"),
+        "the installer bakes the staging root into the service file"
+    );
+
+    // The bus does not watch its service directories — measured on Fedora 44,
+    // whose bus is dbus-broker: the activation failed until `ReloadConfig` was
+    // sent. Without this line a development install silently works only after
+    // the next login.
+    assert!(
+        installer.contains("ReloadConfig"),
+        "the installer does not tell the session bus to reread its services"
+    );
+
+    // And uninstall removes it, or an uninstalled AnyFlow leaves the bus able
+    // to start a binary that is no longer there.
+    let uninstall_block = installer
+        .split("if [ \"$uninstall\" -eq 1 ]")
+        .nth(1)
+        .expect("the installer has an uninstall path");
+    assert!(
+        uninstall_block.contains("$dbus_dst"),
+        "uninstall leaves the D-Bus activation entry behind"
+    );
+    let _ = app_id;
+}

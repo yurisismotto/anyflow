@@ -35,6 +35,17 @@
 //! are recorded so that the shape of this crate — bind an endpoint, resolve
 //! paths, enforce local protection — is legible as *one row of a table*
 //! rather than as the way AnyFlow works.
+//!
+//! # The desktop-shell adapter
+//!
+//! [`tray`] is the third thing in this crate and the newest: a
+//! `StatusNotifierItem` on the session bus, so that KDE Plasma can show
+//! AnyFlow in its system tray. It belongs here for the same reason the control
+//! endpoint does — it is a *Linux desktop session* concept with no portable
+//! meaning, and the portable crates must never learn the words "D-Bus" or
+//! "tray". It is behind the `tray` feature, which is on by default for the
+//! agent and off for the GUI and the CLI, neither of which has any business
+//! owning a tray icon.
 
 use std::path::{Path, PathBuf};
 
@@ -42,6 +53,9 @@ use anyflow_control::transport::{BindError, ControlListener, ControlTransport};
 use tokio::net::{UnixListener, UnixStream};
 
 pub use anyflow_core::platform::unix_fs::{default_data_dir, default_device_name, FileSecretStore};
+
+#[cfg(feature = "tray")]
+pub mod tray;
 
 /// Opens the store at `dir` using this platform's storage and identity
 /// backing.

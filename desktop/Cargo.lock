@@ -227,9 +227,11 @@ dependencies = [
  "anyflow-core",
  "anyflow-proto",
  "async-trait",
+ "futures-lite",
  "tempfile",
  "tokio",
  "tracing",
+ "zbus",
 ]
 
 [[package]]
