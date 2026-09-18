@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
+import io.github.yurisismotto.anyflow.clipboard.ClipboardLimits
 import io.github.yurisismotto.anyflow.clipboard.ClipboardText
 import io.github.yurisismotto.anyflow.files.SharedFile
 import io.github.yurisismotto.anyflow.service.ConnectionService
@@ -172,12 +173,22 @@ class SendActivity : ComponentActivity() {
         ConnectionService.start(this, peer.fingerprint)
         lifecycleScope.launch {
             app.clipboard.sendText(peer.fingerprint, text, sensitive = false)
-                .onSuccess {
+                .onSuccess { receipt ->
+                    // Waits for the computer's verdict rather than announcing
+                    // one. `sendText` returning means the frame is on the
+                    // session; it has never meant the text arrived, and this
+                    // screen said "Sent" on the strength of it (GitHub #8).
+                    // `ClipboardDelivery.describe` is the single vocabulary,
+                    // including the honest "delivery not confirmed".
+                    val delivery = receipt.awaitVerdict(ClipboardLimits.VERDICT_TIMEOUT_MS)
                     android.widget.Toast.makeText(
                         this@SendActivity,
-                        "Sent ${'$'}{it} bytes to ${'$'}{peer.deviceName}.",
-                        android.widget.Toast.LENGTH_SHORT,
+                        delivery.describe(peer.deviceName),
+                        android.widget.Toast.LENGTH_LONG,
                     ).show()
+                    // The screen closes either way: this is a modal over
+                    // someone else's app and the message is the report. What
+                    // changed is that the message is now true.
                     onOutcome(UiMapping.SendAttempt.Sent)
                     finish()
                 }

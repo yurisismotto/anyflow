@@ -26,6 +26,7 @@ import io.github.yurisismotto.anyflow.capability.BatteryCapability
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
 import io.github.yurisismotto.anyflow.capability.FilesCapability
 import io.github.yurisismotto.anyflow.capability.NotificationsCapability
+import io.github.yurisismotto.anyflow.clipboard.ClipboardLimits
 import io.github.yurisismotto.anyflow.clipboard.ClipboardNotifications
 import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSendFailed
@@ -135,6 +136,18 @@ class MainActivity : ComponentActivity() {
     private var requestedClip by mutableStateOf<Fingerprint?>(null)
 
     /**
+     * The Quick Settings clipboard request, and when it may run.
+     *
+     * Android refuses `getPrimaryClip` to an app without window focus, and
+     * this Activity is not focused when a tile intent is delivered — not in
+     * `onCreate`, not in `onNewIntent` behind the shade, and not in
+     * `onResume`. Reading there is GitHub #7: the read came back empty and
+     * the person was told their clipboard was empty. The request therefore
+     * waits here until `onWindowFocusChanged(true)`. See [ClipboardShortcut].
+     */
+    private val clipboardShortcut = ClipboardShortcut()
+
+    /**
      * Android's notification access, as last read from the platform.
      *
      * Held here rather than inside a screen because it has to be re-read on
@@ -167,6 +180,12 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        // Restored *before* the launch intent is looked at, and that order is
+        // the whole of test F12. A configuration change recreates this
+        // Activity and `getIntent()` still returns the tile's intent, so
+        // without the id this instance already spent, a rotation after a tile
+        // send would send the clipboard again.
+        clipboardShortcut.restore(savedInstanceState?.getString(STATE_CONSUMED_REQUEST))
         handleIntent(intent)
 
         setContent {
@@ -218,6 +237,27 @@ class MainActivity : ComponentActivity() {
      * for an unchanged role set, but a resume is frequent and this keeps the
      * event meaning what it says.
      */
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_CONSUMED_REQUEST, clipboardShortcut.consumedId())
+    }
+
+    /**
+     * The only place a Quick Settings clipboard request is ever executed.
+     *
+     * Not `onResume`, and not after a delay. An Activity behind the Quick
+     * Settings shade is resumed and unfocused, and so is one behind a
+     * permission dialog; `hasFocus` is the platform's own answer to the
+     * question `getPrimaryClip` actually asks. Draining is idempotent, so the
+     * repeated `true` callbacks Android emits do nothing after the first.
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (clipboardShortcut.onWindowFocusChanged(hasFocus) == ClipboardShortcut.Action.SEND) {
+            sendClipboardFromShortcut()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         val granted = NotificationAccess.isGranted(this)
@@ -248,7 +288,11 @@ class MainActivity : ComponentActivity() {
         val offers by app.files.pendingOffers.collectAsState()
         val transfers by app.files.visible.collectAsState()
         val pendingClips by app.clipboard.pendingClips.collectAsState()
-        val outcomes by app.clipboard.lastOutcome.collectAsState()
+        val deliveries by app.clipboard.lastDelivery.collectAsState()
+        // What the session that is up actually negotiated. Observed, because a
+        // session ending has to grey the Send button out rather than leave it
+        // live over nothing.
+        val liveSession by app.liveSession.collectAsState()
         val notifications by app.notifications.status.collectAsState()
         // The capability republishes on every bind, unbind and revocation, so
         // a permission taken away while this screen is open is picked up here
@@ -271,7 +315,8 @@ class MainActivity : ComponentActivity() {
             offers = offers,
             transfers = transfers,
             pendingClips = pendingClips,
-            clipboardOutcomes = outcomes,
+            clipboardDeliveries = deliveries,
+            liveSession = liveSession,
             remoteBatteryPercent = app.battery.remoteReading()?.percentage,
             notificationAccessGranted = notificationAccess,
             notifications = notifications,
@@ -396,7 +441,18 @@ class MainActivity : ComponentActivity() {
                 requestedClip = Fingerprint.fromHex(hex)
             }
 
-            ACTION_SEND_CLIPBOARD -> sendClipboardFromShortcut()
+            ACTION_SEND_CLIPBOARD -> {
+                // Recorded, not executed. `hasWindowFocus()` is asked rather
+                // than assumed: an intent arriving at a screen the person is
+                // already looking at — the ordinary `onNewIntent` case — must
+                // run now, because the focus change it would otherwise wait
+                // for has already happened and will not repeat.
+                val action = clipboardShortcut.onRequest(
+                    requestId = intent.getStringExtra(EXTRA_REQUEST_ID),
+                    hasWindowFocus = hasWindowFocus(),
+                )
+                if (action == ClipboardShortcut.Action.SEND) sendClipboardFromShortcut()
+            }
         }
     }
 
@@ -423,7 +479,19 @@ class MainActivity : ComponentActivity() {
             // `single`, not `first`: the branch is already guarded by the size,
             // and spelling it this way means no peer-selection call site in the
             // app can be read as "whichever one is first".
-            1 -> sendClipboard(eligible.single().fingerprint)
+            1 -> {
+                val peer = eligible.single()
+                // The same gate the buttons use, so the tile cannot be the
+                // one path that starts a send the session cannot carry. It is
+                // asked here rather than folded into the filter above because
+                // the *destination* is a trust question and the gate is a
+                // session question, and answering them together would turn
+                // "not negotiated yet" into "no computer is set up".
+                when (val gate = UiMapping.clipboardSendGate(peer, app.liveSession.value)) {
+                    is UiMapping.ClipboardSendGate.Ready -> sendClipboard(peer.fingerprint)
+                    is UiMapping.ClipboardSendGate.Blocked -> showError(gate.reason)
+                }
+            }
             else -> showError("Choose which computer to send the clipboard to.")
         }
     }
@@ -440,7 +508,20 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val name = app.trustStore.peer(peer)?.deviceName ?: "the computer"
             app.clipboard.sendCurrentClipboard(peer, confirmedSensitive)
-                .onSuccess { bytes -> showError("Sent $bytes bytes to $name.") }
+                .onSuccess { receipt ->
+                    // **The whole of GitHub #8 is this line not saying "Sent".**
+                    // `sendCurrentClipboard` succeeding means the frame is on
+                    // the session and nothing more; the computer's verdict
+                    // arrives afterwards, and on a LAN it arrives in
+                    // milliseconds. So the message waits for it, and when no
+                    // verdict comes it says that rather than inventing one.
+                    //
+                    // The wait is a suspending one in the Activity's own
+                    // scope: no thread is blocked, the screen stays live, and
+                    // `lastDelivery` — which the UI draws — is updated whether
+                    // or not anyone is still here to read the toast.
+                    showError(receipt.awaitVerdict(ClipboardLimits.VERDICT_TIMEOUT_MS).describe(name))
+                }
                 .onFailure { failure ->
                     when (val reason = (failure as? ClipboardSendFailed)?.failure) {
                         is ClipboardSync.SendFailure.NeedsConfirmation ->
@@ -491,5 +572,19 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** Asks this screen to send the clipboard as soon as it has focus. */
         const val ACTION_SEND_CLIPBOARD = "io.github.yurisismotto.anyflow.SEND_CLIPBOARD"
+
+        /**
+         * A fresh random id per tile press, minted by [ClipboardTileService].
+         *
+         * An idempotency token, not a credential: it authorizes nothing, and
+         * the send it leads to still asks the trust store for the grant and
+         * the per-peer policy. Its only job is to tell a genuine second press
+         * from a replay of the first through `getIntent()`.
+         */
+        const val EXTRA_REQUEST_ID = "io.github.yurisismotto.anyflow.CLIPBOARD_REQUEST_ID"
+
+        /** Saved-state key for the last request id actually executed. */
+        private const val STATE_CONSUMED_REQUEST = "clipboard_shortcut_consumed"
+
     }
 }

@@ -107,15 +107,24 @@ class PeerConnection private constructor(
     private val _closed = MutableStateFlow(false)
     val closed: StateFlow<Boolean> = _closed.asStateFlow()
 
+    /**
+     * The capability send seam.
+     *
+     * Builds the envelope *first* so its `message_id` can be answered to the
+     * capability. That id is the only handle a capability has on a frame once
+     * it is written, and it is what `Envelope.correlation_id` names when a
+     * peer refuses the frame — so a capability that keeps it can attribute a
+     * refusal instead of merely observing one. See [CapabilityContext.send].
+     */
     private val context = CapabilityContext(peer, peerDevice.deviceId) { id, payload ->
-        send(
-            factory.build {
-                capabilityMessage = CapabilityMessage.newBuilder()
-                    .setCapabilityId(id)
-                    .setPayload(payload)
-                    .build()
-            },
-        )
+        val envelope = factory.build {
+            capabilityMessage = CapabilityMessage.newBuilder()
+                .setCapabilityId(id)
+                .setPayload(payload)
+                .build()
+        }
+        send(envelope)
+        envelope.messageId
     }
 
     /**
@@ -216,7 +225,29 @@ class PeerConnection private constructor(
                     Envelope.BodyCase.PONG -> Unit
                     Envelope.BodyCase.CAPABILITY_ANNOUNCE -> Unit
                     Envelope.BodyCase.ERROR -> {
+                        // The code, never `error.message`: that is a free
+                        // string chosen by the other end of the wire.
                         Log.w(TAG, "peer error code=${envelope.error.code} fatal=${envelope.error.fatal}")
+                        // Offered to the capabilities so the operation that
+                        // caused it can be told what happened. Before this,
+                        // a peer refusing `clipboard.v1` produced this log
+                        // line and nothing else, and the person who pressed
+                        // Send was told their clipboard had been sent
+                        // (GitHub #8). A correlation id is only ever matched
+                        // against ids a capability minted itself.
+                        if (!envelope.correlationId.isEmpty) {
+                            for (id in negotiatedCapabilities) {
+                                runCatching {
+                                    registry[id]?.onPeerError(
+                                        context,
+                                        envelope.correlationId,
+                                        envelope.error.code,
+                                    )
+                                }.onFailure { e ->
+                                    Log.w(TAG, "capability $id failed on a peer error: ${e.javaClass.simpleName}")
+                                }
+                            }
+                        }
                         if (envelope.error.fatal) {
                             ending = "peer reported a fatal error"
                             break

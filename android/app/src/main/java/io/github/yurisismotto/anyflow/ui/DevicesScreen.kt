@@ -183,11 +183,13 @@ fun DevicesScreen(
                         // Disabled rather than hidden: the reason is one tap
                         // away on the device screen, and a row that reflows
                         // whenever a session drops is worse than a grey tile.
-                        // `connected` already implies a target: it is false
-                        // whenever there is not one, so the compiler narrows
-                        // `target` here without a second null check.
-                        enabled = connected && target.allows(ClipboardCapability.ID) &&
-                            target.clipboardPolicy.allowSend,
+                        //
+                        // The condition is `UiMapping`'s, not this screen's.
+                        // It used to be written inline here and differently on
+                        // two other screens, and none of the three asked the
+                        // question that mattered — whether the live session
+                        // negotiated `clipboard.v1` at all (GitHub #8).
+                        enabled = target != null && state.clipboardSendGate(target).ready,
                         onClick = { target?.let { onSendClipboard(it.fingerprint.toHex()) } },
                         modifier = Modifier.weight(1f),
                     )

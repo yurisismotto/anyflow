@@ -833,22 +833,244 @@ fn a_refusal_by_the_receiving_device_is_reported() {
     assert!(
         m.clipboard
             .detail
-            .contains("Last clip sent: not authorized by Tablet."),
+            .contains("Tablet is not set up to accept this computer's clipboard."),
         "{}",
         m.clipboard.detail
     );
 
-    // A clip that landed is not news.
-    for quiet in ["applied", "pending", "duplicate"] {
+    // A clip that landed says so. It used to say nothing, which was fine
+    // while the press claimed "Clipboard sent" — but the press now says
+    // "awaiting confirmation", and an empty row is not what that resolves to.
+    for (landed, expected) in [
+        ("applied", "The last clip reached Tablet."),
+        (
+            "pending",
+            "The last clip reached Tablet and is waiting to be applied there.",
+        ),
+        ("duplicate", "Tablet already had the last clip."),
+    ] {
         let mut ok = live(std::slice::from_ref(&d));
-        ok.clipboard.as_mut().expect("report").peers[0].last_outcome = Some(quiet.into());
+        ok.clipboard.as_mut().expect("report").peers[0].last_outcome = Some(landed.into());
+        let detail = PanelModel::build(&ok, None).clipboard.detail;
+        assert!(detail.contains(expected), "{landed}: {detail}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// QP-DEBT-06 — the immediate Send clipboard feedback
+// ---------------------------------------------------------------------------
+
+/// **D1 — a local enqueue is never labelled a confirmed success.**
+///
+/// The whole of QP-DEBT-06. `ClipboardSend` is answered as soon as the frame
+/// is on the session; the press used to be acknowledged with "Clipboard sent
+/// to SM-X620", and on hardware the tablet had refused the clip.
+#[test]
+fn d1_the_immediate_message_does_not_claim_delivery() {
+    let message = clipboard_submitted_message("SM-X620");
+    assert!(
+        !message.contains("Clipboard sent"),
+        "the press must not claim delivery: {message}"
+    );
+    // A whitelist would be brittle; what matters is that no reading of it
+    // says the clip arrived.
+    for claim in ["arrived", "received", "delivered", "copied"] {
+        assert!(!message.contains(claim), "{claim} in {message}");
+    }
+}
+
+/// **D2 — and it says, in words, that it is waiting.**
+#[test]
+fn d2_the_immediate_message_names_the_pending_state() {
+    let message = clipboard_submitted_message("SM-X620");
+    assert!(message.contains("awaiting confirmation"), "{message}");
+    // It names the destination, so a person with two devices paired knows
+    // which one the answer will be about.
+    assert!(message.contains("SM-X620"), "{message}");
+}
+
+/// **D3 — a confirmed peer verdict reads as success.**
+#[test]
+fn d3_a_confirmed_verdict_reads_as_success() {
+    assert!(clipboard_outcome_succeeded("applied"));
+    // `pending` is the peer holding the clip for a person to apply: it
+    // arrived. `duplicate` means an earlier copy of it did.
+    assert!(clipboard_outcome_succeeded("pending"));
+    assert!(clipboard_outcome_succeeded("duplicate"));
+    assert!(clipboard_outcome_note("applied", "SM-X620").contains("reached SM-X620"));
+}
+
+/// **D4 — a not-authorized verdict is an explicit rejection.**
+#[test]
+fn d4_a_not_authorized_verdict_is_explicit() {
+    assert!(!clipboard_outcome_succeeded("not authorized"));
+    let note = clipboard_outcome_note("not authorized", "SM-X620");
+    assert!(note.contains("not set up to accept"), "{note}");
+    assert!(!note.contains("reached"), "{note}");
+}
+
+/// **D5 — every other refusal is a refusal, including one we do not know.**
+///
+/// The default arm matters more than the named ones: a newer daemon reporting
+/// an outcome this build has never heard of must not fall through to
+/// something that reads as success.
+#[test]
+fn d5_every_refusing_outcome_is_refused_including_unknown_ones() {
+    for outcome in [
+        "rejected by policy",
+        "rejected as sensitive",
+        "too large",
+        "invalid text",
+        "failed",
+        "some-future-outcome",
+        "",
+    ] {
         assert!(
-            !PanelModel::build(&ok, None)
-                .clipboard
-                .detail
-                .contains("Last clip"),
-            "{quiet} should not be reported as a problem"
+            !clipboard_outcome_succeeded(outcome),
+            "{outcome} must not read as success"
         );
+        let note = clipboard_outcome_note(outcome, "SM-X620");
+        assert!(!note.contains("reached SM-X620"), "{outcome}: {note}");
+        assert!(!note.is_empty(), "{outcome} must say something");
+    }
+}
+
+/// **D6 — no verdict is not a success.**
+///
+/// A device that has answered nothing leaves the row saying nothing about a
+/// last clip, which is the honest state: the panel does not know.
+#[test]
+fn d6_no_verdict_produces_no_claim() {
+    let d = device("Tablet", "aa11");
+    let report = live(std::slice::from_ref(&d));
+    let detail = PanelModel::build(&report, None).clipboard.detail;
+    assert!(!detail.contains("last clip"), "{detail}");
+    assert!(!detail.contains("reached"), "{detail}");
+}
+
+/// **D7 — a verdict for one device does not describe another.**
+///
+/// The row is built from the selected peer's own `ClipboardPeerReport`, which
+/// is matched on device id and short fingerprint together.
+#[test]
+fn d7_a_verdict_for_another_device_does_not_reach_this_row() {
+    let a = device("Tablet", "aa11");
+    let b = device("Laptop", "bb22");
+    let mut report = live(&[a.clone(), b.clone()]);
+    // Only the *second* device refused something.
+    let peers = &mut report.clipboard.as_mut().expect("report").peers;
+    peers[1].last_outcome = Some("not authorized".into());
+
+    let m = PanelModel::build(&report, Some("aa11"));
+    assert_eq!(m.target.fingerprint(), Some("aa11"));
+    assert!(
+        !m.clipboard.detail.contains("not set up to accept"),
+        "{}",
+        m.clipboard.detail
+    );
+
+    // And it does reach the row it belongs to.
+    let m = PanelModel::build(&report, Some("bb22"));
+    assert!(
+        m.clipboard
+            .detail
+            .contains("Laptop is not set up to accept"),
+        "{}",
+        m.clipboard.detail
+    );
+}
+
+/// **D8 — no clipboard content can reach the panel's model or wording.**
+///
+/// Structural: `ClipboardPeerReport` has no field that could carry text, and
+/// the vocabulary is composed from a device name and a fixed sentence. This
+/// pins the wording half by feeding a canary through as the device name — the
+/// only attacker-influenced string the row interpolates — and checking that
+/// no outcome path invents anything else.
+#[test]
+fn d8_no_clipboard_content_appears_in_the_row() {
+    for outcome in [
+        "applied",
+        "pending",
+        "duplicate",
+        "not authorized",
+        "rejected by policy",
+        "rejected as sensitive",
+        "too large",
+        "invalid text",
+        "failed",
+        "unknown",
+    ] {
+        let note = clipboard_outcome_note(outcome, "Tablet");
+        // The daemon's inter-process vocabulary is not English and is never
+        // echoed: "Last clip sent: rejected as sensitive by Tablet." is what
+        // echoing it read like.
+        assert!(
+            !note.contains(&format!("{outcome} by")),
+            "{outcome}: the protocol string leaked into {note}"
+        );
+    }
+    assert_eq!(
+        clipboard_submitted_message("Tablet"),
+        "Clipboard submitted to Tablet; awaiting confirmation"
+    );
+}
+
+/// **D9 — the row's existing semantics are unchanged.**
+///
+/// The direction sentences, the mobile caveat and the grant/policy states are
+/// what they were; QP-DEBT-06 appends a verdict and changes nothing else.
+#[test]
+fn d9_the_existing_row_semantics_are_preserved() {
+    let d = device("Tablet", "aa11");
+    let mut report = live(std::slice::from_ref(&d));
+    report.clipboard.as_mut().expect("report").peers[0].last_outcome = Some("applied".into());
+    let row = PanelModel::build(&report, None).clipboard;
+
+    assert_eq!(row.value, StatusValue::On);
+    assert!(
+        row.detail
+            .contains("Sends this computer's clipboard only when you press Send clipboard."),
+        "{}",
+        row.detail
+    );
+    assert!(
+        row.detail
+            .contains("Clips from Tablet replace this clipboard as they arrive."),
+        "{}",
+        row.detail
+    );
+    assert!(
+        row.detail
+            .contains("Tablet sends only when you ask it to there."),
+        "{}",
+        row.detail
+    );
+}
+
+/// **D10 — no new routing authority is introduced.**
+///
+/// The wording functions take strings and answer strings. Nothing here reads
+/// a target, resolves a device or composes a request, so nothing here can
+/// become a second answer to "which computer".
+#[test]
+fn d10_the_feedback_wording_decides_no_destination() {
+    let d = device("Tablet", "aa11");
+    let mut report = live(std::slice::from_ref(&d));
+    report.clipboard.as_mut().expect("report").peers[0].last_outcome =
+        Some("not authorized".into());
+
+    // A refusal in the row does not disable, enable or re-point the action:
+    // the gate is grant, negotiation and policy, and a past verdict is none
+    // of them.
+    let m = PanelModel::build(&report, None);
+    assert!(m.send_clipboard.is_ready());
+    match send_clipboard_request(&m.send_clipboard) {
+        Some(Request::ClipboardSend { device, sensitive }) => {
+            assert_eq!(device, "aa11");
+            assert!(!sensitive);
+        }
+        other => panic!("expected a ClipboardSend to aa11, got {other:?}"),
     }
 }
 

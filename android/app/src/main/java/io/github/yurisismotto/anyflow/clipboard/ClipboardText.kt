@@ -152,6 +152,19 @@ object ClipboardLimits {
      */
     const val MAX_TEXT_BYTES = 32 * 1024
 
+    /**
+     * How long a send waits for the receiving computer's verdict before
+     * reporting that it does not know.
+     *
+     * On a LAN the `ClipboardResult` comes back in milliseconds, so in
+     * practice a person sees the real outcome and this never fires. It exists
+     * because a peer is under no obligation to answer at all, and a message
+     * that never appears would be a worse lie than an honest "not confirmed".
+     * Five seconds is well inside how long someone will wait after pressing
+     * Send and well short of the session's own liveness bounds.
+     */
+    const val VERDICT_TIMEOUT_MS = 5_000L
+
     /** How many recently handled event ids are remembered. */
     const val EVENT_CACHE_ENTRIES = 256
 

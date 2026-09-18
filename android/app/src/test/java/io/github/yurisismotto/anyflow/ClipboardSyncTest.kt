@@ -123,6 +123,15 @@ class ClipboardSyncTest {
         val authorizer = FakeAuthorizer()
         val clock = FakeClock()
         val sent = mutableListOf<ByteString>()
+
+        /**
+         * The envelope message ids the fake session minted, in send order.
+         *
+         * The real `PeerConnection` answers one per frame; a peer refusing the
+         * capability echoes it back as `Envelope.correlation_id`. Recording
+         * them here is what lets a test drive that path.
+         */
+        val messageIds = mutableListOf<ByteString>()
         val sync = ClipboardSync(
             systemClipboard = clipboard,
             authorizer = authorizer,
@@ -133,7 +142,13 @@ class ClipboardSyncTest {
     }
 
     private suspend fun Rig.connect(peer: Fingerprint) {
-        sync.attachSession(peer) { payload -> sent += payload }
+        sync.attachSession(peer) { payload ->
+            sent += payload
+            // Unique per frame, as the envelope factory's are.
+            val id = ByteString.copyFrom(ByteArray(16).also { SecureRandom().nextBytes(it) })
+            messageIds += id
+            id
+        }
     }
 
     private suspend fun Rig.handle(
@@ -488,9 +503,13 @@ class ClipboardSyncTest {
             "answering an answer is how two correct peers build a loop",
             rig.sync.handleControl(peer, "desktop", "Fedora", result),
         )
-        assertEquals(
-            ClipboardSync.Outcome.APPLIED,
-            rig.sync.lastOutcome.value[peer.toHex()],
+        // Nothing is recorded: the result names an event id this device never
+        // minted, so there is no send for it to be the verdict *of*. Before
+        // the correlation existed this wrote "APPLIED" against the peer, which
+        // is how a result for one clip could describe another.
+        assertNull(
+            "a result must not resolve a send that was never made",
+            rig.sync.lastDelivery.value[peer.toHex()],
         )
     }
 
@@ -533,7 +552,10 @@ class ClipboardSyncTest {
         assertFalse(failure.describe().contains("hunter2"))
 
         // With the confirmation, it goes — and the hint travels with it.
-        assertEquals(7, rig.sync.sendCurrentClipboard(peer, confirmedSensitive = true).getOrThrow())
+        assertEquals(
+            7,
+            rig.sync.sendCurrentClipboard(peer, confirmedSensitive = true).getOrThrow().bytes,
+        )
         assertEquals(1, rig.sent.size)
         assertTrue(rig.sent[0].asUpdate().sensitiveHint)
     }
@@ -546,7 +568,7 @@ class ClipboardSyncTest {
         rig.connect(peer)
         rig.clipboard.userCopies("ordinary text", sensitive = false)
 
-        assertEquals(13, rig.sync.sendCurrentClipboard(peer).getOrThrow())
+        assertEquals(13, rig.sync.sendCurrentClipboard(peer).getOrThrow().bytes)
         assertEquals(1, rig.sent.size)
         assertFalse(rig.sent[0].asUpdate().sensitiveHint)
     }
@@ -699,7 +721,7 @@ class ClipboardSyncTest {
         rig.clipboard.userCopies("never written")
         assertEquals(
             "never written".length,
-            rig.sync.sendCurrentClipboard(peer).getOrThrow(),
+            rig.sync.sendCurrentClipboard(peer).getOrThrow().bytes,
         )
         assertEquals(1, rig.sent.size)
     }

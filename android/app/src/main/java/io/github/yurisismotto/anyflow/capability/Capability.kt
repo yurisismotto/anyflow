@@ -2,6 +2,7 @@ package io.github.yurisismotto.anyflow.capability
 
 import com.google.protobuf.ByteString
 import io.github.yurisismotto.anyflow.identity.Fingerprint
+import io.github.yurisismotto.anyflow.proto.ErrorCode
 
 /**
  * A feature of the protocol.
@@ -27,6 +28,32 @@ interface Capability {
      */
     suspend fun onMessage(context: CapabilityContext, payload: ByteString)
 
+    /**
+     * The peer answered one of **our** frames with a transport-level error.
+     *
+     * [correlationId] is `Envelope.correlation_id`, which a refusing peer sets
+     * to the `message_id` of the frame it is refusing — the id
+     * [CapabilityContext.send] handed back when that frame went out. A
+     * capability that kept its ids can therefore attribute the refusal to the
+     * exact operation that caused it; one that did not simply ignores this.
+     *
+     * ## Why every capability is told, rather than one being routed to
+     *
+     * The transport cannot know which capability a `message_id` belongs to:
+     * the error names an envelope, and the envelope's capability id is not
+     * echoed back. So this is a fan-out, and the safety of it rests on the id
+     * being 16 bytes of randomness minted per frame — a capability that did
+     * not mint this one cannot match it.
+     *
+     * Default no-op: a capability that never correlates anything is unaffected.
+     */
+    suspend fun onPeerError(
+        context: CapabilityContext,
+        correlationId: ByteString,
+        code: ErrorCode,
+    ) {
+    }
+
     suspend fun onPeerDisconnected(peer: Fingerprint) {}
 }
 
@@ -34,9 +61,20 @@ interface Capability {
 class CapabilityContext(
     val peer: Fingerprint,
     val peerDeviceId: String,
-    private val sender: suspend (String, ByteString) -> Unit,
+    private val sender: suspend (String, ByteString) -> ByteString,
 ) {
-    suspend fun send(capabilityId: String, payload: ByteString) = sender(capabilityId, payload)
+    /**
+     * Sends one capability frame and answers the `message_id` it went out
+     * under.
+     *
+     * Returning the id is what makes a peer's refusal attributable. Before
+     * this, `ERROR_CODE_UNSUPPORTED_CAPABILITY` could only be logged: the id
+     * it correlated to had already been discarded inside the transport, so a
+     * clipboard the desktop had dropped was reported to the person as sent
+     * (GitHub #8).
+     */
+    suspend fun send(capabilityId: String, payload: ByteString): ByteString =
+        sender(capabilityId, payload)
 }
 
 /** The set of capabilities this device implements. */

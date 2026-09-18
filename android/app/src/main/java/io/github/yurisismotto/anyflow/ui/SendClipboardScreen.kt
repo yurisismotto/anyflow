@@ -160,15 +160,27 @@ fun SendClipboardScreen(
 
         Spacer(Modifier.height(AnyFlowSpacing.xs))
 
+        val gate = state.clipboardSendGate(peer)
         AnyFlowPrimaryButton(
             text = "Send to ${peer.deviceName}",
             icon = R.drawable.ic_send,
-            enabled = connected && preview != null,
+            // The same gate as every other Send clipboard affordance. This
+            // screen used to ask only whether a link was up, which made it the
+            // most permissive of the three and the one a Quick Settings press
+            // is most likely to land on.
+            enabled = gate.ready && preview != null,
             onClick = {
                 actions.onSendClipboard(peer.fingerprint)
                 onBack()
             },
         )
+        gate.reasonOrNull?.let { reason ->
+            Text(
+                reason,
+                style = AnyFlowType.caption,
+                color = colors.textMuted,
+            )
+        }
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             AnyFlowTextButton("Cancel", onBack)
         }

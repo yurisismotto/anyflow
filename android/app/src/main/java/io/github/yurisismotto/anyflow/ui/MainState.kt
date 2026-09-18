@@ -4,6 +4,7 @@ import android.graphics.drawable.Drawable
 import androidx.compose.runtime.Immutable
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.capability.NotificationsCapability
+import io.github.yurisismotto.anyflow.clipboard.ClipboardDelivery
 import io.github.yurisismotto.anyflow.clipboard.ClipboardPolicy
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
 import io.github.yurisismotto.anyflow.files.FileTransferManager
@@ -59,7 +60,23 @@ data class MainUiState(
     val offers: List<FileTransferManager.IncomingOffer>,
     val transfers: List<FileTransferManager.TransferUi>,
     val pendingClips: List<ClipboardSync.PendingClipInfo>,
-    val clipboardOutcomes: Map<String, ClipboardSync.Outcome>,
+    /**
+     * What is known about the last clipboard sent to each computer.
+     *
+     * A [ClipboardDelivery], not an outcome enum: "we wrote the frame" and
+     * "the computer applied it" are different facts and the screen must not
+     * read one as the other. See GitHub #8.
+     */
+    val clipboardDeliveries: Map<String, ClipboardDelivery>,
+    /**
+     * What the live session negotiated, or null when there is none.
+     *
+     * Session state, deliberately beside the trust store rather than folded
+     * into it: a grant is what a computer may do, and this is what the
+     * connection that is up can carry. Both are needed before a Send button
+     * is honest — see [UiMapping.clipboardSendGate].
+     */
+    val liveSession: AnyFlowApp.LiveSession?,
     val remoteBatteryPercent: Int?,
     /**
      * Android's own notification access, as the platform reports it **now**.
@@ -83,6 +100,16 @@ data class MainUiState(
     /** The fingerprint of the peer with a live session, if any. */
     val connectedFingerprintShort: String?
         get() = (connection as? AnyFlowApp.ConnectionState.Connected)?.fingerprintShort
+
+    /**
+     * Whether this computer may be sent the clipboard right now, and why not.
+     *
+     * One place, so the home screen, the device card and the send screen
+     * cannot drift apart again — the drift that let all three offer a button
+     * over a session with no `clipboard.v1` on it.
+     */
+    fun clipboardSendGate(peer: TrustStore.TrustedPeer): UiMapping.ClipboardSendGate =
+        UiMapping.clipboardSendGate(peer, liveSession)
 
     /**
      * Which computer this phone is pointed at, and why — or why it is not.

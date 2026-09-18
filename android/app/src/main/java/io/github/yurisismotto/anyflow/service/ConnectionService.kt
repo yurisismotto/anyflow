@@ -247,6 +247,16 @@ class ConnectionService : LifecycleService() {
                 // Recorded before the session runs, so a retarget arriving in
                 // the same instant can tell whose session this is.
                 currentSessionPeerHex = peer.fingerprint.toHex()
+                // What this session can actually carry, published for the UI.
+                // Not a grant and never persisted: it is fixed by the HELLO
+                // that just ran and dies with the session, which is exactly
+                // why a screen can trust it. See AnyFlowApp.LiveSession.
+                app.publishLiveSession(
+                    AnyFlowApp.LiveSession(
+                        peerHex = peer.fingerprint.toHex(),
+                        negotiated = connection.negotiatedCapabilities.toSet(),
+                    ),
+                )
                 updateNotification(getString(R.string.notif_connected, peer.deviceName))
                 // A data stream reuses this session's address, port and
                 // pinned identity. Recorded before the session runs, so a
@@ -266,6 +276,10 @@ class ConnectionService : LifecycleService() {
                 } finally {
                     currentConnection = null
                     currentSessionPeerHex = null
+                    // Cleared with the session it describes. A negotiated set
+                    // that outlived its session would be the stale authority
+                    // this flow exists to avoid.
+                    app.publishLiveSession(null)
                 }
             }
 
@@ -345,6 +359,7 @@ class ConnectionService : LifecycleService() {
         coordinator?.stop("service destroyed")
         currentConnection?.disconnect()
         currentSessionPeerHex = null
+        app.publishLiveSession(null)
         runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
         super.onDestroy()
     }

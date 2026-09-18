@@ -8,12 +8,15 @@ import io.github.yurisismotto.anyflow.proto.capabilities.ClipboardControl
 import io.github.yurisismotto.anyflow.proto.capabilities.ClipboardOutcome
 import io.github.yurisismotto.anyflow.proto.capabilities.ClipboardResult
 import io.github.yurisismotto.anyflow.proto.capabilities.ClipboardUpdate
+import io.github.yurisismotto.anyflow.proto.ErrorCode
 import java.security.SecureRandom
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * All `clipboard.v1` state and policy for this phone.
@@ -130,8 +133,59 @@ class ClipboardSync(
     /** Keyed by `fingerprint.toHex()`; see the class docs. */
     private val pending = LinkedHashMap<String, PendingClip>()
 
-    /** Live sessions, for sends this device starts. Keyed by hex. */
-    private val sessions = LinkedHashMap<String, suspend (ByteString) -> Unit>()
+    /**
+     * Live sessions, for sends this device starts. Keyed by hex.
+     *
+     * The lambda answers the **envelope message id** the session minted for
+     * the frame. That id is the only thing a generic `Error` can be correlated
+     * back to — `Envelope.correlation_id` is set to it by a peer that refuses
+     * the capability — so throwing it away, as this used to, is what left
+     * `ERROR_CODE_UNSUPPORTED_CAPABILITY` a log line nobody could attribute.
+     */
+    private val sessions = LinkedHashMap<String, suspend (ByteString) -> ByteString>()
+
+    /** One clipboard send that has left and has not been answered. */
+    private class Outstanding(
+        val peerHex: String,
+        val bytes: Int,
+        /**
+         * The session generation this send belongs to.
+         *
+         * Compared on every resolution so that a verdict produced by a
+         * previous session cannot settle a send made by the current one.
+         * Session teardown already settles and removes the entries, so this
+         * is the belt to that braces — and it is what makes "no stale result
+         * from a previous session" a check rather than a consequence.
+         */
+        val epoch: Long,
+        val settled: CompletableDeferred<ClipboardDelivery>,
+    )
+
+    /**
+     * Sends awaiting a verdict, keyed by `eventId` hex.
+     *
+     * Keyed by the **protocol's own** identifier, which is the only safe
+     * choice: `ClipboardResult.event_id` echoes it, so a result can resolve
+     * exactly the send it is about. Correlating by peer name, byte count,
+     * timestamp or arrival order would all mean a verdict for one clip could
+     * settle another.
+     */
+    private val outstanding = LinkedHashMap<String, Outstanding>()
+
+    /**
+     * `envelope.message_id` hex to `eventId` hex, for the frames above.
+     *
+     * The second index exists because the two refusal paths speak different
+     * languages. A peer that negotiated `clipboard.v1` answers in
+     * `clipboard.v1` and names the `event_id`; a peer that did **not**
+     * negotiate it answers with a transport `Error` and can only name the
+     * envelope it is replying to. Both are real correlation identities and
+     * both are on the wire already.
+     */
+    private val byMessageId = LinkedHashMap<String, String>()
+
+    /** Per-peer session generation. Bumped on every attach. */
+    private val epochs = LinkedHashMap<String, Long>()
 
     private val _pendingClips = MutableStateFlow<List<PendingClipInfo>>(emptyList())
 
@@ -145,13 +199,19 @@ class ClipboardSync(
      */
     val pendingClips: StateFlow<List<PendingClipInfo>> = _pendingClips.asStateFlow()
 
-    private val _lastOutcome = MutableStateFlow<Map<String, Outcome>>(emptyMap())
+    private val _lastDelivery = MutableStateFlow<Map<String, ClipboardDelivery>>(emptyMap())
 
     /**
-     * The last verdict each computer reported for something we sent it,
-     * keyed by `fingerprint.toHex()`.
+     * What is known about the last clipboard sent to each computer, keyed by
+     * `fingerprint.toHex()`.
+     *
+     * The state authority for the UI. A toast is a one-shot announcement that
+     * can be missed and cannot be corrected; this is the value a screen draws,
+     * and it moves from [ClipboardDelivery.Enqueued] to a settled state as the
+     * peer answers. It never holds clipboard text — `ClipboardDelivery` has no
+     * field that could.
      */
-    val lastOutcome: StateFlow<Map<String, Outcome>> = _lastOutcome.asStateFlow()
+    val lastDelivery: StateFlow<Map<String, ClipboardDelivery>> = _lastDelivery.asStateFlow()
 
     /** Called when a clip arrives that needs the person to act. */
     var onClipPending: ((PendingClipInfo) -> Unit)? = null
@@ -160,8 +220,15 @@ class ClipboardSync(
     // Sessions
     // -----------------------------------------------------------------------
 
-    suspend fun attachSession(peer: Fingerprint, send: suspend (ByteString) -> Unit) {
-        mutex.withLock { sessions[peer.toHex()] = send }
+    suspend fun attachSession(peer: Fingerprint, send: suspend (ByteString) -> ByteString) {
+        val hex = peer.toHex()
+        mutex.withLock {
+            sessions[hex] = send
+            // A new generation. Anything still outstanding from the previous
+            // one belongs to a session that is gone and can never be resolved
+            // by this one.
+            epochs[hex] = (epochs[hex] ?: 0L) + 1L
+        }
     }
 
     /**
@@ -170,11 +237,35 @@ class ClipboardSync(
      * The pending clip goes with it: a clip from a computer that is no longer
      * connected, which the person never applied, has no reason to stay in
      * memory.
+     *
+     * ## Outstanding sends are settled, not dropped
+     *
+     * A clipboard that left and was never answered is
+     * [ClipboardDelivery.Unconfirmed], and the screen has to say so. Dropping
+     * the entry silently would leave a caller waiting for a verdict that can
+     * no longer arrive, and would leave the last thing the person saw —
+     * "waiting for confirmation" — standing forever over a dead session.
      */
     suspend fun detachSession(peer: Fingerprint) {
-        mutex.withLock {
-            sessions.remove(peer.toHex())
-            pending.remove(peer.toHex())
+        val hex = peer.toHex()
+        val stranded = mutex.withLock {
+            sessions.remove(hex)
+            pending.remove(hex)
+            val mine = outstanding.entries.filter { it.value.peerHex == hex }
+            mine.forEach { (eventHex, _) -> outstanding.remove(eventHex) }
+            byMessageId.entries.removeAll { (_, eventHex) ->
+                mine.any { it.key == eventHex }
+            }
+            mine.map { it.value }
+        }
+        for (entry in stranded) {
+            settle(
+                entry,
+                ClipboardDelivery.Unconfirmed(
+                    ClipboardDelivery.Unconfirmed.Reason.DISCONNECTED,
+                    entry.bytes,
+                ),
+            )
         }
         publishPending()
     }
@@ -231,8 +322,13 @@ class ClipboardSync(
                 val result = control.result
                 val outcome = Outcome.entries.firstOrNull { it.proto == result.outcome }
                     ?: Outcome.FAILED
-                _lastOutcome.value = _lastOutcome.value + (peer.toHex() to outcome)
-                Log.d(TAG, "peer reported clipboard outcome: $outcome")
+                // Resolved by the event id the peer echoed, and only for the
+                // peer the send was actually made to. A result naming an id
+                // this session did not mint resolves nothing at all — which
+                // is what stops a verdict for one clip settling another, and
+                // what stops a peer influencing a send made to a different
+                // computer.
+                resolveByEventId(peer, result.eventId.toByteArray(), outcome)
                 null
             }
 
@@ -432,7 +528,7 @@ class ClipboardSync(
     suspend fun sendCurrentClipboard(
         peer: Fingerprint,
         confirmedSensitive: Boolean = false,
-    ): Result<Int> {
+    ): Result<SendReceipt> {
         val policy = authorizer.policyFor(peer)
         if (!policy.allowSend) {
             return Result.failure(ClipboardSendFailed(SendFailure.NotPermitted))
@@ -456,19 +552,34 @@ class ClipboardSync(
         return sendText(peer, clip.text, clip.sensitive)
     }
 
-    /** Sends explicit text, bypassing the system clipboard. */
+    /**
+     * Sends explicit text, bypassing the system clipboard.
+     *
+     * Answers a [SendReceipt], **not** a success. The frame is on the session
+     * and nothing more is known yet; [SendReceipt.awaitVerdict] is how a
+     * caller finds out what the peer did with it, and
+     * [ClipboardDelivery.Enqueued] is what the state says until it does.
+     *
+     * This return type is the correction to GitHub #8. The old one was
+     * `Result<Int>`, and `Result.success(42)` from here read at every call
+     * site as "42 bytes arrived" when all it ever meant was "42 bytes were
+     * handed to the writer".
+     */
     suspend fun sendText(
         peer: Fingerprint,
         text: ClipboardText,
         sensitive: Boolean,
-    ): Result<Int> {
+    ): Result<SendReceipt> {
         val policy = authorizer.policyFor(peer)
         if (!policy.allowSend) {
             return Result.failure(ClipboardSendFailed(SendFailure.NotPermitted))
         }
 
-        val send = mutex.withLock { sessions[peer.toHex()] }
-            ?: return Result.failure(ClipboardSendFailed(SendFailure.NotConnected))
+        val hex = peer.toHex()
+        val (send, epoch) = mutex.withLock {
+            val session = sessions[hex] ?: return@withLock null
+            session to (epochs[hex] ?: 0L)
+        } ?: return Result.failure(ClipboardSendFailed(SendFailure.NotConnected))
 
         val eventId = randomEventId()
         val update = ClipboardControl.newBuilder()
@@ -483,20 +594,180 @@ class ClipboardSync(
             )
             .build()
 
-        return try {
+        val eventHex = eventId.toHexString()
+        val entry = Outstanding(
+            peerHex = hex,
+            bytes = text.byteLength,
+            epoch = epoch,
+            settled = CompletableDeferred(),
+        )
+        // Registered *before* the write. A peer on the same LAN can answer
+        // while `send` is still returning, and an entry registered afterwards
+        // would miss that verdict and report the clip as unconfirmed.
+        mutex.withLock {
+            outstanding[eventHex] = entry
+            evictOldestLocked()
+        }
+
+        val messageId = try {
             send(update.toByteString())
-            Log.i(
-                TAG,
-                "clipboard update sent to ${peer.toDisplayShort()} " +
-                    "event=${Redact.eventPrefix(eventId)} bytes=${text.byteLength} " +
-                    "sensitive=$sensitive",
-            )
-            Result.success(text.byteLength)
         } catch (e: Exception) {
             Log.w(TAG, "could not send a clipboard update: ${e.javaClass.simpleName}")
-            Result.failure(ClipboardSendFailed(SendFailure.NotConnected))
+            mutex.withLock {
+                outstanding.remove(eventHex)
+                byMessageId.entries.removeAll { it.value == eventHex }
+            }
+            return Result.failure(ClipboardSendFailed(SendFailure.NotConnected))
+        }
+
+        mutex.withLock { byMessageId[messageId.toByteArray().toHexString()] = eventHex }
+
+        // An event prefix, a count and a flag. Never the text, never the hash
+        // in full, never the peer's name.
+        Log.i(
+            TAG,
+            "clipboard update sent to ${peer.toDisplayShort()} " +
+                "event=${Redact.eventPrefix(eventId)} bytes=${text.byteLength} " +
+                "sensitive=$sensitive",
+        )
+        publishDelivery(hex, ClipboardDelivery.Enqueued(text.byteLength))
+        return Result.success(SendReceipt(eventHex, text.byteLength, entry.settled))
+    }
+
+    /**
+     * A clipboard that has left, and the means to learn what became of it.
+     *
+     * Deliberately not a `Result`: there is no success to report yet, and a
+     * type that looked like one is how the defect was written in the first
+     * place.
+     */
+    class SendReceipt internal constructor(
+        /** The protocol event id, hex. The correlation key, and public. */
+        val eventIdHex: String,
+        val bytes: Int,
+        private val settled: CompletableDeferred<ClipboardDelivery>,
+    ) {
+        /** What is known right now, before any verdict. */
+        val enqueued: ClipboardDelivery get() = ClipboardDelivery.Enqueued(bytes)
+
+        /**
+         * Waits for the peer's verdict, for at most [timeoutMs].
+         *
+         * A timeout is [ClipboardDelivery.Unconfirmed], never a failure and
+         * never a success: the clip may have arrived and this end cannot tell.
+         * The wait does *not* cancel the send or forget the correlation — a
+         * verdict that arrives late still settles the state the screen draws.
+         */
+        suspend fun awaitVerdict(timeoutMs: Long): ClipboardDelivery =
+            withTimeoutOrNull(timeoutMs) { settled.await() }
+                ?: ClipboardDelivery.Unconfirmed(
+                    ClipboardDelivery.Unconfirmed.Reason.TIMED_OUT,
+                    bytes,
+                )
+    }
+
+    // -----------------------------------------------------------------------
+    // Verdicts
+    // -----------------------------------------------------------------------
+
+    /**
+     * A peer answered in `clipboard.v1`, naming the event it is about.
+     *
+     * Three things have to agree before anything is settled: the event id is
+     * one this device minted, the peer answering is the peer it was sent to,
+     * and the session is the one it was sent on. Any of the three failing
+     * means the result belongs to something else and is discarded.
+     */
+    private suspend fun resolveByEventId(peer: Fingerprint, eventId: ByteArray, outcome: Outcome) {
+        val hex = peer.toHex()
+        val eventHex = eventId.toHexString()
+        val entry = mutex.withLock {
+            val candidate = outstanding[eventHex] ?: return@withLock null
+            // Not ours to settle. Left in place rather than removed: the real
+            // peer's answer must still be able to resolve it.
+            if (candidate.peerHex != hex) return@withLock null
+            if (candidate.epoch != (epochs[hex] ?: 0L)) return@withLock null
+            outstanding.remove(eventHex)
+            byMessageId.entries.removeAll { it.value == eventHex }
+            candidate
+        }
+        if (entry == null) {
+            // Common and harmless: a duplicate result, or one for a send that
+            // the session teardown already settled. Logged without the id.
+            Log.d(TAG, "clipboard result did not match an outstanding send")
+            return
+        }
+        Log.d(TAG, "peer reported clipboard outcome: $outcome")
+        settle(entry, ClipboardDelivery.of(outcome, entry.bytes))
+    }
+
+    /**
+     * The peer refused the capability rather than the clip.
+     *
+     * The transport hands this on with `Envelope.correlation_id`, which a
+     * refusing peer sets to the `message_id` of the frame it is refusing.
+     * That is a real protocol identity, minted here, unguessable and unique —
+     * so matching on it is safe in a way that matching on a timestamp or a
+     * byte count never would be. A correlation id this device did not mint
+     * matches nothing and is ignored.
+     */
+    suspend fun onPeerRefusal(peer: Fingerprint, correlationId: ByteString, code: ErrorCode) {
+        val hex = peer.toHex()
+        val messageHex = correlationId.toByteArray().toHexString()
+        val entry = mutex.withLock {
+            val eventHex = byMessageId[messageHex] ?: return@withLock null
+            val candidate = outstanding[eventHex] ?: return@withLock null
+            if (candidate.peerHex != hex) return@withLock null
+            if (candidate.epoch != (epochs[hex] ?: 0L)) return@withLock null
+            outstanding.remove(eventHex)
+            byMessageId.remove(messageHex)
+            candidate
+        } ?: return
+
+        val refusal = when (code) {
+            ErrorCode.ERROR_CODE_UNSUPPORTED_CAPABILITY -> ClipboardDelivery.Refusal.NOT_NEGOTIATED
+            ErrorCode.ERROR_CODE_NOT_AUTHORIZED -> ClipboardDelivery.Refusal.NOT_AUTHORIZED
+            ErrorCode.ERROR_CODE_RATE_LIMITED -> ClipboardDelivery.Refusal.RATE_LIMITED
+            else -> ClipboardDelivery.Refusal.OTHER
+        }
+        // The code, not the peer's message: `Error.message` is a free string
+        // from the other end of the wire.
+        Log.i(TAG, "peer refused a clipboard frame: $refusal")
+        settle(entry, ClipboardDelivery.Refused(refusal, entry.bytes))
+    }
+
+    private fun settle(entry: Outstanding, delivery: ClipboardDelivery) {
+        entry.settled.complete(delivery)
+        publishDelivery(entry.peerHex, delivery)
+    }
+
+    private fun publishDelivery(peerHex: String, delivery: ClipboardDelivery) {
+        _lastDelivery.value = _lastDelivery.value + (peerHex to delivery)
+    }
+
+    /**
+     * Keeps the outstanding map bounded.
+     *
+     * A peer that answers nothing must not be able to grow this without end.
+     * The oldest entry is settled as unconfirmed rather than dropped, so a
+     * caller waiting on it is answered rather than left. Called under [mutex].
+     */
+    private fun evictOldestLocked() {
+        while (outstanding.size > MAX_OUTSTANDING_SENDS) {
+            val oldest = outstanding.entries.first()
+            outstanding.remove(oldest.key)
+            byMessageId.entries.removeAll { it.value == oldest.key }
+            oldest.value.settled.complete(
+                ClipboardDelivery.Unconfirmed(
+                    ClipboardDelivery.Unconfirmed.Reason.TIMED_OUT,
+                    oldest.value.bytes,
+                ),
+            )
         }
     }
+
+    /** Outstanding sends, for tests and diagnostics. No content. */
+    suspend fun outstandingSends(): Int = mutex.withLock { outstanding.size }
 
     /** Cache sizes, so the bounded-growth property is observable. */
     suspend fun cacheSizes(): Pair<Int, Int> =
@@ -515,8 +786,22 @@ class ClipboardSync(
             .build()
             .toByteString()
 
+    private fun ByteArray.toHexString(): String =
+        joinToString("") { "%02x".format(it) }
+
     companion object {
         private const val TAG = "ClipboardSync"
+
+        /**
+         * How many sends may await a verdict at once.
+         *
+         * The protocol does not serialise clipboard operations — nothing in
+         * `clipboard_v1.proto` says a sender must wait — so this is a real
+         * bound rather than a theoretical one. It is generous for a capability
+         * a person drives by hand, and small enough that a peer which answers
+         * nothing cannot cost this process memory.
+         */
+        private const val MAX_OUTSTANDING_SENDS = 32
     }
 }
 
