@@ -244,15 +244,20 @@ fun PeerDetailScreen(
                 }
 
                 Spacer(Modifier.height(AnyFlowSpacing.xxs))
+                val clipboardGate = state.clipboardSendGate(peer)
                 AnyFlowPrimaryButton(
                     text = "Send clipboard",
                     icon = R.drawable.ic_send,
-                    enabled = connected && policy.allowSend,
+                    enabled = clipboardGate.ready,
                     onClick = { onSendClipboard(peer.fingerprint.toHex()) },
                 )
-                if (!connected) {
+                // The reason the button is grey, in the one place a person is
+                // looking when they wonder. It used to say "Connect to X" for
+                // every cause, including a session that was up and simply had
+                // not negotiated the clipboard.
+                clipboardGate.reasonOrNull?.let { reason ->
                     Text(
-                        "Connect to ${peer.deviceName} to send your clipboard.",
+                        reason,
                         style = AnyFlowType.caption,
                         color = colors.textMuted,
                     )

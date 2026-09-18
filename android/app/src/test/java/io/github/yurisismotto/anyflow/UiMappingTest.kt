@@ -134,33 +134,49 @@ class UiMappingTest {
 
     // ---- capability and policy gating ------------------------------------
 
-    @Test
-    fun `sending the clipboard needs the grant, the direction and a session`() {
-        val full = peer(ClipboardCapability.ID)
-        assertTrue(UiMapping.canSendClipboard(full, connected = true))
+    /** A live session with this peer, negotiating [capabilities]. */
+    private fun session(vararg capabilities: String) = AnyFlowApp.LiveSession(
+        peerHex = "00".repeat(32),
+        negotiated = capabilities.toSet(),
+    )
 
-        // Any one of the three missing is enough to disable the action.
+    @Test
+    fun `sending the clipboard needs the grant, the direction, a session and negotiation`() {
+        val full = peer(ClipboardCapability.ID)
+        val live = session(ClipboardCapability.ID)
+        assertTrue(UiMapping.canSendClipboard(full, live))
+
+        // Any one of the four missing is enough to disable the action.
         assertFalse(
             "a session alone is not authorisation",
-            UiMapping.canSendClipboard(peer(), connected = true),
+            UiMapping.canSendClipboard(peer(), live),
         )
         assertFalse(
             "the grant alone is not a connection",
-            UiMapping.canSendClipboard(full, connected = false),
+            UiMapping.canSendClipboard(full, null),
         )
         assertFalse(
             "the grant does not override the send direction being off",
             UiMapping.canSendClipboard(
                 peer(ClipboardCapability.ID, policy = ClipboardPolicy(allowSend = false)),
-                connected = true,
+                live,
             ),
+        )
+        assertFalse(
+            "a session that never negotiated the clipboard cannot carry one",
+            UiMapping.canSendClipboard(full, session(BatteryCapability.ID)),
         )
     }
 
     @Test
     fun `a battery grant does not authorise the clipboard`() {
         // Capabilities are independent. Granting one must never widen another.
-        assertFalse(UiMapping.canSendClipboard(peer(BatteryCapability.ID), connected = true))
+        assertFalse(
+            UiMapping.canSendClipboard(
+                peer(BatteryCapability.ID),
+                session(ClipboardCapability.ID),
+            ),
+        )
         assertFalse(UiMapping.canSendFiles(peer(BatteryCapability.ID), connected = true))
     }
 

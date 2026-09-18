@@ -103,6 +103,42 @@ class AnyFlowApp : Application() {
         _connectionState.value = state
     }
 
+    /**
+     * What the **live session** negotiated, if there is one.
+     *
+     * ## Why this is not read from the trust store
+     *
+     * A grant says what a computer is *allowed* to do. A negotiated capability
+     * set says what the session that is up can *actually carry*, and the two
+     * come apart: the set is fixed by `HELLO` and is the authority for the
+     * whole life of that session, so a capability granted afterwards is not on
+     * it until a new handshake runs (ADR-0017 §3). A screen that asked only
+     * the trust store therefore offered a Send button over a session that
+     * would drop the frame — which is half of GitHub #8.
+     *
+     * ## Why it is never persisted
+     *
+     * It is connection state, not trust. Writing it down would create a second
+     * record of what a peer may do, ageing the moment the session ends, and
+     * the whole point of asking the live session is that it cannot be stale.
+     * It is cleared when the session ends, and a process restart starts at
+     * null rather than at a remembered yes.
+     */
+    data class LiveSession(
+        /** Whose session this is. The routing identity, never a name. */
+        val peerHex: String,
+        /** Capability ids this session negotiated. Not grants. */
+        val negotiated: Set<String>,
+    )
+
+    private val _liveSession = MutableStateFlow<LiveSession?>(null)
+    val liveSession: StateFlow<LiveSession?> = _liveSession.asStateFlow()
+
+    /** Called by the connection service when a session comes up or goes. */
+    fun publishLiveSession(session: LiveSession?) {
+        _liveSession.value = session
+    }
+
     override fun onCreate() {
         super.onCreate()
         trustStore = TrustStore(this)

@@ -425,9 +425,16 @@ impl QuickPanel {
                     let Some(panel) = panel.upgrade() else { return };
                     match reply {
                         Ok(Response::Error { message }) => {
-                            panel.toast(&format!("Could not send the clipboard: {message}"));
+                            panel.toast(&model::clipboard_send_error_message(&message));
                         }
-                        Ok(_) => panel.toast(&format!("Clipboard sent to {peer}")),
+                        // QP-DEBT-06: not "Clipboard sent". The daemon answers
+                        // this as soon as the frame is on the session, and the
+                        // device's verdict arrives afterwards — in the
+                        // clipboard status row, which the panel's own poll
+                        // refreshes within a couple of seconds. Claiming
+                        // delivery here was optimistic by exactly one round
+                        // trip, and on hardware the two came apart.
+                        Ok(_) => panel.toast(&model::clipboard_submitted_message(&peer)),
                         Err(_) => panel.toast("The AnyFlow service is not available"),
                     }
                 });

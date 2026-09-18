@@ -54,14 +54,82 @@ object UiMapping {
     }
 
     /**
-     * May "Send clipboard" be tapped?
+     * Whether "Send clipboard" may be pressed, and if not, what to say.
      *
-     * Three separate conditions, and collapsing them is how a person comes to
-     * believe sync is running when it is not: the capability must be granted,
-     * the direction must be permitted, and a session must exist.
+     * ## Why this is a reason and not a boolean — GitHub #8
+     *
+     * There were four independent conditions and three screens, each of which
+     * wrote its own subset inline; this function existed and none of them
+     * called it. The home screen and the device card asked for the grant, the
+     * policy and a live link, and the send screen asked only for a live link.
+     * None asked whether the session that is up had actually **negotiated**
+     * `clipboard.v1`, so the button was live over a session that would drop
+     * the frame — and the send that followed failed with "Not connected to
+     * that computer", which was not true and told the person nothing they
+     * could act on.
+     *
+     * The order of the checks is the order a person can fix them in, which is
+     * why the grant is asked before the connection: "turn it on" is an answer,
+     * and "you are not connected" over a computer the person never granted
+     * anything to is a red herring.
      */
-    fun canSendClipboard(peer: TrustStore.TrustedPeer, connected: Boolean): Boolean =
-        peer.allows(ClipboardCapability.ID) && peer.clipboardPolicy.allowSend && connected
+    sealed interface ClipboardSendGate {
+        data object Ready : ClipboardSendGate
+
+        /** [reason] is written for a person and names no protocol internals. */
+        data class Blocked(val reason: String) : ClipboardSendGate
+
+        val ready: Boolean get() = this is Ready
+
+        /** Null when ready, so a screen can show it under a disabled button. */
+        val reasonOrNull: String? get() = (this as? Blocked)?.reason
+    }
+
+    /**
+     * @param session what the **live** session negotiated, or null when there
+     *   is none. Carries the peer it belongs to, because a capability
+     *   negotiated with one computer says nothing about another — with two
+     *   paired desktops a single global "connected" flag would let the
+     *   session with A enable the Send button aimed at B.
+     */
+    fun clipboardSendGate(
+        peer: TrustStore.TrustedPeer,
+        session: AnyFlowApp.LiveSession?,
+    ): ClipboardSendGate {
+        if (!peer.allows(ClipboardCapability.ID)) {
+            return ClipboardSendGate.Blocked(
+                "Turn on clipboard sharing for ${peer.deviceName} first.",
+            )
+        }
+        if (!peer.clipboardPolicy.allowSend) {
+            return ClipboardSendGate.Blocked(
+                "Sending your clipboard to ${peer.deviceName} is turned off.",
+            )
+        }
+        // Identity, not a flag. `session.peerHex` is the fingerprint hex the
+        // handshake authenticated, and it is compared to this peer's own.
+        if (session == null || session.peerHex != peer.fingerprint.toHex()) {
+            return ClipboardSendGate.Blocked(
+                "Connect to ${peer.deviceName} to send your clipboard.",
+            )
+        }
+        if (ClipboardCapability.ID !in session.negotiated) {
+            // The wording says what is true and what to expect, without
+            // naming a capability id. A grant made just now is the ordinary
+            // cause, and the session ends and redials on its own.
+            return ClipboardSendGate.Blocked(
+                "This connection with ${peer.deviceName} has not negotiated " +
+                    "clipboard sharing yet.",
+            )
+        }
+        return ClipboardSendGate.Ready
+    }
+
+    /** May "Send clipboard" be tapped? */
+    fun canSendClipboard(
+        peer: TrustStore.TrustedPeer,
+        session: AnyFlowApp.LiveSession?,
+    ): Boolean = clipboardSendGate(peer, session).ready
 
     /** May a file be offered to this peer right now? */
     fun canSendFiles(peer: TrustStore.TrustedPeer, connected: Boolean): Boolean =

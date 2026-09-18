@@ -402,6 +402,80 @@ pub fn send_clipboard_request(action: &Action) -> Option<Request> {
 }
 
 // ---------------------------------------------------------------------------
+// Clipboard feedback — QP-DEBT-06
+// ---------------------------------------------------------------------------
+
+/// What the panel says the instant a Send clipboard press is accepted.
+///
+/// # The defect this corrects
+///
+/// The press used to be acknowledged with **"Clipboard sent to SM-X620"**, and
+/// that was optimistic by one round trip. `ClipboardSend` is answered by the
+/// daemon as soon as the frame is on the session — which is all the sending
+/// end can know at that moment — while the receiver's verdict arrives
+/// afterwards and lands in the status row. Found on hardware: the panel said
+/// "sent" and the tablet had refused the clip, because the grant on the
+/// *Android* side was missing.
+///
+/// So the immediate message says what actually happened, and names the thing
+/// that will answer the question. It is not the state authority — the status
+/// row is, and the panel's own poll refreshes it within a couple of seconds —
+/// which is why this is one sentence and not a second outcome model.
+pub fn clipboard_submitted_message(peer: &str) -> String {
+    format!("Clipboard submitted to {peer}; awaiting confirmation")
+}
+
+/// What the panel says when the daemon refuses the press outright.
+///
+/// This one *is* final: nothing left this computer, so there is no verdict
+/// coming and no ambiguity to preserve. The daemon's message is written for a
+/// person and carries no clip content — `do_clipboard_send` composes it from a
+/// fingerprint and a byte count.
+pub fn clipboard_send_error_message(message: &str) -> String {
+    format!("Could not send the clipboard: {message}")
+}
+
+/// Whether a peer's reported outcome means the clip actually arrived.
+///
+/// `duplicate` counts: the peer recognised the event id, which it could only
+/// have got from us, so an earlier copy of that clip reached it. The Android
+/// side sorts the same outcomes the same way, in `ClipboardDelivery::of`.
+pub fn clipboard_outcome_succeeded(outcome: &str) -> bool {
+    matches!(outcome, "applied" | "pending" | "duplicate")
+}
+
+/// One peer verdict, in words, for the clipboard status row.
+///
+/// The row is the authoritative final outcome, so it says what happened when
+/// the clip arrived as well as when it did not — a person who has just been
+/// told "awaiting confirmation" needs somewhere for that to resolve, and an
+/// empty row is not an answer.
+///
+/// The vocabulary is closed and none of it is a protocol string: the daemon's
+/// `Outcome::as_str` values are an interface between two of our own processes,
+/// not English, and `Last clip sent: not authorized by SM-X620.` is what
+/// putting them on screen reads like.
+pub fn clipboard_outcome_note(outcome: &str, peer: &str) -> String {
+    match outcome {
+        "applied" => format!(" The last clip reached {peer}."),
+        "pending" => format!(" The last clip reached {peer} and is waiting to be applied there."),
+        "duplicate" => format!(" {peer} already had the last clip."),
+        "not authorized" => {
+            format!(" {peer} is not set up to accept this computer's clipboard.")
+        }
+        "rejected by policy" => {
+            format!(" {peer} is not accepting clipboard text from this computer.")
+        }
+        "rejected as sensitive" => format!(" {peer} refuses clipboard text marked sensitive."),
+        "too large" => format!(" The last clip was too large for {peer}."),
+        "invalid text" => format!(" {peer} could not read the last clip as text."),
+        // Anything a newer daemon reports. Named as a refusal rather than
+        // echoed, so an unknown value can never read as success.
+        _ => format!(" {peer} could not use the last clip."),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Status lines
 // ---------------------------------------------------------------------------
 
@@ -1237,16 +1311,18 @@ fn clipboard_status(
 
     // What the *peer* said about the last clip this computer sent it.
     //
-    // Worth a line because the alternative is a silent failure. A
-    // `ClipboardSend` is answered as soon as the frame is on the session —
-    // that is all the sending end can know at the time — and the receiver's
-    // verdict arrives afterwards. Found on real hardware: the panel said
-    // "Clipboard sent to SM-X620" and the tablet had refused it, because the
-    // grant on the *Android* side was missing. The desktop cannot know that
-    // in advance; it can stop being the last to mention it.
-    let refusal = match policy.last_outcome.as_deref() {
-        None | Some("applied") | Some("pending") | Some("duplicate") => String::new(),
-        Some(outcome) => format!(" Last clip sent: {outcome} by {}.", peer.name),
+    // This row is where "Clipboard submitted to X; awaiting confirmation"
+    // resolves, which is why it now states the confirming outcomes as well as
+    // the refusing ones (QP-DEBT-06). A `ClipboardSend` is answered as soon as
+    // the frame is on the session — that is all the sending end can know at
+    // the time — and the receiver's verdict arrives afterwards. Found on real
+    // hardware: the panel said "Clipboard sent to SM-X620" and the tablet had
+    // refused it, because the grant on the *Android* side was missing. The
+    // desktop cannot know that in advance; it can stop claiming otherwise, and
+    // it can say so here when the answer comes.
+    let verdict = match policy.last_outcome.as_deref() {
+        None => String::new(),
+        Some(outcome) => clipboard_outcome_note(outcome, &peer.name),
     };
 
     let value = if policy.allow_send || policy.allow_receive {
@@ -1254,7 +1330,7 @@ fn clipboard_status(
     } else {
         StatusValue::Off
     };
-    StatusLine::new(value, format!("{sending} {receiving}{caveat}{refusal}"))
+    StatusLine::new(value, format!("{sending} {receiving}{caveat}{verdict}"))
 }
 
 /// The notifications row: grant and policy, never mere advertisement.

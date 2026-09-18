@@ -7,6 +7,7 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import io.github.yurisismotto.anyflow.AnyFlowApp
 import io.github.yurisismotto.anyflow.capability.ClipboardCapability
+import java.security.SecureRandom
 
 /**
  * A "Send clipboard" tile in the Quick Settings panel.
@@ -35,6 +36,22 @@ import io.github.yurisismotto.anyflow.capability.ClipboardCapability
  * Taking an `Intent` was deprecated and then made to throw
  * `UnsupportedOperationException` on API 34+; a `PendingIntent` is required.
  * Both are handled, because this app supports API 29 upward.
+ *
+ * ## Why every press carries a fresh id — GitHub #7
+ *
+ * `MainActivity` cannot act on this the moment it arrives: Android refuses
+ * `getPrimaryClip` to an app without window focus, so the request has to wait
+ * for `onWindowFocusChanged` (see [ClipboardShortcut]). Waiting means the
+ * request outlives the callback that delivered it, and `getIntent()` keeps
+ * returning the launch intent — so a rotation would replay it and send the
+ * clipboard again.
+ *
+ * A random id per press is what tells the two apart. It is minted here, at
+ * the one place that knows a person actually pressed the tile, and
+ * `FLAG_UPDATE_CURRENT` is what makes the reused `PendingIntent` carry the
+ * new one. It is an idempotency token and nothing else: it is not a
+ * credential, it authorizes nothing, and the send it leads to still asks the
+ * trust store for the grant and the policy.
  */
 class ClipboardTileService : TileService() {
 
@@ -63,6 +80,7 @@ class ClipboardTileService : TileService() {
 
         val intent = Intent(this, MainActivity::class.java)
             .setAction(MainActivity.ACTION_SEND_CLIPBOARD)
+            .putExtra(MainActivity.EXTRA_REQUEST_ID, newRequestId())
             .addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
@@ -81,5 +99,22 @@ class ClipboardTileService : TileService() {
             @Suppress("DEPRECATION")
             startActivityAndCollapse(intent)
         }
+    }
+
+    /**
+     * 16 random bytes as hex.
+     *
+     * Random rather than a counter: a counter would restart with the process,
+     * and a restarted counter colliding with an id `MainActivity` had already
+     * consumed is exactly the replay this is here to stop.
+     */
+    private fun newRequestId(): String =
+        ByteArray(REQUEST_ID_BYTES)
+            .also(random::nextBytes)
+            .joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        const val REQUEST_ID_BYTES = 16
+        val random = SecureRandom()
     }
 }

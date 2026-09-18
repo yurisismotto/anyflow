@@ -3,6 +3,7 @@ package io.github.yurisismotto.anyflow.capability
 import com.google.protobuf.ByteString
 import io.github.yurisismotto.anyflow.clipboard.ClipboardSync
 import io.github.yurisismotto.anyflow.identity.Fingerprint
+import io.github.yurisismotto.anyflow.proto.ErrorCode
 
 /**
  * `clipboard.v1` — text clipboard sharing with the paired computer.
@@ -39,6 +40,24 @@ class ClipboardCapability(
         if (reply != null) {
             context.send(ID, reply)
         }
+    }
+
+    /**
+     * A refusal from the peer, correlated back to the clipboard frame it
+     * refused.
+     *
+     * This is the path that carries `ERROR_CODE_UNSUPPORTED_CAPABILITY` — the
+     * answer a desktop gives when its own session never negotiated
+     * `clipboard.v1`, which is exactly the state GitHub #8 was about. The
+     * decision about what it means is [ClipboardSync]'s, as every other
+     * clipboard decision is; this only routes.
+     */
+    override suspend fun onPeerError(
+        context: CapabilityContext,
+        correlationId: ByteString,
+        code: ErrorCode,
+    ) {
+        sync.onPeerRefusal(context.peer, correlationId, code)
     }
 
     override suspend fun onPeerDisconnected(peer: Fingerprint) {
