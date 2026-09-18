@@ -237,6 +237,18 @@ fun AnyFlowCapabilityRow(
  * Direction is stated in words ("From Fedora" / "To Fedora") rather than
  * implied by an arrow's rotation, and the state line never disappears — a
  * transfer that failed keeps saying so until it is cleared.
+ *
+ * @param statusLabel the word for the state, when the caller owns a more
+ *   specific vocabulary than [AnyFlowStatus] does. The Files screen does:
+ *   "Declined", "Timed out" and "Disconnected" are three different endings
+ *   that all wear the same muted colour, and each is a separate localised
+ *   string. The colour still comes from [status], so the two cannot disagree.
+ * @param rowDescription what a screen reader reads instead of the card's
+ *   four separate fragments. Supplied rather than assembled here, because
+ *   only the caller knows the order the sentence should be in.
+ * @param action a trailing action for a settled transfer — Open, typically.
+ *   A slot rather than a label and a lambda so the caller keeps the decision
+ *   about whether the action is offerable at all.
  */
 @Composable
 fun AnyFlowTransferCard(
@@ -249,7 +261,13 @@ fun AnyFlowTransferCard(
     percentLabel: String? = null,
     icon: Int = R.drawable.ic_file,
     accent: Color? = null,
+    statusLabel: String? = null,
+    rowDescription: String? = null,
+    cancelLabel: String = "Cancel",
+    /** Names what would be cancelled; every row's button reads "Cancel". */
+    cancelDescription: String? = null,
     onCancel: (() -> Unit)? = null,
+    action: (@Composable () -> Unit)? = null,
 ) {
     val colors = AnyFlowTheme.colors
     val tileAccent = accent ?: colors.accentBlue
@@ -257,7 +275,22 @@ fun AnyFlowTransferCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             AnyFlowIconTile(icon = icon, accent = tileAccent)
             Spacer(Modifier.width(AnyFlowSpacing.sm))
-            Column(Modifier.weight(1f)) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    // One sentence, not four fragments. The filename is
+                    // elided on screen when it is long; the description is
+                    // not, so a screen reader still reads the whole name.
+                    .then(
+                        if (rowDescription == null) {
+                            Modifier
+                        } else {
+                            Modifier.semantics(mergeDescendants = true) {
+                                contentDescription = rowDescription
+                            }
+                        },
+                    ),
+            ) {
                 Text(
                     filename,
                     style = AnyFlowType.subtitle,
@@ -284,14 +317,29 @@ fun AnyFlowTransferCard(
             AnyFlowProgressBar(fraction)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (detail != null) {
+            if (statusLabel != null) {
+                AnyFlowStatusBadge(status, label = statusLabel, showIcon = false)
+            } else if (detail != null) {
                 Text(detail, style = AnyFlowType.caption, color = colors.textSecondary)
             } else if (status != AnyFlowStatus.Success) {
                 AnyFlowStatusBadge(status, showIcon = false)
             }
+            if (statusLabel != null && detail != null) {
+                Spacer(Modifier.width(AnyFlowSpacing.xs))
+                Text(detail, style = AnyFlowType.caption, color = colors.textSecondary)
+            }
             Spacer(Modifier.weight(1f))
+            action?.invoke()
             if (onCancel != null) {
-                AnyFlowTextButton("Cancel", onCancel)
+                AnyFlowTextButton(
+                    cancelLabel,
+                    onCancel,
+                    modifier = if (cancelDescription == null) {
+                        Modifier
+                    } else {
+                        Modifier.semantics { contentDescription = cancelDescription }
+                    },
+                )
             }
         }
     }

@@ -79,7 +79,7 @@ fun AnyFlowShell(
                 onSelect = { tab ->
                     screen = when (tab) {
                         Tab.Devices -> Screen.Devices
-                        Tab.Activity -> Screen.Activity
+                        Tab.Files -> Screen.Files
                         Tab.Settings -> Screen.Settings
                     }
                 },
@@ -111,7 +111,7 @@ fun AnyFlowShell(
                         onSendClipboard = { screen = Screen.SendClipboard(it) },
                     )
 
-                    Screen.Activity -> ActivityScreen(state = state, actions = actions)
+                    Screen.Files -> FilesScreen(state = state, actions = actions)
 
                     Screen.Settings -> SettingsScreen(state = state, actions = actions)
 
@@ -164,7 +164,7 @@ private fun ShellTopBar(screen: Screen, onBack: () -> Unit) {
     val colors = AnyFlowTheme.colors
     val title = when (screen) {
         Screen.Devices -> "AnyFlow"
-        Screen.Activity -> "Activity"
+        Screen.Files -> stringResource(R.string.files_title)
         Screen.Settings -> "Settings"
         is Screen.PeerDetail -> "Device"
         is Screen.SendClipboard -> "Send clipboard"
@@ -211,6 +211,7 @@ private fun ShellBottomBar(current: Tab, onSelect: (Tab) -> Unit) {
     NavigationBar(containerColor = colors.surface, tonalElevation = 0.dp) {
         Tab.entries.forEach { tab ->
             val selected = tab == current
+            val label = stringResource(tab.label)
             NavigationBarItem(
                 selected = selected,
                 onClick = { onSelect(tab) },
@@ -223,9 +224,9 @@ private fun ShellBottomBar(current: Tab, onSelect: (Tab) -> Unit) {
                         modifier = Modifier.size(AnyFlowIconSize.large),
                     )
                 },
-                label = { Text(tab.label, style = AnyFlowType.caption) },
+                label = { Text(stringResource(tab.label), style = AnyFlowType.caption) },
                 alwaysShowLabel = true,
-                modifier = Modifier.semantics { contentDescription = tab.label },
+                modifier = Modifier.semantics { contentDescription = label },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = colors.accentTeal,
                     selectedTextColor = colors.accentTeal,

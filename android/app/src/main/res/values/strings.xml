@@ -198,4 +198,81 @@
     <string name="device_remove_from_list_confirm_title">Remove %1$s from the list?</string>
     <string name="device_remove_from_list_confirm_body">This device will stay revoked and cannot reconnect unless you pair it again.</string>
     <string name="device_remove_from_list_confirm_button">Remove</string>
+
+    <!--
+      The Files screen.
+
+      Every word a person reads about a transfer is here rather than inlined
+      in Compose, for the same reason the notification consent copy is: these
+      are claims about what happened to someone's file, and a claim has to be
+      reviewable in one place and translatable without touching Kotlin.
+
+      Two rules bind what may be written below.
+
+      *A status word must name a state the transfer state machine can prove.*
+      There is no string here for "delivered", "synced" or "complete" as
+      distinct from what `TransferState` actually reaches, and no string that
+      softens a failure into a pause. `files_status_sent` is written only when
+      the receiving computer confirmed it has the bytes; `files_status_received`
+      only when the hash matched and the file was published.
+
+      *Nothing here can interpolate a URI or a path.* The only format
+      specifiers below take a device name or a file's display name. A
+      `content://` URI identifies a provider, sometimes an account and
+      sometimes a document id, and there is deliberately no string it could be
+      substituted into.
+    -->
+    <!-- The three bottom-bar destinations. -->
+    <string name="tab_devices">Devices</string>
+    <string name="tab_settings">Settings</string>
+
+    <string name="files_title">Files</string>
+    <string name="files_tab">Files</string>
+    <string name="files_section_active">Active</string>
+    <string name="files_section_recent">Recent</string>
+
+    <!--
+      Said plainly, because it is the one thing about this screen a person
+      could otherwise get wrong. AnyFlow keeps no transfer history: the list
+      is what this app has done since it started, and closing it is not losing
+      a log, because there was never a log.
+    -->
+    <string name="files_recent_scope">Transfers from this session. AnyFlow keeps no history of what you send or receive — received files stay in Downloads/AnyFlow.</string>
+    <string name="files_empty_title">No transfers yet</string>
+    <string name="files_empty_subtitle">Files you send or receive appear here while they are moving, and stay listed until AnyFlow closes.</string>
+
+    <!-- Direction. Words, never an arrow alone: an arrow announces nothing. -->
+    <string name="files_direction_sent">Sent</string>
+    <string name="files_direction_received">Received</string>
+    <string name="files_from_device">From %1$s</string>
+    <string name="files_to_device">To %1$s</string>
+
+    <!-- Status. One per state the machine actually reaches. -->
+    <string name="files_status_waiting">Waiting</string>
+    <string name="files_status_sending">Sending</string>
+    <string name="files_status_receiving">Receiving</string>
+    <string name="files_status_sent">Sent</string>
+    <string name="files_status_received">Received</string>
+    <string name="files_status_declined">Declined</string>
+    <string name="files_status_cancelled">Cancelled</string>
+    <string name="files_status_timed_out">Timed out</string>
+    <string name="files_status_disconnected">Disconnected</string>
+    <string name="files_status_failed">Failed</string>
+
+    <!-- Opening, and the four honest ways it does not happen. -->
+    <string name="files_action_open">Open</string>
+    <string name="files_action_open_description">Open %1$s</string>
+    <string name="files_action_cancel_description">Stop transferring %1$s</string>
+    <string name="files_open_file_missing">That file is no longer on this device.</string>
+    <string name="files_open_source_unavailable">AnyFlow no longer has permission to open the file it sent.</string>
+    <string name="files_open_no_viewer">No app on this device can open this file.</string>
+
+    <!--
+      Read by a screen reader in place of the row's separate lines, so it says
+      one sentence instead of four fragments: "pasture-map.pdf, Received from
+      Fedora, 2.4 MB". The size is omitted when it is not known rather than
+      read as zero.
+    -->
+    <string name="files_row_description">%1$s, %2$s, %3$s</string>
+    <string name="files_row_description_no_size">%1$s, %2$s</string>
 </resources>

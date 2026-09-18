@@ -1,19 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The themed-icon layer. Android tints this with the wallpaper palette, so it
-  carries no colour of its own — which is exactly why the mark was designed to
-  survive monochrome.
+  The Android 13+ themed-icon layer: the Flow A, in one colour.
+
+  ## Why this is not the foreground with the gradient removed
+
+  It is exactly that, and deliberately so. Same path, same 8-unit stroke, same
+  group translate as `ic_launcher_foreground.xml` — so a themed launcher shows
+  the same mark in the same place, not a second drawing of it that drifts.
+  What changes is only the paint.
+
+  ## Genuinely monochrome
+
+  Android tints this layer with the wallpaper palette, and it does so by
+  taking the layer's *alpha* and painting the system's own colour through it.
+  A gradient here would not survive that; it would be flattened, and the file
+  would be claiming a colour it never gets to keep. So there is one flat
+  black, no gradient, and none of the brand hexes appear anywhere below.
+
+  `BrandingResourcesTest` asserts that — no `<gradient>`, no brand colour —
+  because "the monochrome icon must genuinely be monochrome" is the kind of
+  property that decays the first time somebody copies the foreground over it.
+
+  That the mark survives this at all is a property of the mark: the Flow A is
+  one stroked ribbon and carries no colour-dependent meaning, which is why
+  BRAND.md ships a `-mono` cut of it.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108"
     android:tint="#FF000000">
-    <group android:pivotX="32" android:pivotY="32"
-        android:scaleX="1.15" android:scaleY="1.15"
-        android:translateX="22" android:translateY="22">
-        <path android:pathData="M14,44 C 30,44 24,21 50,22" android:strokeColor="#FF000000"
-            android:strokeWidth="6.5" android:strokeLineCap="round" />
-        <path android:pathData="M14,44m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" android:fillColor="#FF000000" />
-        <path android:pathData="M50,22m-7,0a7,7 0 1,0 14,0a7,7 0 1,0 -14,0" android:fillColor="#FF000000" />
+    <group android:translateX="21.2" android:translateY="17.8">
+        <path
+            android:pathData="M 53 56 C 50 41 43 22 32 8 C 22 21 15 36 10 47 C 7.5 52.5 11.5 56.5 15.5 52 C 22 43.5 33 38 45 37.5 C 50 37.3 54 38 57 39"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
     </group>
 </vector>

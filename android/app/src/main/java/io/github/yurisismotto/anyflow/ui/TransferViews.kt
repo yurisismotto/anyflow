@@ -27,12 +27,20 @@ import io.github.yurisismotto.anyflow.ui.theme.AnyFlowType
  * watch progress, see the outcome. What changed is only how it looks.
  */
 
-/** A file a computer wants to send. Nothing arrives until this is answered. */
+/**
+ * A file a computer wants to send. Nothing arrives until this is answered.
+ *
+ * @param peerLabel what to call the computer that is offering. Null falls
+ *   back to its short fingerprint, which is always available and always
+ *   unambiguous; a name is friendlier when the caller has one to hand. Either
+ *   way it is display only — the offer is answered by its transfer id.
+ */
 @Composable
 fun IncomingOfferCard(
     offer: FileTransferManager.IncomingOffer,
     onRespond: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    peerLabel: String? = null,
 ) {
     val colors = AnyFlowTheme.colors
     AnyFlowCard(modifier) {
@@ -45,7 +53,7 @@ fun IncomingOfferCard(
                 // name could otherwise forge the rest of this card.
                 Text(offer.filename, style = AnyFlowType.subtitle, color = colors.textPrimary)
                 Text(
-                    "${humanBytes(offer.sizeBytes)} · from ${offer.peer.toDisplayShort()}",
+                    "${humanBytes(offer.sizeBytes)} · from ${peerLabel ?: offer.peer.toDisplayShort()}",
                     style = AnyFlowType.caption,
                     color = colors.textSecondary,
                 )

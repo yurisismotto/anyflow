@@ -1,6 +1,7 @@
 package io.github.yurisismotto.anyflow.ui
 
 import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
 import androidx.compose.runtime.saveable.Saver
 import io.github.yurisismotto.anyflow.R
 
@@ -32,8 +33,18 @@ sealed interface Screen {
         override val tab = Tab.Devices
     }
 
-    data object Activity : Screen {
-        override val tab = Tab.Activity
+    /**
+     * Transfers: what is moving, and what moved earlier in this session.
+     *
+     * This was `Activity`, and the rename is the feature. "Activity" named a
+     * screen that showed transfers, pending clipboard text and incoming
+     * offers all at once, which made it the place nothing in particular
+     * lived; the clipboard half already had a better home on Devices, where
+     * it sits beside the computer it came from. What is left is files, so it
+     * is called Files.
+     */
+    data object Files : Screen {
+        override val tab = Tab.Files
     }
 
     data object Settings : Screen {
@@ -71,10 +82,18 @@ sealed interface Screen {
     }
 }
 
-enum class Tab(val label: String, @DrawableRes val icon: Int) {
-    Devices("Devices", R.drawable.ic_home),
-    Activity("Activity", R.drawable.ic_activity),
-    Settings("Settings", R.drawable.ic_settings),
+/**
+ * The three roots of the app.
+ *
+ * The label is a resource id rather than a `String`, because a tab label is
+ * user-facing copy and this enum is constructed before any Composable is
+ * running — a literal here would be the one piece of navigation text a
+ * translator could not reach.
+ */
+enum class Tab(@StringRes val label: Int, @DrawableRes val icon: Int) {
+    Devices(R.string.tab_devices, R.drawable.ic_home),
+    Files(R.string.files_tab, R.drawable.ic_files),
+    Settings(R.string.tab_settings, R.drawable.ic_settings),
 }
 
 /**
@@ -87,7 +106,7 @@ val ScreenSaver: Saver<Screen, Any> = Saver(
     save = { screen ->
         when (screen) {
             Screen.Devices -> listOf("devices")
-            Screen.Activity -> listOf("activity")
+            Screen.Files -> listOf("files")
             Screen.Settings -> listOf("settings")
             is Screen.PeerDetail -> listOf("peer", screen.fingerprintHex)
             is Screen.SendClipboard -> listOf("send", screen.fingerprintHex)
@@ -99,7 +118,11 @@ val ScreenSaver: Saver<Screen, Any> = Saver(
         @Suppress("UNCHECKED_CAST")
         val parts = saved as List<String>
         when (parts.firstOrNull()) {
-            "activity" -> Screen.Activity
+            "files" -> Screen.Files
+            // What this destination was called before it became Files. Kept
+            // so a saved state written by the previous version restores to
+            // the screen the person was on rather than silently to Devices.
+            "activity" -> Screen.Files
             "settings" -> Screen.Settings
             "peer" -> parts.getOrNull(1)?.let(Screen::PeerDetail) ?: Screen.Devices
             "send" -> parts.getOrNull(1)?.let(Screen::SendClipboard) ?: Screen.Devices
