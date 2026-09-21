@@ -15,29 +15,35 @@ Open-source, local-first device continuity.
 > and [the migration note](docs/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md) for what
 > to do about an existing checkout or test device.
 >
+> The repository has since been renamed too, and now lives at
+> `github.com/yurisismotto/omnibridge`.
+>
 > The certification reports in this repository were written under the old
 > name and keep their original wording; they are evidence, not documentation.
-> The repository URL is still `github.com/yurisismotto/anyflow` until it is
-> renamed by hand.
+> Their AnyFlow naming — and the old repository URLs in the CI run and issue
+> links they cite — is preserved deliberately.
 
 No required cloud. No vendor lock-in. No telemetry by default.
 
 Devices find each other on the local network, authenticate with pinned public
 keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 
-> **Status: `clipboard.v1` Sprint.** On top of the certified foundation —
-> identity, discovery, pairing, authenticated transport, ping/pong,
-> `battery.v1` and `files.v1` — this adds **text clipboard sharing**.
-> Notifications, media control and browser integration are **not**
-> implemented; the architecture is built to receive them, and that is all.
+> **Status: pre-1.0.** The certified foundation — identity, discovery,
+> pairing, authenticated transport, ping/pong — carries four capabilities:
+> `battery.v1`, `files.v1`, `clipboard.v1` and `notifications.v1`. **Media
+> control and browser integration are not implemented**; the architecture is
+> built to receive them, and that is all.
 >
-> **`notifications.v1` is approved in design only.** This release contains
-> **no notification listener and no notification code**. The design — an
-> optional, off-by-default Android notification mirror, requiring both the
-> Android OS notification-access grant *and* a separate per-peer grant, with no
-> history, no cloud and no telemetry — is recorded in
-> [ADR-0015](docs/adr/ADR-0015-notification-access.md) and specified in
-> [docs/research/notifications-v1/](docs/research/notifications-v1/).
+> **`notifications.v1` is implemented and certified.** It is an optional,
+> off-by-default Android notification mirror, requiring both the Android OS
+> notification-access grant *and* a separate per-peer grant, with no history,
+> no cloud and no telemetry. The decision is
+> [ADR-0015](docs/adr/ADR-0015-notification-access.md), with
+> [ADR-0016](docs/adr/ADR-0016-notification-identity.md) and
+> [ADR-0017](docs/adr/ADR-0017-capability-roles.md); it is specified in
+> [docs/research/notifications-v1/](docs/research/notifications-v1/) and
+> certified in
+> [NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md](NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md).
 >
 > Clipboard sharing is, precisely: **automatic desktop → Android sync**
 > (opt-in, per device) and **manual Android → desktop send**. It is not
@@ -73,6 +79,7 @@ omnibridge/
 │   ├── capabilities/battery/  battery.v1
 │   ├── capabilities/files/    files.v1 — transfers, filename safety, stream auth
 │   ├── capabilities/clipboard/ clipboard.v1 — text rules, policy, loop suppression
+│   ├── capabilities/notifications/ notifications.v1 — mirror, roles, redaction
 │   ├── daemon/                omnibridged
 │   ├── cli/                   omnibridge
 │   └── gui/                   omnibridge-gui — GTK4 / libadwaita
@@ -83,7 +90,7 @@ omnibridge/
     ├── architecture/          OVERVIEW.md, PROTOCOL.md, FILES.md
     ├── security/              THREAT_MODEL.md
     ├── research/              cross-platform expansion, notifications.v1
-    └── adr/                   ADR-0001 … ADR-0015
+    └── adr/                   ADR-0001 … ADR-0018
 ```
 
 ## Running on Linux
@@ -176,7 +183,7 @@ simply the most convenient source when it is new enough.
 ```bash
 cd desktop
 cargo build --release
-cargo test --workspace          # 717 tests
+cargo test --workspace          # 981 tests
 
 ./target/release/omnibridged   # foreground, or install the user unit
 ```
@@ -290,15 +297,15 @@ repository that disables certificate validation.
 ## Testing
 
 ```bash
-cd desktop && cargo test --workspace              # 292 tests
-cd android && ./gradlew :app:testDebugUnitTest    # 206 tests
+cd desktop && cargo test --workspace              # 981 tests
+cd android && ./gradlew :app:testDebugUnitTest    # 771 tests
 
 # Touches the real system clipboard, so it is opt-in:
 cd desktop && cargo test -p omnibridge-capability-clipboard --test real_backend \
     -- --ignored --test-threads=1                 # 9 tests
 
 # On a connected Android device:
-cd android && ./gradlew :app:connectedDebugAndroidTest   # 21 tests
+cd android && ./gradlew :app:connectedDebugAndroidTest   # 102 tests
 ```
 
 The Rust suite includes end-to-end pairing over real TLS on loopback and a
@@ -320,12 +327,6 @@ implementations cannot drift apart silently:
 
 ## Known limitations
 
-* **`files.v1` has not run against a physical phone.** It is exercised end to
-  end against the real `omnibridged` binary over real TLS, in both directions,
-  with SHA-256 verification — but by `fake_phone`, which is a test client and
-  must never be reported as a phone. The Android send and receive paths
-  (Sharesheet intent handling, `ContentResolver` reads, MediaStore writes) are
-  covered by unit and instrumented tests but have not been run on a device.
 * **Widening a capability grant takes effect on the next connection.** A
   session's effective capability set is fixed at handshake time, so after
   `omnibridge grant … files.v1` the phone must reconnect. *Narrowing* is
