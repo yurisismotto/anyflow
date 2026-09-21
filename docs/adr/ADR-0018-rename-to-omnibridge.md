@@ -152,6 +152,11 @@ itself did not move.
 * **The GitHub repository name.** `github.com/yurisismotto/anyflow` is
   unchanged and still referenced by the crate metadata, the RPM spec and the
   systemd unit. Renaming the repository is a manual post-merge operation.
+  *Post-merge update, 2026-09-21: that manual operation has since been carried
+  out. The repository is now `github.com/yurisismotto/omnibridge`, and the
+  three metadata references were updated to match. The old URL is retained
+  where it appears inside historical evidence — CI run links, issue links and
+  the certification reports — which is left as written.*
 * **Packaging.** `omnibridged.service` exists as a source template only. This
   build still installs no user unit and no autostart entry; the D-Bus service
   file activates the *GUI*. That remains the Packaging sprint's work, with the

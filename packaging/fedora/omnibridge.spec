@@ -6,7 +6,7 @@ Release:        1%{?dist}
 Summary:        Local-first device continuity between Android and Fedora
 
 License:        Apache-2.0
-URL:            https://github.com/yurisismotto/anyflow
+URL:            https://github.com/yurisismotto/omnibridge
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  rust >= 1.82

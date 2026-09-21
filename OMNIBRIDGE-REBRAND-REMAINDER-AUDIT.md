@@ -125,6 +125,11 @@ word would delete the guarantee.
 the repository is renamed would point them at a 404. The rename is a deliberate
 manual post-merge step.
 
+> **Post-merge update, 2026-09-21.** The repository rename has since been
+> carried out; the live URL is now `github.com/yurisismotto/omnibridge`, and
+> these three files were updated to it. The table above is retained as this
+> audit's record of the state at PR #44.
+
 ### Frozen cross-language test vectors *(2, one occurrence each)*
 
 `protocol/testdata/identity-a.der` and `identity-b.der` carry
