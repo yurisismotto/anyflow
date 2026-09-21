@@ -178,7 +178,8 @@ jobs:
             'pairing.rs',
             'portable_boundary.rs',
             'protocol.rs',
-            'revoked_tombstone.rs'
+            'revoked_tombstone.rs',
+            'wire_identity.rs'
           ) | Sort-Object
           $actual = Get-ChildItem core/tests -Filter *.rs -File |
                     Select-Object -ExpandProperty Name | Sort-Object
@@ -244,7 +245,8 @@ jobs:
             --test notifications_protocol `
             --test pairing `
             --test portable_boundary `
-            --test protocol
+            --test protocol `
+            --test wire_identity
 
       # ---------------------------------------------------------------- 5 --
       # The dependency boundary, measured on the resolved graph rather than
