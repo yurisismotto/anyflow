@@ -1,4 +1,4 @@
-//! AnyFlow core: identity, pairing, transport and the capability model.
+//! OmniBridge core: identity, pairing, transport and the capability model.
 //!
 //! This crate is deliberately free of any daemon, CLI or GUI concerns. It has
 //! no global state and does no logging of user content. Everything it needs
@@ -41,7 +41,7 @@ pub const DEFAULT_PORT: u16 = 55432;
 /// ALPN identifier for the control session. Negotiated by both ends, so a
 /// client that reaches an unrelated TLS service (or vice versa) fails fast
 /// during the handshake instead of exchanging garbage frames.
-pub const ALPN_PROTOCOL: &[u8] = b"anyflow/1";
+pub const ALPN_PROTOCOL: &[u8] = b"omnibridge/1";
 
 /// ALPN identifier for a bulk data stream (see ADR-0012, ADR-0013).
 ///
@@ -53,7 +53,7 @@ pub const ALPN_PROTOCOL: &[u8] = b"anyflow/1";
 /// Sharing the port is deliberate: it means file transfer inherits the
 /// listener, the discovery record and the dual-stack binding that are already
 /// certified, and adds no second thing to find, firewall or advertise.
-pub const ALPN_DATA_PROTOCOL: &[u8] = b"anyflow-data/1";
+pub const ALPN_DATA_PROTOCOL: &[u8] = b"omnibridge-data/1";
 
 /// DNS-SD service type used for LAN discovery.
-pub const SERVICE_TYPE: &str = "_anyflow._tcp.local.";
+pub const SERVICE_TYPE: &str = "_omnibridge._tcp.local.";

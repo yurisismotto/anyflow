@@ -1,6 +1,6 @@
-# AnyFlow — Cross-platform expansion research
+# OmniBridge — Cross-platform expansion research
 
-**One flow. Any device.**
+**One bridge. Any device.**
 **One protocol. One security model. Multiple platform adapters.**
 
 | Field | Value |
@@ -18,7 +18,7 @@
 
 The answer to one question:
 
-> *What architecture does AnyFlow need in order to support Linux multi-distro, GNOME, KDE
+> *What architecture does OmniBridge need in order to support Linux multi-distro, GNOME, KDE
 > Plasma, Windows, macOS, Android and iOS/iPadOS without duplicating protocol, security and
 > product logic?*
 
@@ -59,7 +59,7 @@ repository was re-audited against the report, and the result is a Wave 0 specifi
 | **Packaging** | **RESEARCHED** | System packages first, Flatpak experimental. **Do not gate on `wl-clipboard >= 2.3`** — Fedora's `2.2.1^git` has the features |
 | **Security** | **VERIFIED** | The model survives intact. **Three defects, one of them present-tense on Linux today** (silent trust-store destruction) |
 | **PoCs** | **POC REQUIRED** | 37 specified. Four are P0, and **all four now PASS**: POC-CORE-01/02/03, and POC-CORE-04 on a GitHub-hosted Windows MSVC runner ([run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649)) |
-| **Wave 0** | **CERTIFIED** | Commit `cfd33f6` on `feature/core-platform-abstraction-v1`. 375 Rust + 232 Android JVM + 21 instrumented tests green; 12/12 official gates; the six portable crates compile for `x86_64-pc-windows-msvc` on a Windows runner. **Certified means the boundary holds and behaviour is unchanged — not that AnyFlow runs on Windows** ([report](../../sprints/wave-0-platform-abstraction.md)) |
+| **Wave 0** | **CERTIFIED** | Commit `cfd33f6` on `feature/core-platform-abstraction-v1`. 375 Rust + 232 Android JVM + 21 instrumented tests green; 12/12 official gates; the six portable crates compile for `x86_64-pc-windows-msvc` on a Windows runner. **Certified means the boundary holds and behaviour is unchanged — not that OmniBridge runs on Windows** ([report](../../sprints/wave-0-platform-abstraction.md)) |
 
 Status vocabulary: **VERIFIED** (closed against a primary source in [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)) ·
 **READY FOR RFC** (evidence sufficient to write the ADR) · **RESEARCHED** (analysis complete, some
@@ -85,11 +85,11 @@ verification outstanding) · **POC REQUIRED** (a decision cannot be made from do
 | 10 | [macOS feasibility](10-MACOS-FEASIBILITY.md) | Rust, Bonjour, Enclave, pasteboard, agent, UI, packaging | Research / Draft | OFFICIAL DOC (partial) | 02 | 7–8 |
 | 11 | [iOS / iPadOS feasibility](11-IOS-IPADOS-FEASIBILITY.md) | What an iOS client can honestly be | POC REQUIRED | OFFICIAL DOC (partial) | 10 | 9 |
 | 12 | [Apple security and integration](12-APPLE-SECURITY-AND-INTEGRATION.md) | Keychain, Enclave, entitlements, sandbox, signing, FFI | Research / Draft | OFFICIAL DOC (partial) | 10, 11 | 7–9 |
-| 13 | [Cross-platform discovery](13-CROSS-PLATFORM-DISCOVERY.md) | Keeping `_anyflow._tcp.local.` working everywhere | Research / Draft | REPO + OFFICIAL DOC | 01 | 5, 7, 9 |
+| 13 | [Cross-platform discovery](13-CROSS-PLATFORM-DISCOVERY.md) | Keeping `_omnibridge._tcp.local.` working everywhere | Research / Draft | REPO + OFFICIAL DOC | 01 | 5, 7, 9 |
 | 14 | [Identity and key storage](14-CROSS-PLATFORM-IDENTITY-AND-KEY-STORAGE.md) | Where the key lives, and how it reaches TLS | Research / Draft | REPO + OFFICIAL DOC | 02, 09, 12 | 0, 5, 7 |
 | 15 | [Cross-platform clipboard](15-CROSS-PLATFORM-CLIPBOARD.md) | One `clipboard.v1`, six backends | Research / Draft | REPO + OFFICIAL DOC | 03, 06, 08, 10, 11 | 0, 6, 8, 9 |
 | 16 | [Cross-platform files](16-CROSS-PLATFORM-FILES.md) | `files.v1` on five platforms | Research / Draft | REPO + OFFICIAL DOC | 03, 11 | 0, 5, 9 |
-| 17 | [Background execution model](17-BACKGROUND-EXECUTION-MODEL.md) | The AnyFlow Agent: one concept, five lifetimes | Research / Draft | REPO + OFFICIAL DOC | 08, 10, 11 | all |
+| 17 | [Background execution model](17-BACKGROUND-EXECUTION-MODEL.md) | The OmniBridge Agent: one concept, five lifetimes | Research / Draft | REPO + OFFICIAL DOC | 08, 10, 11 | all |
 | 18 | [UI platform strategy](18-UI-PLATFORM-STRATEGY.md) | Native toolkits, one identity, no Electron | Research / Draft | REPO + OFFICIAL DOC | 06, 08, 10 | 6, 8, 9 |
 | 19 | [Packaging and distribution](19-PACKAGING-AND-DISTRIBUTION.md) | Consolidated formats, signing, updates, architectures | Research / Draft | OFFICIAL DOC VERIFIED | 07, 08, 10, 12 | 4, 6, 8, 9 |
 | 20 | [Cross-platform threat analysis](20-SECURITY-THREAT-ANALYSIS.md) | New surface for existing attackers | Research / Draft | REPO + OFFICIAL DOC | 09, 12, 14 | all |

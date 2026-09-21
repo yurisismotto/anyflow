@@ -6,17 +6,17 @@
 //!
 //! ```bash
 //! # terminal 1
-//! anyflowd
+//! omnibridged
 //! # terminal 2
-//! anyflow pair                       # copy the payload it prints
+//! omnibridge pair                       # copy the payload it prints
 //! # terminal 3
-//! cargo run -p anyflow-daemon --example fake_phone -- pair '<payload>'
-//! cargo run -p anyflow-daemon --example fake_phone -- connect
+//! cargo run -p omnibridge-daemon --example fake_phone -- pair '<payload>'
+//! cargo run -p omnibridge-daemon --example fake_phone -- connect
 //!
 //! # files.v1: send a file to the desktop, or sit and receive one
-//! anyflow grant <device> files.v1
-//! cargo run -p anyflow-daemon --example fake_phone -- send ~/photo.jpg
-//! cargo run -p anyflow-daemon --example fake_phone -- receive
+//! omnibridge grant <device> files.v1
+//! cargo run -p omnibridge-daemon --example fake_phone -- send ~/photo.jpg
+//! cargo run -p omnibridge-daemon --example fake_phone -- receive
 //! ```
 //!
 //! For `files.v1` it plays the **dialer**, exactly as a phone does: it opens
@@ -24,25 +24,25 @@
 //! the desktop issued.
 //!
 //! Its identity is stored under `--data-dir` (default:
-//! `/tmp/anyflow-fake-phone`) so that "reconnect without pairing again" can
+//! `/tmp/omnibridge-fake-phone`) so that "reconnect without pairing again" can
 //! actually be demonstrated across runs.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyflow_capability_battery::{BatteryCapability, BatteryReading, BatteryState};
-use anyflow_capability_files::{
+use omnibridge_capability_battery::{BatteryCapability, BatteryReading, BatteryState};
+use omnibridge_capability_files::{
     DataStreamDialer, DataStreamIo, Destination, FilesAuthorizer, FilesCapability, FilesConfig,
     IncomingOffer, StreamRole, TransferApproval, TransferManager,
 };
-use anyflow_core::capability::CapabilityRegistry;
-use anyflow_core::error::{PairingError, Result};
-use anyflow_core::qr::QrPayload;
-use anyflow_core::session::{self, ClientHandshake, PeerStatus, SessionHandle, SessionHost};
-use anyflow_core::store::Store;
-use anyflow_core::Fingerprint;
-use anyflow_proto::v1;
-use anyflow_proto::v1::capabilities::ChargingState;
+use omnibridge_core::capability::CapabilityRegistry;
+use omnibridge_core::error::{PairingError, Result};
+use omnibridge_core::qr::QrPayload;
+use omnibridge_core::session::{self, ClientHandshake, PeerStatus, SessionHandle, SessionHost};
+use omnibridge_core::store::Store;
+use omnibridge_core::Fingerprint;
+use omnibridge_proto::v1;
+use omnibridge_proto::v1::capabilities::ChargingState;
 use tokio::sync::Mutex;
 use tokio_rustls::TlsConnector;
 
@@ -63,7 +63,7 @@ impl PhoneHost {
         pinned: Fingerprint,
     ) -> anyhow::Result<Arc<rustls::ClientConfig>> {
         let store = self.store.lock().await;
-        Ok(anyflow_core::tls::data_stream_client_config(
+        Ok(omnibridge_core::tls::data_stream_client_config(
             store.identity(),
             pinned,
         )?)
@@ -83,14 +83,14 @@ impl DataStreamDialer for PhoneDialer {
         let connector = TlsConnector::from(Arc::clone(&self.identity));
         let tcp = tokio::net::TcpStream::connect(self.address)
             .await
-            .map_err(anyflow_core::Error::Io)?;
+            .map_err(omnibridge_core::Error::Io)?;
         let _ = tcp.set_nodelay(true);
-        let name = rustls_pki_types::ServerName::try_from("anyflow.invalid")
-            .map_err(|_| anyflow_core::Error::Protocol("bad static server name"))?;
+        let name = rustls_pki_types::ServerName::try_from("omnibridge.invalid")
+            .map_err(|_| omnibridge_core::Error::Protocol("bad static server name"))?;
         let tls = connector
             .connect(name, tcp)
             .await
-            .map_err(anyflow_core::Error::Io)?;
+            .map_err(omnibridge_core::Error::Io)?;
         let _ = self.pinned;
         Ok(Box::new(tls))
     }
@@ -133,13 +133,13 @@ async fn run_files(
 ) -> anyhow::Result<()> {
     let client_config = {
         let store = host.store.lock().await;
-        anyflow_core::tls::client_config(store.identity(), pinned)?
+        omnibridge_core::tls::client_config(store.identity(), pinned)?
     };
 
     let connector = TlsConnector::from(client_config);
     let tcp = tokio::net::TcpStream::connect(address).await?;
     tcp.set_nodelay(true)?;
-    let name = rustls_pki_types::ServerName::try_from("anyflow.invalid")?;
+    let name = rustls_pki_types::ServerName::try_from("omnibridge.invalid")?;
     let mut tls = connector.connect(name, tcp).await?;
 
     let session_host: Arc<dyn SessionHost> = host.clone();
@@ -162,7 +162,7 @@ async fn run_files(
         .any(|c| c == "files.v1")
     {
         anyhow::bail!(
-            "files.v1 was not granted. Run: anyflow grant <device> files.v1, \
+            "files.v1 was not granted. Run: omnibridge grant <device> files.v1, \
              then reconnect."
         );
     }
@@ -290,7 +290,7 @@ impl SessionHost for PhoneHost {
         version: u32,
     ) -> Result<()> {
         let mut store = self.store.lock().await;
-        store.add_peer(anyflow_core::store::TrustedPeer {
+        store.add_peer(omnibridge_core::store::TrustedPeer {
             device_id: device.device_id.clone(),
             device_name: device.device_name.clone(),
             platform: device.platform,
@@ -316,8 +316,8 @@ async fn main() -> anyhow::Result<()> {
         .install_default()
         .map_err(|_| anyhow::anyhow!("crypto provider already installed"))?;
 
-    let data_dir =
-        std::env::var("FAKE_PHONE_DIR").unwrap_or_else(|_| "/tmp/anyflow-fake-phone".to_string());
+    let data_dir = std::env::var("FAKE_PHONE_DIR")
+        .unwrap_or_else(|_| "/tmp/omnibridge-fake-phone".to_string());
     let store = Store::open(&data_dir)?;
     println!(
         "fake phone identity: {}",
@@ -446,17 +446,17 @@ async fn run(
     host: Arc<PhoneHost>,
     address: std::net::SocketAddr,
     pinned: Fingerprint,
-    token: Option<anyflow_core::pairing::PairingToken>,
+    token: Option<omnibridge_core::pairing::PairingToken>,
 ) -> anyhow::Result<()> {
     let identity_config = {
         let store = host.store.lock().await;
-        anyflow_core::tls::client_config(store.identity(), pinned)?
+        omnibridge_core::tls::client_config(store.identity(), pinned)?
     };
 
     let connector = TlsConnector::from(identity_config);
     let tcp = tokio::net::TcpStream::connect(address).await?;
     tcp.set_nodelay(true)?;
-    let name = rustls_pki_types::ServerName::try_from("anyflow.invalid")?;
+    let name = rustls_pki_types::ServerName::try_from("omnibridge.invalid")?;
     let mut tls = connector.connect(name, tcp).await?;
     println!("TLS established and server identity pinned");
 
@@ -508,7 +508,7 @@ async fn run(
         println!("sent battery.v1: 87% charging");
     }
 
-    // Stay connected briefly so `anyflow status` can be run against a live
+    // Stay connected briefly so `omnibridge status` can be run against a live
     // session in another terminal.
     tokio::time::sleep(Duration::from_secs(
         std::env::var("FAKE_PHONE_HOLD_SECS")
@@ -570,7 +570,7 @@ impl SessionHost for Notifier {
         }
         self.inner.on_established(peer, handle).await;
     }
-    async fn on_closed(&self, peer: &Fingerprint, session_id: anyflow_core::session::SessionId) {
+    async fn on_closed(&self, peer: &Fingerprint, session_id: omnibridge_core::session::SessionId) {
         self.inner.on_closed(peer, session_id).await;
     }
 }

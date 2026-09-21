@@ -6,7 +6,7 @@
 # accidentally unified Cargo feature has leaked into the six portable crates:
 # the boundary Wave 0 built still holds. It is a **boundary regression test**.
 #
-# It says nothing whatsoever about whether AnyFlow *runs* on Windows. That is
+# It says nothing whatsoever about whether OmniBridge *runs* on Windows. That is
 # runtime certification, it needs a real machine, and it belongs to Wave 5+.
 # Conflating the two is how a project talks itself into believing it supports
 # a platform it has never run on.
@@ -20,7 +20,7 @@
 # is a different C runtime and a different `ring` build path, and it is
 # explicitly *not* evidence for MSVC. Hence POC-CORE-04, and hence this job.
 #
-# `anyflow-runtime` is deliberately excluded: it depends on `mdns-sd`, whose
+# `omnibridge-runtime` is deliberately excluded: it depends on `mdns-sd`, whose
 # Windows behaviour is V-12 / POC-WIN-02 and is not Wave 0's problem.
 
 name: Portable core · Windows MSVC
@@ -97,13 +97,13 @@ jobs:
       - name: The portable package set still exists
         run: |
           $expected = @(
-            'anyflow-proto',
-            'anyflow-core',
-            'anyflow-control',
-            'anyflow-capability-clipboard',
-            'anyflow-capability-files',
-            'anyflow-capability-battery',
-            'anyflow-capability-notifications'
+            'omnibridge-proto',
+            'omnibridge-core',
+            'omnibridge-control',
+            'omnibridge-capability-clipboard',
+            'omnibridge-capability-files',
+            'omnibridge-capability-battery',
+            'omnibridge-capability-notifications'
           )
           $have = (cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages.name
           $missing = $expected | Where-Object { $have -notcontains $_ }
@@ -120,13 +120,13 @@ jobs:
         run: |
           cargo check --locked --no-default-features `
             --target x86_64-pc-windows-msvc `
-            -p anyflow-proto `
-            -p anyflow-core `
-            -p anyflow-control `
-            -p anyflow-capability-clipboard `
-            -p anyflow-capability-files `
-            -p anyflow-capability-battery `
-            -p anyflow-capability-notifications
+            -p omnibridge-proto `
+            -p omnibridge-core `
+            -p omnibridge-control `
+            -p omnibridge-capability-clipboard `
+            -p omnibridge-capability-files `
+            -p omnibridge-capability-battery `
+            -p omnibridge-capability-notifications
 
       # Strengthening, not a substitute: `check` stops at metadata, `build`
       # runs codegen and links, which is where `ring`'s MSVC objects and the
@@ -135,17 +135,17 @@ jobs:
         run: |
           cargo build --locked --no-default-features `
             --target x86_64-pc-windows-msvc `
-            -p anyflow-proto `
-            -p anyflow-core `
-            -p anyflow-control `
-            -p anyflow-capability-clipboard `
-            -p anyflow-capability-files `
-            -p anyflow-capability-battery `
-            -p anyflow-capability-notifications
+            -p omnibridge-proto `
+            -p omnibridge-core `
+            -p omnibridge-control `
+            -p omnibridge-capability-clipboard `
+            -p omnibridge-capability-files `
+            -p omnibridge-capability-battery `
+            -p omnibridge-capability-notifications
 
       # ---------------------------------------------------------------- 4 --
       # Test targets. Five of the six portable crates compile every test
-      # target with the platform features off. `anyflow-core` has three that
+      # target with the platform features off. `omnibridge-core` has three that
       # do not, and deliberately so — they test the *unix-fs adapter* rather
       # than the portable core:
       #
@@ -162,7 +162,7 @@ jobs:
       # the target does not compile — measured, not assumed: it fails with
       # `E0599: no associated function ... named 'open'`. That is the seam
       # working as designed. The *portable* half of the same feature — the
-      # tombstone's effect on admission — is covered by `anyflow-daemon`'s
+      # tombstone's effect on admission — is covered by `omnibridge-daemon`'s
       # `revoked_cleanup` suite, which is outside this job's crate set anyway.
       #
       # All three are named here rather than skipped by a wildcard, and the
@@ -178,7 +178,8 @@ jobs:
             'pairing.rs',
             'portable_boundary.rs',
             'protocol.rs',
-            'revoked_tombstone.rs'
+            'revoked_tombstone.rs',
+            'wire_identity.rs'
           ) | Sort-Object
           $actual = Get-ChildItem core/tests -Filter *.rs -File |
                     Select-Object -ExpandProperty Name | Sort-Object
@@ -229,40 +230,41 @@ jobs:
         run: |
           cargo test --locked --no-run --no-default-features `
             --target x86_64-pc-windows-msvc `
-            -p anyflow-proto `
-            -p anyflow-control `
-            -p anyflow-capability-clipboard `
-            -p anyflow-capability-files `
-            -p anyflow-capability-battery `
-            -p anyflow-capability-notifications
+            -p omnibridge-proto `
+            -p omnibridge-control `
+            -p omnibridge-capability-clipboard `
+            -p omnibridge-capability-files `
+            -p omnibridge-capability-battery `
+            -p omnibridge-capability-notifications
 
           cargo test --locked --no-run --no-default-features `
             --target x86_64-pc-windows-msvc `
-            -p anyflow-core `
+            -p omnibridge-core `
             --lib `
             --test identity_seam `
             --test notifications_protocol `
             --test pairing `
             --test portable_boundary `
-            --test protocol
+            --test protocol `
+            --test wire_identity
 
       # ---------------------------------------------------------------- 5 --
       # The dependency boundary, measured on the resolved graph rather than
       # grepped from source. Wave 0 already hit this once: Cargo feature
       # unification switched `unix-fs` back on through a capability crate's
-      # default dependency on `anyflow-core`, and a source grep would have
+      # default dependency on `omnibridge-core`, and a source grep would have
       # missed it (POC-CORE-01).
       - name: Dependency boundary — no Linux platform crate, no unified platform feature
         run: |
           $tree = cargo tree --locked --no-default-features `
             --target x86_64-pc-windows-msvc -e normal `
-            -p anyflow-proto `
-            -p anyflow-core `
-            -p anyflow-control `
-            -p anyflow-capability-clipboard `
-            -p anyflow-capability-files `
-            -p anyflow-capability-battery `
-            -p anyflow-capability-notifications `
+            -p omnibridge-proto `
+            -p omnibridge-core `
+            -p omnibridge-control `
+            -p omnibridge-capability-clipboard `
+            -p omnibridge-capability-files `
+            -p omnibridge-capability-battery `
+            -p omnibridge-capability-notifications `
             --prefix none --format '{p} [{f}]'
 
           $lines = $tree | ForEach-Object { $_ -replace ' \(\*\)$','' } | Sort-Object -Unique
@@ -273,8 +275,8 @@ jobs:
           $names = $lines | ForEach-Object { $_.Split(' ')[0] } | Sort-Object -Unique
 
           $forbiddenCrates = @(
-            'anyflow-linux', 'anyflow-daemon', 'anyflow-runtime',
-            'anyflow-gui', 'anyflow-cli',
+            'omnibridge-linux', 'omnibridge-daemon', 'omnibridge-runtime',
+            'omnibridge-gui', 'omnibridge-cli',
             'x11rb', 'x11rb-protocol', 'zbus', 'zbus_names',
             'gtk4', 'gtk4-sys', 'libadwaita', 'libadwaita-sys',
             'glib', 'glib-sys', 'gdk4', 'gio', 'gobject-sys',
@@ -290,7 +292,7 @@ jobs:
           # And no platform Cargo feature came back on through unification.
           $forbiddenFeatures = @('unix-fs', 'linux-backends', 'upower', 'linux-dbus')
           $bad = @()
-          foreach ($line in ($lines | Where-Object { $_ -like 'anyflow-*' })) {
+          foreach ($line in ($lines | Where-Object { $_ -like 'omnibridge-*' })) {
             if ($line -match '\[(.*)\]$') {
               foreach ($f in ($matches[1] -split ',' | Where-Object { $_ })) {
                 if ($forbiddenFeatures -contains $f.Trim()) { $bad += $line }

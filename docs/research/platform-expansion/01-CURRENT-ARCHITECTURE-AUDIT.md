@@ -25,7 +25,7 @@ grep -rn 'env::var_os|env::var' --include=*.rs desktop/
 
 **The first sweep returns nothing.** There is not one conditional-compilation attribute in
 the entire Rust workspace. This is the single most important structural fact in this
-document: AnyFlow does not currently *have* a platform boundary at the build level. It has
+document: OmniBridge does not currently *have* a platform boundary at the build level. It has
 Linux code that happens to be the only code. Every portability finding below follows from
 that.
 
@@ -45,12 +45,12 @@ new platform is a new implementation rather than an edit.
 
 | Subsystem | Files | Class | Notes |
 | --- | --- | --- | --- |
-| `.proto` schemas | `protocol/proto/anyflow/v1/**` | **PORTABLE CORE** | Language-neutral. Compiled by `prost-build`+`protox` (Rust) and the protobuf Gradle plugin (Kotlin) from the *same* files. |
+| `.proto` schemas | `protocol/proto/omnibridge/v1/**` | **PORTABLE CORE** | Language-neutral. Compiled by `prost-build`+`protox` (Rust) and the protobuf Gradle plugin (Kotlin) from the *same* files. |
 | Generated Rust types | `desktop/proto/src/lib.rs`, `desktop/proto/build.rs` | **PORTABLE CORE** | `protox` is a pure-Rust protobuf compiler, so the build needs no `protoc` binary and no C toolchain. See [ADR-0004](../../adr/ADR-0004-protocol-buffers.md). This is a real portability asset: a Windows or macOS build inherits it for free. |
 | Framing | `desktop/core/src/framing.rs` (62 lines) | **PORTABLE CORE** | 4-byte big-endian length prefix over `tokio::io`. No platform surface. |
 | Envelope / sequence / replay | `desktop/core/src/session.rs` | **PORTABLE CORE** | 1586 lines, no `std::os`, no filesystem, no environment. |
 
-**Platform enum is the one protocol-level gap.** `protocol/proto/anyflow/v1/core.proto`
+**Platform enum is the one protocol-level gap.** `protocol/proto/omnibridge/v1/core.proto`
 declares:
 
 ```protobuf
@@ -80,9 +80,9 @@ there is. Tracked as **PLAT-DEC-008** in [23](23-RISKS-OPEN-QUESTIONS-AND-DECISI
 | Clipboard policy model | `desktop/core/src/clipboard_policy.rs` (226 lines) | **PORTABLE CORE** | Pure data + rules. |
 | Discovery record model | `desktop/core/src/discovery.rs` (122 lines) | **PORTABLE CORE** | TXT build/parse and name sanitisation only. Contains no responder. |
 | **Local identity** | `desktop/core/src/identity.rs` (190 lines) | **NEEDS-REFACTOR** | See §3.1. Compiles anywhere; *structurally* blocks hardware-backed keys. |
-| **Store / trust store** | `desktop/core/src/store.rs` (380 lines) | **LINUX-SPECIFIC** | See §3.2. The only file in `anyflow-core` that fails to compile off-unix. |
+| **Store / trust store** | `desktop/core/src/store.rs` (380 lines) | **LINUX-SPECIFIC** | See §3.2. The only file in `omnibridge-core` that fails to compile off-unix. |
 
-`anyflow-core` is therefore **one file away** from compiling on Windows and macOS, and one
+`omnibridge-core` is therefore **one file away** from compiling on Windows and macOS, and one
 *design change* away from being able to hold a hardware-backed key. That is a much better
 starting position than the "Fedora + Android" framing suggests.
 
@@ -108,19 +108,19 @@ starting position than the "Fedora + Android" framing suggests.
 | mDNS advertisement | `desktop/daemon/src/mdns.rs` (88 lines) | **PORTABLE CORE (POC REQUIRED)** | Uses `mdns-sd`, a pure-Rust responder that the upstream README states "supports macOS, Linux and Windows" (OFFICIAL-ISH: project README, not a distro/vendor doc). Coexistence with a *system* responder on 5353 is the open question → [13](13-CROSS-PLATFORM-DISCOVERY.md). |
 | Session/peer state | `desktop/daemon/src/state.rs` (467 lines) | **PORTABLE CORE** | |
 | **Control socket transport** | `desktop/daemon/src/server.rs` (1017 lines) | **LINUX-SPECIFIC** | `tokio::net::{UnixListener, UnixStream}` + `PermissionsExt` chmod on the socket path. |
-| **Control socket path/uid** | `desktop/daemon/src/control.rs` (379 lines) | **LINUX-SPECIFIC** | `$XDG_RUNTIME_DIR`, `/tmp/anyflow-<uid>` fallback, and `nix_uid()` which parses `/proc/self/status`. The request/response *types* in the same file are portable. |
+| **Control socket path/uid** | `desktop/daemon/src/control.rs` (379 lines) | **LINUX-SPECIFIC** | `$XDG_RUNTIME_DIR`, `/tmp/omnibridge-<uid>` fallback, and `nix_uid()` which parses `/proc/self/status`. The request/response *types* in the same file are portable. |
 | Process entry point | `desktop/daemon/src/main.rs` (305 lines) | **LINUX-SPECIFIC** | `tracing_subscriber` configured `.without_time()` "because journald adds its own". Assumes a `systemd --user` supervisor. |
 
 ### 2.5 CLI, GUI, packaging
 
 | Subsystem | Files | Class | Notes |
 | --- | --- | --- | --- |
-| `anyflow` CLI | `desktop/cli/src/main.rs` (684 lines) | **LINUX-SPECIFIC** | `UnixStream::connect` only. Command surface itself is portable. |
+| `omnibridge` CLI | `desktop/cli/src/main.rs` (684 lines) | **LINUX-SPECIFIC** | `UnixStream::connect` only. Command surface itself is portable. |
 | GUI shell + views | `desktop/gui/src/**` (~2500 lines) | **GTK-SPECIFIC** | GTK4 + libadwaita. |
 | GUI ↔ daemon client | `desktop/gui/src/client.rs` (203 lines) | **LINUX-SPECIFIC** | Same `UnixStream` dependency as the CLI. |
 | GUI resource build | `desktop/gui/build.rs` | **LINUX-SPECIFIC (build-time)** | `glib_build_tools::compile_resources` shells out to `glib-compile-resources`. |
-| RPM spec | `packaging/fedora/anyflow.spec` | **FEDORA-SPECIFIC** | Also: it packages `anyflowd` and `anyflow` **only**. The GUI binary, a `.desktop` entry, an icon and an autostart entry are **not packaged at all**. |
-| systemd user unit | `packaging/fedora/anyflowd.service` | **LINUX-SPECIFIC** | Heavily hardened (`SystemCallFilter`, `RestrictAddressFamilies`, `ProtectSystem=strict`). Nothing equivalent exists on any other platform; see [17](17-BACKGROUND-EXECUTION-MODEL.md). |
+| RPM spec | `packaging/fedora/omnibridge.spec` | **FEDORA-SPECIFIC** | Also: it packages `omnibridged` and `omnibridge` **only**. The GUI binary, a `.desktop` entry, an icon and an autostart entry are **not packaged at all**. |
+| systemd user unit | `packaging/fedora/omnibridged.service` | **LINUX-SPECIFIC** | Heavily hardened (`SystemCallFilter`, `RestrictAddressFamilies`, `ProtectSystem=strict`). Nothing equivalent exists on any other platform; see [17](17-BACKGROUND-EXECUTION-MODEL.md). |
 
 ### 2.6 Android (reference implementation)
 
@@ -131,7 +131,7 @@ implementable twice without sharing a line of transport code.**
 
 | Subsystem | File | Notes |
 | --- | --- | --- |
-| Identity | `identity/DeviceIdentity.kt` | Android Keystore, StrongBox-then-TEE, **key never leaves the TEE**. `KEY_ALIAS = "anyflow-identity-v2"`; v1 keys are deleted because they lacked `DIGEST_NONE` and were unusable for TLS client auth. |
+| Identity | `identity/DeviceIdentity.kt` | Android Keystore, StrongBox-then-TEE, **key never leaves the TEE**. `KEY_ALIAS = "omnibridge-identity-v2"`; v1 keys are deleted because they lacked `DIGEST_NONE` and were unusable for TLS client auth. |
 | Pinning | `net/PinnedTrustManager.kt` | The Kotlin twin of `PinnedServerCertVerifier`. |
 | Framing / protocol | `net/Framing.kt`, `net/Protocol.kt` | Twins of `framing.rs` / `session.rs`. |
 | Discovery | `net/Discovery.kt` | `NsdManager` + `WifiManager.MulticastLock`. |
@@ -184,7 +184,7 @@ implements it against Windows CNG, including ECDSA on secp256r1.
 Severity: **this is the item that decides how much of Wave 0 there is.** Tracked as
 **PLAT-DEC-001** and **PLAT-DEC-004**.
 
-### 3.2 BLOCKER-02 — `store.rs` is the only non-portable file in `anyflow-core`
+### 3.2 BLOCKER-02 — `store.rs` is the only non-portable file in `omnibridge-core`
 
 Three separable problems, in decreasing severity:
 
@@ -197,8 +197,8 @@ Three separable problems, in decreasing severity:
 2. **`write_atomic`** uses `OpenOptionsExt::mode` to create the temp file *already* at the
    final mode, closing the world-readable window. The Windows equivalent must create the
    file with a security descriptor, not chmod after the fact.
-3. **Path and hostname.** `default_data_dir()` is `$XDG_DATA_HOME/anyflow` else
-   `~/.local/share/anyflow`. `default_device_name()` reads `/etc/hostname` and falls back
+3. **Path and hostname.** `default_data_dir()` is `$XDG_DATA_HOME/omnibridge` else
+   `~/.local/share/omnibridge`. `default_device_name()` reads `/etc/hostname` and falls back
    to the literal string `"Fedora"` — which will be a visibly wrong device name on any
    other OS, including other Linux distributions.
 
@@ -282,10 +282,10 @@ avoid.
                               │                            │
                      (prost-build + protox)      (protobuf-gradle-plugin)
                               │                            │
-                       anyflow-proto                  Kotlin protos
+                       omnibridge-proto                  Kotlin protos
                               │                            │
    ┌──────────────────────────┴─────────┐                  │
-   │        anyflow-core                │                  │
+   │        omnibridge-core                │                  │
    │  framing tls session pairing qr    │            android/app
    │  capability fingerprint discovery  │        (independent Kotlin
    │  clipboard_policy                  │         implementation of the
@@ -301,7 +301,7 @@ avoid.
    │ clipboard    │ backend/{wayland,x11}.rs ← LINUX (behind ClipboardBackend) ✅ good pattern
    └──────┬───────┘
           │
-   anyflow-daemon
+   omnibridge-daemon
      listener.rs   PORTABLE (behaviour unverified off-Linux)
      mdns.rs       PORTABLE (mdns-sd: Linux/macOS/Windows)
      state.rs      PORTABLE
@@ -310,20 +310,20 @@ avoid.
      main.rs       LINUX (systemd assumptions)
           │
      ┌────┴────┐
-  anyflow-cli  anyflow-gui
+  omnibridge-cli  omnibridge-gui
    UnixStream   UnixStream + GTK4/libadwaita
 ```
 
 Two things stand out.
 
-**First**, the GUI depends on `anyflow-daemon` (`default-features = false`) purely to reuse
+**First**, the GUI depends on `omnibridge-daemon` (`default-features = false`) purely to reuse
 the control-protocol types — deliberately, so "the GUI cannot drift from the socket
 contract". That is a good decision that becomes a portability problem the moment
-`anyflow-daemon` stops compiling on the target: the GUI inherits every one of the daemon's
+`omnibridge-daemon` stops compiling on the target: the GUI inherits every one of the daemon's
 Linux dependencies just to get some `serde` structs. Splitting the control *types* out of
-`anyflow-daemon` is cheap and unblocks a lot.
+`omnibridge-daemon` is cheap and unblocks a lot.
 
-**Second**, the arrows into `anyflow-core` are all *upward*. Nothing in core depends on
+**Second**, the arrows into `omnibridge-core` are all *upward*. Nothing in core depends on
 the daemon, the CLI or the GUI, and `SessionHost` (`core/src/session.rs:130`) is a proper
 inversion point: `local_device_info`, `registry`, `lookup_peer`, `pairing_mode_active`,
 `verify_pairing_proof`, `confirm_pairing`, `store_peer`, `on_established`, `on_closed`.
@@ -355,8 +355,8 @@ crate. Making it optional is a one-line manifest change plus a `cfg`.
 Item 8 only matters for the GUI, which no non-Linux platform will use.
 
 **Net result:** with `store.rs`, `destination.rs`, the control-socket transport, and the
-`x11rb` feature gate addressed, `anyflow-proto`, `anyflow-core`, all three capability
-crates and most of `anyflow-daemon` compile on `x86_64-pc-windows-msvc` (Rust **Tier 1**)
+`x11rb` feature gate addressed, `omnibridge-proto`, `omnibridge-core`, all three capability
+crates and most of `omnibridge-daemon` compile on `x86_64-pc-windows-msvc` (Rust **Tier 1**)
 and `aarch64-apple-darwin` / `aarch64-apple-ios` (Rust **Tier 2**, both rustup-distributed
 — OFFICIAL DOC VERIFIED, *The rustc book*, Platform Support).
 
@@ -372,7 +372,7 @@ These compile fine and are wrong anyway. They matter more than §5.
 
 | Assumption | Where | Reality elsewhere |
 | --- | --- | --- |
-| A supervisor restarts us (`Restart=on-failure`) | `anyflowd.service` | Windows: SCM or nothing. macOS: `launchd` via `SMAppService`. iOS: nothing — the app is killed and not restarted. |
+| A supervisor restarts us (`Restart=on-failure`) | `omnibridged.service` | Windows: SCM or nothing. macOS: `launchd` via `SMAppService`. iOS: nothing — the app is killed and not restarted. |
 | Logs go to journald, so timestamps are redundant | `daemon/src/main.rs` `.without_time()` | Windows Event Log / a file; macOS `os_log`. Both want timestamps or structured fields. |
 | The device name is `/etc/hostname`, else `"Fedora"` | `core/src/store.rs:108` | Windows `GetComputerNameEx`; macOS `SCDynamicStoreCopyComputerName`; iOS `UIDevice.name` (privacy-restricted since iOS 16 — returns a generic model name without an entitlement). |
 | A graphical session exists and is identified by `WAYLAND_DISPLAY`/`DISPLAY` | `clipboard/backend/mod.rs:176-185` | Meaningless off Linux. |
@@ -395,9 +395,9 @@ Stated plainly, because the roadmap depends on it:
   turns out to be exactly right for every remaining platform: the Apple Secure Enclave
   supports **only** 256-bit elliptic-curve keys (OFFICIAL DOC VERIFIED,
   `kSecAttrTokenIDSecureEnclave`), and Windows CNG KSPs list ECDSA P-256 first.
-  **AnyFlow made the one crypto decision that makes hardware-backed identity possible on
+  **OmniBridge made the one crypto decision that makes hardware-backed identity possible on
   all five platforms, before knowing it would need to.**
-- **Discovery on the wire.** `_anyflow._tcp.local.` with a documented TXT schema
+- **Discovery on the wire.** `_omnibridge._tcp.local.` with a documented TXT schema
   (`v`, `pv`, `id`, `dn`) is plain DNS-SD; every platform has a stack for it.
 - **The capability plugin model.** Adding a platform's partial support is not a protocol
   change.
@@ -422,7 +422,7 @@ Stated plainly, because the roadmap depends on it:
 | **AUD-16** | **`rustls_private_key()` has exactly two call sites, both in `tls.rs`; `private_key_pkcs8_der()` has one production call site, in persistence** | **Positive** | The identity refactor is far smaller than AUD-02 implies |
 | **AUD-17** | **`Platform::Linux` is hardcoded at `store.rs:154` and `store.rs:188`** | Coupling | ARCH-011, Wave 0 |
 | AUD-08 | `battery`/`upower` feature-gating is the right pattern | Positive | Copy it |
-| AUD-09 | GUI depends on `anyflow-daemon` for types only | Coupling | Split control types out |
+| AUD-09 | GUI depends on `omnibridge-daemon` for types only | Coupling | Split control types out |
 | AUD-10 | `Platform` proto enum lacks Windows/macOS/iOS | Protocol gap | Additive, backward-compatible |
 | AUD-11 | RPM packages neither the GUI nor a `.desktop` file | Packaging gap | Pre-existing Linux debt |
 | AUD-12 | `mdns-sd` already claims Linux/macOS/Windows | Positive | Verify, don't replace |

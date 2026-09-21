@@ -8,7 +8,7 @@
 
 use std::fmt;
 
-use anyflow_proto::v1::capabilities as pb;
+use omnibridge_proto::v1::capabilities as pb;
 
 use crate::limits::TRANSFER_ID_LEN;
 
@@ -290,7 +290,7 @@ impl FailureReason {
     /// the two are deliberately separate.
     ///
     /// The tokens are the names in
-    /// [`anyflow_control::transfer_failure`](../../../control/src/lib.rs); the
+    /// [`omnibridge_control::transfer_failure`](../../../control/src/lib.rs); the
     /// correspondence is pinned by a test in `desktop/runtime`, which is the
     /// one crate that can see both.
     ///

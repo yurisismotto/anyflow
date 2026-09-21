@@ -8,7 +8,7 @@
 | **Status** | **IMPLEMENTED AND CERTIFIED** — `feature/core-platform-abstraction-v1`, commit `cfd33f6`. **WAVE 0 CERTIFIED 2026-09-01**: all 12 acceptance gates and all four P0 PoCs pass. See [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
 | **Last reviewed** | 2026-08-31 |
 | **Sprint** | `research/platform-expansion-verification-v1` |
-| **Scope** | The refactor that makes AnyFlow's Rust workspace portable, without adding a platform |
+| **Scope** | The refactor that makes OmniBridge's Rust workspace portable, without adding a platform |
 | **Decision status** | Depends on PLAT-DEC-001, -009, -012, -014 — all **READY FOR RFC** ([27](27-ARCHITECTURE-DECISION-CLOSEOUT.md)) |
 | **Evidence** | Repository at `7bb0cc4`; rustls 0.23.43 documentation; [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) |
 | **Related documents** | [01](01-CURRENT-ARCHITECTURE-AUDIT.md) · [02](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md) · [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md) · [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) · [22](22-IMPLEMENTATION-ROADMAP.md) |
@@ -17,16 +17,16 @@
 
 ## 1. Objective
 
-> Give AnyFlow a **real platform boundary at the build level**, and fix the three defects that a
+> Give OmniBridge a **real platform boundary at the build level**, and fix the three defects that a
 > refactor would otherwise carry forward into every platform that inherits the code.
 
 Measured by one sentence:
 
 > After Wave 0, adding a platform means **writing an adapter crate**. It never means editing
-> `anyflow-core`, `tls.rs`, `session.rs`, or a capability crate's protocol half.
+> `omnibridge-core`, `tls.rs`, `session.rs`, or a capability crate's protocol half.
 
 Today that is false. There is not one `cfg(target_os)` in the workspace — verified again this
-sprint, the sweep still returns nothing. AnyFlow does not have a platform boundary; it has Linux
+sprint, the sweep still returns nothing. OmniBridge does not have a platform boundary; it has Linux
 code that happens to be the only code.
 
 Wave 0 is smaller than Research v1 estimated, for a reason established in
@@ -39,7 +39,7 @@ Wave 0 is smaller than Research v1 estimated, for a reason established in
 Stated first, because Wave 0's value depends on not growing.
 
 - **No new platform.** No Windows, macOS, iOS or KDE-specific functionality. Not one line of
-  `anyflow-windows`.
+  `omnibridge-windows`.
 - **No protocol change.** No `.proto` edit, no `PROTOCOL_VERSION_MAX` move. `PLATFORM_WINDOWS`
   stays PROPOSED (PLAT-DEC-008).
 - **No TLS, pairing, pinning or capability-negotiation behaviour change.** The seam changes *where
@@ -48,9 +48,9 @@ Stated first, because Wave 0's value depends on not growing.
 - **No CI change in the same commit as the refactor.** CI-001 lands after, on green.
 - **No hardware backing.** No TPM, no Enclave, no Keystore. Wave 0 builds the seam and ships
   exactly one implementation of it: the software key that exists today.
-- **No cosmetic renaming.** `anyflow-core` keeps its name. Churn is a cost, not a deliverable.
+- **No cosmetic renaming.** `omnibridge-core` keeps its name. Churn is a cost, not a deliverable.
 
-**The Wave 0 completion test is a negative one:** at the end, AnyFlow on Fedora and the Android app
+**The Wave 0 completion test is a negative one:** at the end, OmniBridge on Fedora and the Android app
 behave identically to before, and `git log` shows no behavioural change — only a boundary.
 
 ---
@@ -71,7 +71,7 @@ Seven items. Five are portability; three are defects; one is both.
 
 Plus two couplings that make the boundary awkward:
 
-- **C1** — `anyflow-gui` and `anyflow-cli` both depend on `anyflow-daemon` (`default-features = false`)
+- **C1** — `omnibridge-gui` and `omnibridge-cli` both depend on `omnibridge-daemon` (`default-features = false`)
   solely to reuse the control-protocol types. Deliberate, and good — but it means the GUI inherits
   every Linux dependency of the daemon to obtain some `serde` structs.
 - **C2** — `Platform::Linux` is hardcoded at `store.rs:154` and `store.rs:188`. The platform identity
@@ -87,15 +87,15 @@ regression in kind. See [02 §3](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md), Alt-
 
 ## 4. Target architecture
 
-Evolution, not replacement. **`anyflow-core` keeps its name, its path and its public API.**
+Evolution, not replacement. **`omnibridge-core` keeps its name, its path and its public API.**
 
 ```
                       protocol/proto/**            (untouched)
                              │
-                      anyflow-proto                (untouched)
+                      omnibridge-proto                (untouched)
                              │
    ┌─────────────────────────┴──────────────────────────────┐
-   │  anyflow-core                     PORTABLE — no std::os │
+   │  omnibridge-core                     PORTABLE — no std::os │
    │    framing session tls pairing qr fingerprint           │
    │    capability discovery clipboard_policy                │
    │                                                          │
@@ -114,14 +114,14 @@ Evolution, not replacement. **`anyflow-core` keeps its name, its path and its pu
    └────┬──────────────────────────────────────────┘
         │
    ┌────┴───────────────────────┐   ┌──────────────────────────┐
-   │  anyflow-control    (NEW)  │   │  anyflow-runtime   (NEW) │
+   │  omnibridge-control    (NEW)  │   │  omnibridge-runtime   (NEW) │
    │  control request/response  │◄──┤  today's daemon minus    │
    │  types only. No I/O.       │   │  its Linux assumptions   │
    │  Breaks C1.                │   │  ── trait ControlTransport│
    └────┬───────────────────────┘   └────────┬─────────────────┘
         │                                     │
         │              ┌──────────────────────┴──────────┐
-        │              │  anyflow-linux           (NEW)  │
+        │              │  omnibridge-linux           (NEW)  │
         │              │  UDS transport, XDG paths,      │
         │              │  0600/0700 modes, /etc/hostname,│
         │              │  file-backed identity           │
@@ -129,12 +129,12 @@ Evolution, not replacement. **`anyflow-core` keeps its name, its path and its pu
         │              └──────────────────────┬──────────┘
         │                                     │
    ┌────┴──────┬──────────────────┐   ┌───────┴────┐
-   │anyflow-cli│  anyflow-gui     │   │  anyflowd  │
+   │omnibridge-cli│  omnibridge-gui     │   │  omnibridged  │
    └───────────┴──────────────────┘   └────────────┘
 ```
 
-**Five new crates' worth of names, but only three are new code**: `anyflow-control` is a *move*,
-`anyflow-runtime` and `anyflow-linux` are a *split* of today's `anyflow-daemon`.
+**Five new crates' worth of names, but only three are new code**: `omnibridge-control` is a *move*,
+`omnibridge-runtime` and `omnibridge-linux` are a *split* of today's `omnibridge-daemon`.
 
 ### Why these seams and no others
 
@@ -156,7 +156,7 @@ listed after.
 | Rejected seam | Why |
 | --- | --- |
 | `DiscoveryBackend` | `mdns-sd` claims Linux/macOS/Windows. Until V-12 shows it fails, a trait would abstract over one implementation. **Add it when a second exists**, not before |
-| `NotificationBackend` | AnyFlow implements no notifications on any platform. Nothing to abstract |
+| `NotificationBackend` | OmniBridge implements no notifications on any platform. Nothing to abstract |
 | `RuntimeLifecycle` | The differences (systemd / `Run` key / `SMAppService`) live in the **host process**, not in library code. A trait would have one method and no callers |
 | `DestinationResolver` | Subsumed by `FileSink`. Two traits for one concern |
 | `FileSystemBackend` | Too broad. `FileSink` names what `files.v1` actually needs |
@@ -171,16 +171,16 @@ implementation impossible, not when a second implementation is merely imaginable
 
 | Crate | Status | Contents | `unsafe_code` |
 | --- | --- | --- | --- |
-| `anyflow-proto` | unchanged | generated types | forbid |
-| `anyflow-core` | **modified** | protocol, TLS, pairing, capability, discovery model, clipboard policy; `IdentityProvider` + `SecretStore` traits; portable state/trust logic | **forbid** |
-| `anyflow-capability-{battery,clipboard,files}` | **modified** | protocol halves; `FileSink` added; `x11rb` feature-gated | **forbid** |
-| `anyflow-control` | **NEW (move)** | control request/response types; `serde` derives. No I/O, no tokio | forbid |
-| `anyflow-runtime` | **NEW (split)** | listener, mdns, state, `SessionHost` impl, `ControlTransport` trait | forbid |
-| `anyflow-linux` | **NEW (split)** | UDS transport, XDG paths, mode checks, `/etc/hostname`, file identity, wl-clipboard/X11 wiring | **deny** |
-| `anyflow-daemon` (`anyflowd`) | **modified** | thin binary: compose runtime + linux adapter | deny |
-| `anyflow-cli`, `anyflow-gui` | **modified** | depend on `anyflow-control`, **not** `anyflow-daemon` | deny |
+| `omnibridge-proto` | unchanged | generated types | forbid |
+| `omnibridge-core` | **modified** | protocol, TLS, pairing, capability, discovery model, clipboard policy; `IdentityProvider` + `SecretStore` traits; portable state/trust logic | **forbid** |
+| `omnibridge-capability-{battery,clipboard,files}` | **modified** | protocol halves; `FileSink` added; `x11rb` feature-gated | **forbid** |
+| `omnibridge-control` | **NEW (move)** | control request/response types; `serde` derives. No I/O, no tokio | forbid |
+| `omnibridge-runtime` | **NEW (split)** | listener, mdns, state, `SessionHost` impl, `ControlTransport` trait | forbid |
+| `omnibridge-linux` | **NEW (split)** | UDS transport, XDG paths, mode checks, `/etc/hostname`, file identity, wl-clipboard/X11 wiring | **deny** |
+| `omnibridge-daemon` (`omnibridged`) | **modified** | thin binary: compose runtime + linux adapter | deny |
+| `omnibridge-cli`, `omnibridge-gui` | **modified** | depend on `omnibridge-control`, **not** `omnibridge-daemon` | deny |
 
-**Why not `crates/anyflow-*`?** The alternative layout in the brief (`crates/anyflow-core`,
+**Why not `crates/omnibridge-*`?** The alternative layout in the brief (`crates/omnibridge-core`,
 `crates/platform-linux`, …) is a full directory reshuffle for no functional gain. `desktop/` already
 contains only Rust; `desktop/core`, `desktop/daemon`, `desktop/capabilities/*` are established in
 [ADR-0001](../../adr/ADR-0001-monorepo-structure.md); every path in every existing document points
@@ -200,8 +200,8 @@ unsafe_code = "forbid"
 `Security.framework`, IOKit). The fix must be shaped so it **cannot** weaken the security core:
 
 - Remove `unsafe_code` from `[workspace.lints.rust]`.
-- Add `unsafe_code = "forbid"` explicitly to `anyflow-core`, `anyflow-proto`, `anyflow-control`,
-  `anyflow-runtime` and the three capability crates.
+- Add `unsafe_code = "forbid"` explicitly to `omnibridge-core`, `omnibridge-proto`, `omnibridge-control`,
+  `omnibridge-runtime` and the three capability crates.
 - Adapter and binary crates get `unsafe_code = "deny"`, so any `unsafe` needs a deliberate,
   reviewable `#[allow]` with a justification comment.
 
@@ -219,7 +219,7 @@ Illustrative. **Not implementation.** Names to be settled in the RFC.
 Derived from what `tls.rs` and `store.rs` actually consume, not from a wish list.
 
 ```rust
-// anyflow-core. PROPOSED — illustrative only.
+// omnibridge-core. PROPOSED — illustrative only.
 
 /// How the private key is protected. Reported locally; never on the wire
 /// (PLAT-DEC-012 — an unverifiable self-report is not a security property).
@@ -238,7 +238,7 @@ pub enum KeyBacking {
 pub trait IdentityProvider: Send + Sync + std::fmt::Debug {
     fn device_id(&self) -> &str;
     fn device_name(&self) -> &str;
-    fn platform(&self) -> anyflow_proto::v1::Platform;   // fixes C2
+    fn platform(&self) -> omnibridge_proto::v1::Platform;   // fixes C2
 
     fn certificate_der(&self) -> &CertificateDer<'static>;
     fn fingerprint(&self) -> Fingerprint;
@@ -260,7 +260,7 @@ pub trait IdentityProvider: Send + Sync + std::fmt::Debug {
 `fn sign(&self, scheme, message) -> Result<Vec<u8>>`. Verification against rustls 0.23.43 shows that
 is the wrong shape: rustls needs `Arc<dyn SigningKey>`, whose `choose_scheme(&[SignatureScheme])`
 returns a `Box<dyn Signer>` **per handshake**. Flattening that into one `sign()` would force
-`anyflow-core` to reimplement scheme negotiation — re-solving, less well, something rustls already
+`omnibridge-core` to reimplement scheme negotiation — re-solving, less well, something rustls already
 does. **Return the rustls type.**
 
 Three details from the rustls docs the implementations must honour
@@ -273,7 +273,7 @@ Three details from the rustls docs the implementations must honour
 3. **ECDSA output must be X9.62 DER `SEQUENCE { INTEGER r, INTEGER s }`.** Apple returns DER;
    CNG returns raw IEEE-P1363 and must be converted (`rustls-cng` already does this).
 
-**Wave 0 ships exactly one implementation**, in `anyflow-linux`:
+**Wave 0 ships exactly one implementation**, in `omnibridge-linux`:
 
 ```rust
 pub struct FileIdentity { /* … cert, PKCS#8 bytes, fingerprint … */ }
@@ -338,7 +338,7 @@ pub trait SecretStore: Send + Sync {
 ```
 
 The **policy** — schema version, refusing a newer schema, atomic write-then-rename, JSON shape,
-trust-store semantics — stays portable in `anyflow-core`. Only the *bytes-to-storage* step moves.
+trust-store semantics — stays portable in `omnibridge-core`. Only the *bytes-to-storage* step moves.
 
 `write_atomic`'s security property must survive the move: the temp file is created **already at the
 final mode**, so there is no window in which the key is world-readable. The trait's contract must
@@ -447,17 +447,17 @@ defects are fixed *before* the code that contains them is moved, so the move is 
 | **1** | **P7** — move `unsafe_code` from workspace to per-crate | Full suite; `cargo clippy` clean |
 | **2** | **P3** — fix identity failure semantics in `store.rs`; add `key_backing`; bump schema | `identity_and_store.rs` (24 tests) unmodified + **new** fault-injection tests |
 | **3** | **P4** — SEC-004: add `:`, Unicode `Cf`, `CONIN$`/`CONOUT$`, `<>"|?*` to `filename.rs` | `filename.rs` unit tests + `files.rs` (36 tests) + **new** adversarial cases |
-| **4** | Extract `anyflow-control` (types only); repoint CLI and GUI | GUI + CLI build **without** `anyflow-daemon`; `control.rs` (4 tests) unmodified |
-| **5** | Introduce `IdentityProvider` + `KeyBacking`; `FileIdentity` in `anyflow-linux`; swap the two `tls.rs` lines to resolvers | `protocol.rs` (12), `pairing.rs` (21), `e2e.rs` (18), `sessions.rs` (6) **unmodified**; Android interop unchanged |
-| **6** | Introduce `SecretStore`; move Unix modes/XDG into `anyflow-linux`; fix **C2** (`Platform` from the provider) | `identity_and_store.rs` unmodified |
-| **7** | Introduce `FileSink`; move `destination.rs` platform bits to `anyflow-linux` | `files.rs` (36 tests) unmodified |
-| **8** | Split `anyflow-daemon` → `anyflow-runtime` + `anyflow-linux`; `ControlTransport` with the UDS impl | `control.rs`, `listen.rs` (5), `wire.rs` (10) unmodified |
-| **9** | Feature-gate `x11rb`; `anyflow-core` and capability crates carry no `std::os::unix` | Compile gate (§10) |
+| **4** | Extract `omnibridge-control` (types only); repoint CLI and GUI | GUI + CLI build **without** `omnibridge-daemon`; `control.rs` (4 tests) unmodified |
+| **5** | Introduce `IdentityProvider` + `KeyBacking`; `FileIdentity` in `omnibridge-linux`; swap the two `tls.rs` lines to resolvers | `protocol.rs` (12), `pairing.rs` (21), `e2e.rs` (18), `sessions.rs` (6) **unmodified**; Android interop unchanged |
+| **6** | Introduce `SecretStore`; move Unix modes/XDG into `omnibridge-linux`; fix **C2** (`Platform` from the provider) | `identity_and_store.rs` unmodified |
+| **7** | Introduce `FileSink`; move `destination.rs` platform bits to `omnibridge-linux` | `files.rs` (36 tests) unmodified |
+| **8** | Split `omnibridge-daemon` → `omnibridge-runtime` + `omnibridge-linux`; `ControlTransport` with the UDS impl | `control.rs`, `listen.rs` (5), `wire.rs` (10) unmodified |
+| **9** | Feature-gate `x11rb`; `omnibridge-core` and capability crates carry no `std::os::unix` | Compile gate (§10) |
 
 **Step 5 is the risky one** and is deliberately placed after the two defect fixes, so that if it is
 reverted the security improvements stay.
 
-**Steps 2 and 3 are shippable on their own.** If Wave 0 is abandoned after step 3, AnyFlow is
+**Steps 2 and 3 are shippable on their own.** If Wave 0 is abandoned after step 3, OmniBridge is
 strictly better than it is today: two real defects fixed, no architectural change. That is a
 deliberate property of this ordering.
 
@@ -474,7 +474,7 @@ Absolute, and each is testable:
 | **CC-3** | **Existing `state.json` files load.** A pre-Wave-0 install upgrades in place: same identity, same `device_id`, same fingerprint, same peer list, no re-pairing |
 | **CC-4** | **Same identity file format.** `identity.key` stays PKCS#8 at 0600. Wave 0 changes *how the key is reached*, not what is on disk |
 | **CC-5** | **No test may be modified to make the refactor pass.** If a test fails, the refactor is wrong. Adding tests is required; changing one is a review stop |
-| **CC-6** | **`anyflow status` output stays stable**, except for an added key-backing line |
+| **CC-6** | **`omnibridge status` output stays stable**, except for an added key-backing line |
 | **CC-7** | **The systemd unit and the RPM keep working**, unchanged, with binaries at the same paths |
 
 CC-5 deserves emphasis. The 309 existing tests are the specification of behaviour Wave 0 must
@@ -513,7 +513,7 @@ must not do.
 | **`IdentityProvider`** | A test-double provider drives a full pinned handshake, proving nothing needs PKCS#8 |
 | **`KeyBacking` round-trip** | Written to `state.json`, read back; an older file yields `Software` |
 | **`ControlTransport::AlreadyOwned`** | Binding twice returns `AlreadyOwned`, not a generic IO error |
-| **Portable-crate purity** | `anyflow-core` and the capability crates contain no `std::os::unix` — grep-based, in CI |
+| **Portable-crate purity** | `omnibridge-core` and the capability crates contain no `std::os::unix` — grep-based, in CI |
 
 ### 10.3 The compile gate
 
@@ -528,13 +528,13 @@ onto a Linux runner.
 
 ```
 # On a Windows CI runner (GitHub-hosted windows-latest has MSVC):
-cargo check -p anyflow-proto -p anyflow-core -p anyflow-control \
-            -p anyflow-capability-clipboard -p anyflow-capability-files \
-            -p anyflow-capability-battery \
+cargo check -p omnibridge-proto -p omnibridge-core -p omnibridge-control \
+            -p omnibridge-capability-clipboard -p omnibridge-capability-files \
+            -p omnibridge-capability-battery \
             --no-default-features --target x86_64-pc-windows-msvc
 ```
 
-**`anyflow-runtime` is deliberately excluded** from the first gate. It depends on `mdns-sd`, whose
+**`omnibridge-runtime` is deliberately excluded** from the first gate. It depends on `mdns-sd`, whose
 Windows behaviour is V-12/POC-WIN-02 — unresolved and not Wave 0's problem. Adding it later is a
 one-line CI change.
 
@@ -553,7 +553,7 @@ one-line CI change.
 | **Compile check** | No `std::os::unix` leaked into a portable crate. **A boundary regression test, nothing more** |
 | **Runtime certification** | The software behaves correctly on that platform. Requires a real machine, and is **Wave 5+**, never Wave 0 |
 
-A green Windows `cargo check` says nothing about whether AnyFlow works on Windows. It says the
+A green Windows `cargo check` says nothing about whether OmniBridge works on Windows. It says the
 boundary held.
 
 ### 10.4 Hardware and environment
@@ -595,7 +595,7 @@ Concretely, each independently checkable:
 | **SI-8** | **The private-key protection check is never weakened.** `verify_protection()` must be a hard error on every backing. A platform without an equivalent does not get a pass — it gets an implementation |
 | **SI-9** | **`initialize()` is reachable only from `IDENTITY_NOT_CREATED`** (§7) |
 | **SI-10** | **Filename sanitisation is protocol-global.** No `#[cfg]` in `filename.rs` (PLAT-DEC-014) |
-| **SI-11** | `unsafe_code = "forbid"` retained on `anyflow-core`, `anyflow-proto`, `anyflow-control`, `anyflow-runtime` and all three capability crates |
+| **SI-11** | `unsafe_code = "forbid"` retained on `omnibridge-core`, `omnibridge-proto`, `omnibridge-control`, `omnibridge-runtime` and all three capability crates |
 | **SI-12** | Session resumption stays disabled (`send_tls13_tickets = 0`) — full handshakes are where pinning lives |
 
 ---
@@ -609,12 +609,12 @@ Wave 0 is done when **all** of these hold:
 | **G1** | 309 existing tests pass, **unmodified** | `cargo test --workspace` + `git diff --stat` on `tests/` shows additions only |
 | **G2** | New tests from §10.2 pass | `cargo test --workspace` |
 | **G3** | Windows compile gate passes for the six portable crates | §10.3, Windows runner |
-| **G4** | `anyflow-core` and the capability crates contain no `std::os::unix` | grep gate in CI |
-| **G5** | GUI and CLI build without `anyflow-daemon` | `cargo tree -p anyflow-gui \| grep -c anyflow-daemon` → 0 |
+| **G4** | `omnibridge-core` and the capability crates contain no `std::os::unix` | grep gate in CI |
+| **G5** | GUI and CLI build without `omnibridge-daemon` | `cargo tree -p omnibridge-gui \| grep -c omnibridge-daemon` → 0 |
 | **G6** | **The unmodified Android app pairs, connects, sends and receives** | Manual, on the physical device |
 | **G7** | A pre-Wave-0 `state.json` upgrades in place; same fingerprint, same peers, no re-pairing | Fixture + manual |
 | **G8** | Identity fault injection: key deleted / `chmod 000` / dir non-traversable → refuses to start, `state.json` byte-identical | New tests |
-| **G9** | `anyflow status` reports `KeyBacking::Software` | Manual |
+| **G9** | `omnibridge status` reports `KeyBacking::Software` | Manual |
 | **G10** | Fedora hardware smoke: pair, clipboard both directions, file both directions, `sensitive_hint` | Manual, on the certification machine |
 | **G11** | `cargo clippy --workspace --all-targets` clean; `unsafe_code` lints as specified | CI |
 | **G12** | No `.proto` file changed; `PROTOCOL_VERSION_MAX` unchanged | `git diff --stat protocol/` empty |
@@ -639,8 +639,8 @@ Estimated from the audit. **No file below was modified in this sprint.**
 | `desktop/capabilities/files/src/destination.rs` | `FileSink`; Unix bits move | Medium |
 | `desktop/capabilities/clipboard/Cargo.toml` | `x11rb` optional | Low |
 | `desktop/capabilities/clipboard/src/backend/mod.rs` | Contract wording (PLAT-DEC-009) | Low |
-| `desktop/daemon/src/{control,server,main,state,listener,mdns}.rs` | Split across `anyflow-control` / `anyflow-runtime` / `anyflow-linux` | Medium |
-| `desktop/cli/src/main.rs`, `desktop/gui/src/client.rs` | Depend on `anyflow-control`; use `ControlTransport` | Medium |
+| `desktop/daemon/src/{control,server,main,state,listener,mdns}.rs` | Split across `omnibridge-control` / `omnibridge-runtime` / `omnibridge-linux` | Medium |
+| `desktop/cli/src/main.rs`, `desktop/gui/src/client.rs` | Depend on `omnibridge-control`; use `ControlTransport` | Medium |
 | `desktop/{control,runtime,platform-linux}/` | **New** | Medium |
 | `desktop/*/tests/**` | **Additions only** (CC-5) | — |
 
@@ -673,7 +673,7 @@ feature/wave0-platform-seams-v1
   PR 1  chore: scope unsafe_code lint per crate            (step 1)
   PR 2  fix: never regenerate identity over an unusable key (step 2)  ← ships alone
   PR 3  fix: harden filename sanitisation                   (step 3)  ← ships alone
-  PR 4  refactor: extract anyflow-control                   (step 4)
+  PR 4  refactor: extract omnibridge-control                   (step 4)
   PR 5  refactor: IdentityProvider seam                     (step 5)  ← the risky one
   PR 6  refactor: SecretStore seam                          (step 6)
   PR 7  refactor: FileSink seam                             (step 7)
@@ -699,7 +699,7 @@ content and should not wait for the refactor to land.
 | `clipboard-session` VM job | Wave 2–3 | Containers cannot host a Wayland compositor with a seat |
 
 **Cross-compiling is not runtime certification.** CI-001 proves the boundary held. It does not
-prove AnyFlow runs on Windows, and the roadmap must never treat a green CI-001 as Windows support.
+prove OmniBridge runs on Windows, and the roadmap must never treat a green CI-001 as Windows support.
 
 ---
 
@@ -712,7 +712,7 @@ prove AnyFlow runs on Windows, and the roadmap must never treat a green CI-001 a
 | 1 — unsafe_code scoping | 0.5 d |
 | 2 — identity failure semantics | 2 d |
 | 3 — filename hardening | 1.5 d |
-| 4 — extract `anyflow-control` | 1 d |
+| 4 — extract `omnibridge-control` | 1 d |
 | 5 — `IdentityProvider` | **3 d** |
 | 6 — `SecretStore` | 2 d |
 | 7 — `FileSink` | 1.5 d |
@@ -768,19 +768,19 @@ protocol change, no `.proto` edit, no Android edit.
 **Three amendments the implementation forced**, recorded so the next wave
 inherits the corrected version rather than this one:
 
-1. **The Unix filesystem adapter stayed in `anyflow-core`**, behind the
-   default-on `unix-fs` feature, rather than moving to `anyflow-linux`. §5
+1. **The Unix filesystem adapter stayed in `omnibridge-core`**, behind the
+   default-on `unix-fs` feature, rather than moving to `omnibridge-linux`. §5
    places it in the adapter, but `Store::open(dir)` is called from
    `core/tests/identity_and_store.rs`, and **CC-5** forbids editing a test to
    make the refactor pass. This specification's own compile gate is written
    `--no-default-features`, which is exactly the shape the feature provides,
    so the boundary the gate checks is unchanged.
-2. **`ControlTransport` lives in `anyflow-control`, not `anyflow-runtime`.**
-   §6.4 places it in the runtime, but `anyflow-gui` and `anyflow-cli` need the
+2. **`ControlTransport` lives in `omnibridge-control`, not `omnibridge-runtime`.**
+   §6.4 places it in the runtime, but `omnibridge-gui` and `omnibridge-cli` need the
    client half of the endpoint, and reaching it through the runtime would have
    re-created audit finding **C1** — the GUI inheriting mDNS, UPower and every
    capability crate for some struct definitions. The trait needs only tokio's
-   `AsyncRead`/`AsyncWrite`, so `anyflow-control` stays dependency-light.
+   `AsyncRead`/`AsyncWrite`, so `omnibridge-control` stays dependency-light.
 3. **A seventh trait, `IdentityBackend`, was added.** Not a seventh concern:
    it is the *creation* half of `IdentityProvider`, split out because
    `create()` is where hardware differs most. Folding it in would have forced

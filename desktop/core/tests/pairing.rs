@@ -2,11 +2,11 @@
 
 use std::time::Duration;
 
-use anyflow_core::error::PairingError;
-use anyflow_core::pairing::{
+use omnibridge_core::error::PairingError;
+use omnibridge_core::pairing::{
     self, PairingSession, PairingToken, MAX_FAILED_ATTEMPTS, NONCE_LEN, TOKEN_LEN,
 };
-use anyflow_core::Fingerprint;
+use omnibridge_core::Fingerprint;
 
 fn fp(byte: u8) -> Fingerprint {
     Fingerprint::from_hex(&format!("{byte:02x}").repeat(32)).expect("valid fingerprint")
@@ -257,8 +257,8 @@ fn nonces_are_unique() {
 // Cross-language known-answer vector
 // ---------------------------------------------------------------------------
 //
-// This is the contract between `anyflow_core::pairing` and Kotlin's
-// `io.github.yurisismotto.anyflow.pairing.PairingProof`. The identical vector
+// This is the contract between `omnibridge_core::pairing` and Kotlin's
+// `io.github.yurisismotto.omnibridge.pairing.PairingProof`. The identical vector
 // lives in `android/app/src/test/.../PairingProofTest.kt`. If either side
 // changes the domain separator, the field order or the length prefixing, one
 // of the two tests fails instead of pairing mysteriously breaking on a real
@@ -293,7 +293,7 @@ fn proof_matches_the_cross_language_known_answer() {
     let proof = pairing::compute_proof(&vector_token(), &fp(1), &fp(2), &vector_nonce());
     assert_eq!(
         data_encoding::HEXLOWER.encode(&proof),
-        "97385308e28f98d2adc2c9b9fdd4c9ec80709608861343c28774b50aa0c2b527",
+        "d34504e66ea816d8ac8a12de225db8ae6b9c03f7010b15a15f50cf3b53b859e1",
         "pairing proof diverged from the Kotlin implementation"
     );
 }
@@ -304,7 +304,7 @@ fn confirmation_matches_the_cross_language_known_answer() {
         pairing::compute_confirmation(&vector_token(), &fp(1), &fp(2), &vector_nonce());
     assert_eq!(
         data_encoding::HEXLOWER.encode(&confirmation),
-        "8d914525f557aad15203eda571e48535756b366cd5670e0507ba6ca051b7c218",
+        "fd1689c7fd3715e376ea9423c858c4839cce729a9471b5f6e93f76e34d0c11f3",
         "pairing confirmation diverged from the Kotlin implementation"
     );
 }

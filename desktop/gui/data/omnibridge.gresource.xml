@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The brand artwork, compiled into the binary so it cannot go missing when the
+  app runs from anywhere other than the source tree.
+
+  The `icons/` tree is an icon-theme directory, not a loose file: `install_icons`
+  in src/lib.rs adds this prefix to the default `GtkIconTheme`, so the
+  application icon resolves by *name* — `io.github.yurisismotto.omnibridge` — in
+  the window list and the switcher, with or without anything installed under
+  /usr/share/icons. The file in it is derived from the canonical
+  docs/design/assets/omnibridge-app-icon.svg by build.rs rather than committed
+  twice.
+
+  Glyph icons are NOT here: the desktop draws them from the platform's own
+  Adwaita symbolic set. GTK recolours a symbolic icon by forcing a fill, which
+  turns a stroke-drawn glyph into a solid blob — and accent tinting (status
+  colours, tinted tiles) is load-bearing in this design, so tintable icons win
+  over a bespoke set. The canonical OmniBridge glyph family still lives in
+  docs/design/assets/icons and is what Android ships.
+-->
+<gresources>
+  <gresource prefix="/io/github/yurisismotto/omnibridge">
+    <file preprocess="xml-stripblanks">omnibridge-mark.svg</file>
+    <file preprocess="xml-stripblanks">omnibridge-mark-mono.svg</file>
+    <file preprocess="xml-stripblanks">omnibridge-app-icon.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/apps/io.github.yurisismotto.omnibridge.svg</file>
+  </gresource>
+</gresources>

@@ -1,6 +1,6 @@
 //! "Remove from list", from the control socket down to the wire.
 //!
-//! The store tests in `anyflow-core` prove what a tombstone *is*. These prove
+//! The store tests in `omnibridge-core` prove what a tombstone *is*. These prove
 //! what it *does*: that a device removed from the list is still turned away by
 //! the real handshake, that the control socket refuses to use the operation as
 //! a shortcut to revoking, and that a fresh pairing ceremony — the whole one,
@@ -15,12 +15,12 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyflow_core::session::{PeerStatus, SessionHost};
-use anyflow_core::Error;
-use anyflow_daemon::control::{DeviceReport, DeviceState, Request, Response};
-use anyflow_daemon::server;
-use anyflow_daemon::state::DaemonState;
 use common::{TestClient, TestServer};
+use omnibridge_core::session::{PeerStatus, SessionHost};
+use omnibridge_core::Error;
+use omnibridge_daemon::control::{DeviceReport, DeviceState, Request, Response};
+use omnibridge_daemon::server;
+use omnibridge_daemon::state::DaemonState;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
@@ -240,7 +240,7 @@ async fn a_device_removed_from_the_list_is_still_refused_at_the_door() {
         .connect(
             server.addr,
             server.fingerprint,
-            Some(&anyflow_core::pairing::PairingToken::generate().expect("token")),
+            Some(&omnibridge_core::pairing::PairingToken::generate().expect("token")),
         )
         .await
         .expect_err("a token nobody issued must not readmit it either");
@@ -283,7 +283,7 @@ async fn a_fresh_pairing_brings_a_removed_device_back_exactly_once() {
     pair_then_revoke(&server, &phone).await;
     ok_message(control.remove(&phone.fingerprint.to_hex()).await);
 
-    // The owner runs `anyflow pair` and confirms the fingerprint by hand.
+    // The owner runs `omnibridge pair` and confirms the fingerprint by hand.
     let fresh = server.open_pairing(TTL).await;
     let session = phone
         .connect(server.addr, server.fingerprint, Some(&fresh))

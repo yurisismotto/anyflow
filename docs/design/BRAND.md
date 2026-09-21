@@ -1,21 +1,86 @@
-# AnyFlow — Brand
+# OmniBridge — Brand
 
-**One flow. Any device.**
+**One bridge. Any device.**
+
+---
+
+## Canonical identity
+
+| Field | Value |
+|---|---|
+| **Product name** | **OmniBridge** — one word, capital O, capital B. Never "Omnibridge", "Omni Bridge" or "OB". |
+| **Tagline** | **One bridge. Any device.** |
+| **Positioning** | A single bridge between devices and platforms. |
+| **Identity direction** | **Platform-neutral.** Not an Android product, not a Linux product: Android and Linux are its first two implementations. Nothing in the name, the mark or the copy may imply otherwise. |
+| **Translated?** | The name is **not** translated. The tagline is not currently localised (the app ships one locale); if it is localised later, it is translated as one whole sentence pair, never assembled from parts. |
+| **Previous name** | AnyFlow (*One flow. Any device.*), renamed before the public v1.0.0 release — see [ADR-0018](../adr/ADR-0018-rename-to-omnibridge.md) and [the migration note](../MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md). |
+
+### Reserved naming family
+
+Reserved for future use, and **not implemented today**. Nothing in the product
+currently uses any of these, and no surface should adopt one without a
+decision record:
+
+| Name | Reserved for |
+|---|---|
+| **OmniBridge Desktop** | the desktop application, when it needs naming apart from the product |
+| **OmniBridge for Android** | the Android application, likewise |
+| **OmniBridge Connect** | — |
+| **OmniBridge Mirror** | — |
+| **OmniBridge Find** | — |
+
+The current application is called **OmniBridge**, everywhere, with no suffix.
+
+---
+
+## Visual identity: CLOSED
+
+The official OmniBridge artwork was supplied and installed on 2026-09-21. The
+`BLOCKED_VISUAL_ASSET` notice that stood here is withdrawn: there is no
+placeholder left anywhere in the product, and no AnyFlow-era mark is drawn by
+any active surface.
+
+| | |
+|---|---|
+| **Canonical mark** | [`assets/omnibridge-mark.svg`](assets/omnibridge-mark.svg) |
+| **Name** | OmniBridge |
+| **Tagline** | One bridge. Any device. |
+| **Typeface** | Inter |
+| **Palette** | `#4F6BFF` Primary Blue · `#18B8C9` Bridge Cyan · `#7C5CFC` Accent Violet · `#0B1020` Dark · `#F7F9FC` Surface |
+
+`omnibridge-mark.svg` is the single source of truth for geometry. Every other
+asset and every platform derivative is built from *its* outline, and that is
+asserted rather than asked for: `desktop/gui/tests/brand_assets.rs` and
+Android's `BrandingResourcesTest` both re-read this file and compare the
+outline byte for byte, so a derivative that is redrawn, retraced or edited
+fails the build instead of shipping.
+
+The artwork is installed exactly as supplied. This repository does not
+regenerate, simplify or re-export it.
+
+> **One delta, deliberately left for a later sprint.** The *brand palette*
+> above is the official OmniBridge one. The *UI gradient tokens* further down
+> are still the AnyFlow-era sweep (`#16B8A6` → `#4F7CFF` → `#8B5CF6`), because
+> those are code — `docs/design/tokens.json`, `ui/theme/Color.kt` and
+> `desktop/gui/src/theme.rs`, pinned by token tests on both front ends — and
+> retuning them is an interface change, not artwork integration. The two are
+> close but not identical. Moving the tokens onto the official palette is a
+> self-contained follow-up and is not blocked by anything here.
 
 ---
 
 ## The idea
 
-AnyFlow moves what matters between the machines a person already owns, over
+OmniBridge moves what matters between the machines a person already owns, over
 their own network, with nothing in the middle. The brand has one job: to make
 that feel calm and obviously trustworthy rather than clever.
 
 Two consequences run through everything below.
 
-**Flow is the metaphor, not decoration.** A continuous line joining two points
-is the product in one shape: two endpoints, one movement, no third party. It
+**The bridge is the metaphor, not decoration.** One span joining two sides is
+the product in one shape: two endpoints, one crossing, no third party. It
 appears as the mark, as the empty-state illustration, as the transfer motif —
-always the same curve, never a generic swoosh.
+always the same artwork, never a generic swoosh.
 
 **The interface stays quiet.** The palette is vivid but the UI is mostly
 neutral: white or Ink surfaces, hairline borders, one accent at a time. Colour
@@ -26,59 +91,43 @@ already saturated has nothing left to say those things with.
 
 ## Logo
 
-There are two marks. They are not alternatives, and they are not competing
-logos: they have different jobs and share one geometry.
+There is **one** mark. Not a pair with different jobs, not an institutional cut
+and a product cut — one piece of artwork, used everywhere, at every size.
 
-### Flowing A — the institutional mark
+![OmniBridge](assets/omnibridge-mark.svg)
 
-![Flowing A](assets/logo-flowing-a.svg)
+A curled span: the ribbon sweeps over and folds back through itself, so the
+two sides it joins are drawn by one unbroken gesture. On a 188 × 146 grid, in
+the cyan → blue → violet sweep.
 
-An abstract "A" built from flowing lines, with the crossbar running through
-and out to the right like a ribbon. This is AnyFlow *the project*: the
-wordmark lockup, About screens, documentation, a future site.
+| Cut | File | Where it is used |
+|---|---|---|
+| Full colour | [`omnibridge-mark.svg`](assets/omnibridge-mark.svg) | **Canonical.** App bar, empty states, GTK `brand_mark`, Android `logo_omnibridge_mark` |
+| Single colour | [`omnibridge-mark-mono.svg`](assets/omnibridge-mark-mono.svg) | Anywhere the mark must inherit the text colour |
+| Application icon | [`omnibridge-app-icon.svg`](assets/omnibridge-app-icon.svg) | Linux hicolor icon, Android adaptive foreground |
+| Themed icon | [`omnibridge-android-monochrome.svg`](assets/omnibridge-android-monochrome.svg) | Android 13+ themed launcher layer |
+| Wordmark | [`omnibridge-wordmark.svg`](assets/omnibridge-wordmark.svg) | Wordmark alone |
+| Lockup | [`omnibridge-logo-lockup.svg`](assets/omnibridge-logo-lockup.svg) | Mark + wordmark + tagline |
 
-Files: [`logo-flowing-a.svg`](assets/logo-flowing-a.svg),
-[`logo-flowing-a-mono.svg`](assets/logo-flowing-a-mono.svg),
-[`logo-lockup.svg`](assets/logo-lockup.svg).
+### There is no small cut, and that is deliberate
 
-### Flowing Ribbon — the product and connection mark
-
-![Flowing Ribbon](assets/icon-flowing-ribbon.svg)
-
-One continuous stroke from a teal node to a violet node:
-
-```text
-device ●~~~~~~~~~● device
-```
-
-This is AnyFlow *the running thing*: the app icon, the app bar, the tray, the
-transfer motif, the empty state. It is the mark people see most.
-
-Files: [`icon-flowing-ribbon.svg`](assets/icon-flowing-ribbon.svg),
-[`icon-flowing-ribbon-mono.svg`](assets/icon-flowing-ribbon-mono.svg),
-[`app-icon.svg`](assets/app-icon.svg),
-[`ribbon-connection.svg`](assets/ribbon-connection.svg) (the wide form, for
-empty states).
-
-### What makes them a family
-
-Both are drawn on a 64-unit grid with a **6.5-unit stroke**, **round
-terminals**, the same easing in the curves, and the same gradient running
-lower-left to upper-right. The ribbon's node circles and the A's bar terminal
-are the same radius. Redraw either one at a different weight and they stop
-being a family.
+The AnyFlow marks needed a heavier variant below about 24 px because they were
+*stroked*: an 8-unit stroke on a 64-unit grid falls under a pixel and a half at
+that size and greys out. The OmniBridge mark is **filled**. It scales down as
+area rather than as line weight, so one file answers for every size and there
+is no second cut to keep in step.
 
 ### Misuse
 
 Do not:
 
-- rotate, shear, or flip either mark;
-- recolour them outside the brand gradient or a single flat brand colour;
-- put the Flowing A on an app icon, or the Ribbon in a wordmark lockup;
+- rotate, shear, or flip the mark;
+- recolour it outside the supplied gradients or a single flat brand colour;
+- separate the mark from its lockup and re-set the wordmark by hand;
 - add a shadow, outline, or bevel;
-- place either mark on a busy photograph;
-- reproduce the gradient version below about 20 px — use the monochrome file;
-- redraw the curve "close enough". The path data is the mark.
+- place the mark on a busy photograph;
+- redraw, retrace or "clean up" the curve. The path data **is** the mark, and
+  both front ends fail their build if it changes.
 
 ---
 
@@ -201,7 +250,7 @@ face makes `1`/`l` and `0`/`O` a coin toss.
 
 One family per platform, and that is the point rather than a compromise:
 
-- **Android** — the AnyFlow set in
+- **Android** — the OmniBridge set in
   [`assets/icons/`](assets/icons/), mirrored as vector drawables in
   `android/app/src/main/res/drawable/`. 24 dp grid, 2 px stroke, round caps
   and joins. The drawables are generated from the SVGs, so the two cannot
@@ -259,20 +308,23 @@ No screen contains a literal hex value.
 
 | File | Role |
 |---|---|
-| [`logo-flowing-a.svg`](assets/logo-flowing-a.svg) | Institutional mark, full colour |
-| [`logo-flowing-a-mono.svg`](assets/logo-flowing-a-mono.svg) | Institutional mark, single colour |
-| [`icon-flowing-ribbon.svg`](assets/icon-flowing-ribbon.svg) | Product mark, full colour |
-| [`icon-flowing-ribbon-mono.svg`](assets/icon-flowing-ribbon-mono.svg) | Product mark, single colour |
-| [`app-icon.svg`](assets/app-icon.svg) | 512 px app icon on Ink |
-| [`ribbon-connection.svg`](assets/ribbon-connection.svg) | Wide connection ribbon, empty states |
-| [`wordmark.svg`](assets/wordmark.svg) / [`-mono`](assets/wordmark-mono.svg) | Wordmark |
-| [`logo-lockup.svg`](assets/logo-lockup.svg) | Mark + wordmark + tagline |
-| [`assets/icons/`](assets/icons/) | The 28-glyph AnyFlow icon family |
+| [`omnibridge-mark.svg`](assets/omnibridge-mark.svg) | **Canonical mark.** Every other asset derives from this outline |
+| [`omnibridge-mark-mono.svg`](assets/omnibridge-mark-mono.svg) | Mark, single colour, inherits `currentColor` |
+| [`omnibridge-app-icon.svg`](assets/omnibridge-app-icon.svg) | 512 px application icon |
+| [`omnibridge-android-monochrome.svg`](assets/omnibridge-android-monochrome.svg) | Android themed-icon cut |
+| [`omnibridge-wordmark.svg`](assets/omnibridge-wordmark.svg) | Wordmark |
+| [`omnibridge-logo-lockup.svg`](assets/omnibridge-logo-lockup.svg) | Mark + wordmark + tagline |
+| [`assets/icons/`](assets/icons/) | The 28-glyph OmniBridge icon family — brand-neutral UI glyphs, carried over unchanged |
 
-Android adaptive icon: `res/mipmap-anydpi-v26/ic_launcher.xml` with an Ink
-background, the ribbon foreground inside the 72 dp safe zone, and a
-monochrome layer for Android 13+ themed icons.
+Android adaptive icon: `res/mipmap-anydpi-v26/ic_launcher.xml` with a Dark
+(`#0B1020`) background, the mark as the adaptive foreground inside the 72 dp
+safe zone, and a monochrome layer for Android 13+ themed icons. All three are
+generated from `omnibridge-mark.svg` and asserted against it.
 
-All artwork here is original vector work. No third-party or
-unknown-licence asset is included, and the wordmark is set in live text rather
-than outlines so the logo never disagrees with the face the product renders.
+The wordmark and the lockup ship as **outlines**, not live text. That is a
+property of the supplied artwork and it is the reason the typeface is recorded
+here as well: a surface that sets "OmniBridge" as text must set it in Inter to
+match the wordmark it sits beside. It also means the letterforms cannot be
+checked by reading the file — what the tests assert instead is that no active
+asset carries the pre-rename identity, and that every product surface which
+*speaks* the name says OmniBridge.

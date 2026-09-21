@@ -5,11 +5,11 @@
 ```
      Linux desktop                                Android
 ┌───────────────────────┐                 ┌───────────────────────┐
-│  anyflow (CLI)        │                 │  Compose UI           │
+│  omnibridge (CLI)        │                 │  Compose UI           │
 │        │              │                 │        │              │
 │  unix socket, JSON    │                 │  ConnectionService    │
 │        │              │                 │  (connectedDevice FGS)│
-│  anyflowd             │                 │        │              │
+│  omnibridged             │                 │        │              │
 │  ┌─────────────────┐  │   TLS 1.3       │  ┌──────────────────┐ │
 │  │ session         │◀─┼─────────────────┼─▶│ PeerConnection   │ │
 │  │ capabilities    │  │   mutual auth   │  │ capabilities     │ │
@@ -26,35 +26,35 @@ The phone always initiates. The desktop always listens. See ADR-0005.
 
 | Crate | Depends on | Role |
 | --- | --- | --- |
-| `anyflow-proto` | — | Generated protobuf types |
-| `anyflow-core` | proto | Identity, pairing, TLS, framing, session, capability registry |
-| `anyflow-capability-battery` | core, proto | `battery.v1` |
-| `anyflow-capability-files` | core, proto | `files.v1`: transfer state machine, filename safety, data-stream auth |
-| `anyflow-capability-clipboard` | core, proto | `clipboard.v1`: text rules, policy, loop suppression, Wayland/X11 backend |
-| `anyflow-control` | — | The CLI/GUI ↔ agent contract: request/response types and the `ControlTransport` seam. No I/O |
-| `anyflow-runtime` | core, control, battery, files, clipboard | The AnyFlow Agent, minus the platform: mDNS, listener, state, control server, `SessionHost` |
-| `anyflow-linux` | core, control | The Linux adapter: Unix-socket control endpoint, XDG paths, 0600/0700 modes, store composition |
-| `anyflow-daemon` | runtime, linux | `anyflowd` — composes the two and adds a `main` |
-| `anyflow-cli` | control, linux | `anyflow` |
-| `anyflow-gui` | control, linux | `anyflow-gui` |
+| `omnibridge-proto` | — | Generated protobuf types |
+| `omnibridge-core` | proto | Identity, pairing, TLS, framing, session, capability registry |
+| `omnibridge-capability-battery` | core, proto | `battery.v1` |
+| `omnibridge-capability-files` | core, proto | `files.v1`: transfer state machine, filename safety, data-stream auth |
+| `omnibridge-capability-clipboard` | core, proto | `clipboard.v1`: text rules, policy, loop suppression, Wayland/X11 backend |
+| `omnibridge-control` | — | The CLI/GUI ↔ agent contract: request/response types and the `ControlTransport` seam. No I/O |
+| `omnibridge-runtime` | core, control, battery, files, clipboard | The OmniBridge Agent, minus the platform: mDNS, listener, state, control server, `SessionHost` |
+| `omnibridge-linux` | core, control | The Linux adapter: Unix-socket control endpoint, XDG paths, 0600/0700 modes, store composition |
+| `omnibridge-daemon` | runtime, linux | `omnibridged` — composes the two and adds a `main` |
+| `omnibridge-cli` | control, linux | `omnibridge` |
+| `omnibridge-gui` | control, linux | `omnibridge-gui` |
 
-`anyflow-core` has no global state and no I/O policy. Everything it needs from
+`omnibridge-core` has no global state and no I/O policy. Everything it needs from
 the host arrives through the `SessionHost` trait, which is why the whole
 protocol can be tested in-process over real TLS with no daemon, no filesystem
 and no human.
 
 ## The platform boundary
 
-Since Wave 0 the workspace has an explicit one. `anyflow-proto`,
-`anyflow-core`, `anyflow-control` and the three capability crates are
+Since Wave 0 the workspace has an explicit one. `omnibridge-proto`,
+`omnibridge-core`, `omnibridge-control` and the three capability crates are
 **portable**: built with `--no-default-features` they contain no `std::os`, no
 environment assumption and no filesystem assumption, and they compile for a
 non-Unix target. Their host implementations live behind default-on Cargo
 features, in modules that a `cargo test` gate
 (`core/tests/portable_boundary.rs`) keeps enumerated.
 
-Adding a platform means writing an adapter crate alongside `anyflow-linux`. It
-does not mean editing `anyflow-core`, `tls.rs`, `session.rs` or a capability
+Adding a platform means writing an adapter crate alongside `omnibridge-linux`. It
+does not mean editing `omnibridge-core`, `tls.rs`, `session.rs` or a capability
 crate's protocol half — and the same gate is what keeps that true.
 
 Four seams carry the boundary, each justified by a verified platform
@@ -93,7 +93,7 @@ a device name.
 
 Adding a capability touches four things and none of them are the transport:
 
-1. A `.proto` under `protocol/proto/anyflow/v1/capabilities/`.
+1. A `.proto` under `protocol/proto/omnibridge/v1/capabilities/`.
 2. `impl Capability` in a new crate under `desktop/capabilities/`.
 3. `class … : Capability` under `android/app/src/main/java/.../capability/`.
 4. Register it, and decide its grant policy — **not** in `auto_grant` unless

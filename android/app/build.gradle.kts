@@ -9,11 +9,11 @@ plugins {
 }
 
 android {
-    namespace = "io.github.yurisismotto.anyflow"
+    namespace = "io.github.yurisismotto.omnibridge"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.github.yurisismotto.anyflow"
+        applicationId = "io.github.yurisismotto.omnibridge"
         // API 29 (Android 10) is the floor: it is where TLS 1.3 is enabled by
         // default and where SSLParameters.setApplicationProtocols (ALPN)
         // became available. Below that we could not speak the protocol at all.
@@ -64,7 +64,7 @@ android {
             // the very certificates the Rust suite reads, so the two
             // implementations cannot quietly disagree about what an identity
             // fingerprint is. Regenerate with:
-            //   cargo run -p anyflow-core --example gen_test_vectors
+            //   cargo run -p omnibridge-core --example gen_test_vectors
             resources.srcDir("../../protocol/testdata")
             // Same idea for the design tokens: DesignTokensTest reads the very
             // file the desktop's own token test reads, so the two front ends

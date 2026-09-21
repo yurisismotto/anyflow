@@ -36,7 +36,7 @@ application. Reading and writing work fine; only *watching* does not.
 
 That is a real constraint, not a packaging gap: it is a deliberate Mutter
 position, since data-control lets any client read every clipboard change
-without user interaction. AnyFlow is not entitled to route around a
+without user interaction. OmniBridge is not entitled to route around a
 compositor's privacy decision.
 
 The options were:
@@ -109,7 +109,7 @@ and this module is the seed of its watch half.
 
 **It depends on Xwayland running.** If `DISPLAY` is unset — a GNOME session
 built without Xwayland — detection falls through to "no watch source", which is
-reported by `anyflow clipboard status` and degrades to manual sending. Nothing
+reported by `omnibridge clipboard status` and degrades to manual sending. Nothing
 breaks; a feature is simply unavailable and says so.
 
 **It works better elsewhere.** On sway, Hyprland or KWin the first branch is
@@ -131,7 +131,7 @@ on the connection — the standard idiom for interrupting an X event loop.
 and waiting 400 ms to see whether it survives; there is no way to ask a
 compositor "do you implement data-control" without a Wayland connection of our
 own, so we ask the tool that already knows. Doing it once at startup — rather
-than per command — is also what lets `anyflow clipboard status` tell the user
+than per command — is also what lets `omnibridge clipboard status` tell the user
 what will and will not work *before* they turn a flag on.
 
 **A GNOME change would simplify this.** If Mutter ships

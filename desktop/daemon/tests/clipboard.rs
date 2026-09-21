@@ -11,10 +11,10 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyflow_capability_clipboard::{limits, ClipboardPolicy, CAPABILITY_ID};
-use anyflow_core::capability::OutboundMessage;
-use anyflow_proto::Message;
 use common::*;
+use omnibridge_capability_clipboard::{limits, ClipboardPolicy, CAPABILITY_ID};
+use omnibridge_core::capability::OutboundMessage;
+use omnibridge_proto::Message;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 

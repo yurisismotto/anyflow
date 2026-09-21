@@ -17,7 +17,7 @@ because it implements one half, its peer implements the other.
 
 **Across time.** Android notification access is a permission the user grants in
 Settings and can withdraw at any moment. Withdrawal fires
-`onListenerDisconnected()` while the AnyFlow session is up and healthy. The
+`onListenerDisconnected()` while the OmniBridge session is up and healthy. The
 phone must be able to say **"I am no longer a source"** immediately, without a
 reconnect — and *without* dropping `notifications.v1` entirely, because it
 should still accept dismissals for notifications it has already sourced.
@@ -26,7 +26,7 @@ should still accept dismissals for notifications it has already sourced.
 
 `HELLO.capabilities` is a flat list of ids, and the transport is deliberately
 capability-agnostic — [ADR-0008](ADR-0008-capability-architecture.md):
-*"There is no capability name anywhere in `anyflow-core`'s transport code."*
+*"There is no capability name anywhere in `omnibridge-core`'s transport code."*
 Three properties of `HELLO` each rule it out on their own:
 
 1. **It is sent once.** A handshake field cannot express a permission that
@@ -124,15 +124,15 @@ One unknown value must not discard a set, and it must not be inferred into
 existence: a peer that has never heard of a role cannot have implemented it, so
 treating an unknown value as granted could only ever be wrong.
 
-### 6. **Platform capability ≠ AnyFlow peer grant**
+### 6. **Platform capability ≠ OmniBridge peer grant**
 
 This is the clause the rest of the ADR exists to protect, and it is the easiest
 one to erode by accident.
 
-|  | Platform capability | AnyFlow peer grant | Role |
+|  | Platform capability | OmniBridge peer grant | Role |
 | --- | --- | --- | --- |
 | Question it answers | *May this app read notifications on this phone?* | *May this specific pinned computer be sent them?* | *Can this peer physically do this half of the capability right now?* |
-| Who decides | The OS, in Settings | The user, per peer, in AnyFlow | The peer, about itself |
+| Who decides | The OS, in Settings | The user, per peer, in OmniBridge | The peer, about itself |
 | Where it lives | Android permission state | The local trust store | One connection's memory |
 | Is it authorization? | For the OS | **Yes** | **No** |
 
@@ -162,7 +162,7 @@ one capability misbehaving must not cost the user everything else
 
 ## Consequences
 
-* **The revocation story is honest.** "AnyFlow stops mirroring the moment you
+* **The revocation story is honest.** "OmniBridge stops mirroring the moment you
   revoke access in Settings" is structurally true: the phone announces the
   narrowed set before it stops being connected, and the desktop closes every
   mirror for that peer.
@@ -189,9 +189,9 @@ than wrong.
 
 ## Notes
 
-* Wire schema: `protocol/proto/anyflow/v1/capabilities/notifications_v1.proto`;
+* Wire schema: `protocol/proto/omnibridge/v1/capabilities/notifications_v1.proto`;
   rules in [02 §3](../research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md).
-* Portable implementation: `anyflow_core::notifications::PeerRoles`.
+* Portable implementation: `omnibridge_core::notifications::PeerRoles`.
 * The access contract, and the permission lifecycle this narrows against:
   [ADR-0015](ADR-0015-notification-access.md).
 * Notification naming: [ADR-0016](ADR-0016-notification-identity.md).

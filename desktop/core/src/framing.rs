@@ -10,7 +10,7 @@
 //! this protocol version is large — a battery update is a few dozen bytes —
 //! and it can be raised deliberately when a capability actually needs it.
 
-use anyflow_proto::Message;
+use omnibridge_proto::Message;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::error::{Error, Result};
@@ -20,7 +20,7 @@ pub const MAX_FRAME_LEN: u32 = 64 * 1024;
 
 pub async fn write_envelope<W: AsyncWrite + Unpin>(
     w: &mut W,
-    envelope: &anyflow_proto::v1::Envelope,
+    envelope: &omnibridge_proto::v1::Envelope,
 ) -> Result<()> {
     let body = envelope.encode_to_vec();
     let len: u32 = body
@@ -36,7 +36,9 @@ pub async fn write_envelope<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
-pub async fn read_envelope<R: AsyncRead + Unpin>(r: &mut R) -> Result<anyflow_proto::v1::Envelope> {
+pub async fn read_envelope<R: AsyncRead + Unpin>(
+    r: &mut R,
+) -> Result<omnibridge_proto::v1::Envelope> {
     let mut len_buf = [0u8; 4];
     match r.read_exact(&mut len_buf).await {
         Ok(_) => {}
@@ -58,5 +60,5 @@ pub async fn read_envelope<R: AsyncRead + Unpin>(r: &mut R) -> Result<anyflow_pr
         _ => Error::Io(e),
     })?;
 
-    Ok(anyflow_proto::v1::Envelope::decode(&body[..])?)
+    Ok(omnibridge_proto::v1::Envelope::decode(&body[..])?)
 }

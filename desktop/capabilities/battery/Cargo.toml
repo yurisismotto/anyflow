@@ -1,5 +1,5 @@
 [package]
-name = "anyflow-capability-battery"
+name = "omnibridge-capability-battery"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -22,11 +22,11 @@ unwrap_used = "warn"
 
 [dependencies]
 # `default-features = false`: a capability crate needs the protocol half of
-# `anyflow-core`, never its Unix filesystem adapter. Leaving the default on
+# `omnibridge-core`, never its Unix filesystem adapter. Leaving the default on
 # would drag `unix-fs` into every build through feature unification, and the
 # portability gate would then pass for the wrong reason.
-anyflow-core = { version = "0.1.0", path = "../../core", default-features = false }
-anyflow-proto = { version = "0.1.0", path = "../../proto" }
+omnibridge-core = { version = "0.1.0", path = "../../core", default-features = false }
+omnibridge-proto = { version = "0.1.0", path = "../../proto" }
 prost = "0.14"
 tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"

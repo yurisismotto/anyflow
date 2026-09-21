@@ -1,0 +1,60 @@
+# D-Bus activation for OmniBridge's desktop application.
+#
+# ---------------------------------------------------------------------------
+# Why this file exists
+# ---------------------------------------------------------------------------
+#
+# The desktop entry has carried `DBusActivatable=true` since the Quick Panel
+# sprint, and the GtkApplication has exported `app.quick-panel`,
+# `app.settings` and `app.transfers` on the session bus since then too. That
+# is enough for a caller to raise a surface of an OmniBridge that is *already
+# running*. It is not enough to start one, and the difference was measured
+# rather than assumed:
+#
+#     $ pkill -x omnibridge-gui
+#     $ gdbus call --session --dest io.github.yurisismotto.omnibridge \
+#           --object-path /io/github/yurisismotto/omnibridge \
+#           --method org.freedesktop.Application.ActivateAction \
+#           quick-panel '[]' '{}'
+#     Error: org.freedesktop.DBus.Error.ServiceUnknown: The name is not activatable
+#
+# `DBusActivatable=true` is a promise *about* the application, read by things
+# that launch desktop entries. The message bus does not read desktop entries;
+# it reads this directory. Without an entry here the bus has no way to start
+# the name, which is why the call above fails while the identical call against
+# a running instance succeeds.
+#
+# The tray item needs the cold case: someone clicks OmniBridge in the system tray
+# on a freshly booted session, where `omnibridged` is running as a user service
+# and no GUI process exists at all.
+#
+# ---------------------------------------------------------------------------
+# Why `--gapplication-service`
+# ---------------------------------------------------------------------------
+#
+# Without it, the bus starts `omnibridge-gui` with no arguments, which is a bare
+# launch — and a bare launch opens Settings. The person who clicked "Quick
+# Panel" would get two windows, one of them unasked for. With it, GApplication
+# enters service mode: it registers the bus name, opens nothing, and waits for
+# the activation message that is already on its way. Measured on this build:
+# the process owns `io.github.yurisismotto.omnibridge`, exports no window object,
+# and exits by itself after ten idle seconds.
+#
+# That last part is the lifecycle this whole sprint is built to protect. The
+# GUI does not become resident in order to have a tray icon; it is started for
+# a window and it leaves when the window is gone. `omnibridged` stays the only
+# long-lived OmniBridge process, and it is the daemon — not this — that owns the
+# StatusNotifierItem.
+#
+# ---------------------------------------------------------------------------
+# @BINDIR@
+# ---------------------------------------------------------------------------
+#
+# `Exec` in a D-Bus service file must be an absolute path; the bus does not
+# search `PATH`. It is substituted at install time from the prefix the
+# installer was given, so a development install under `~/.local` and a package
+# under `/usr` produce the same file with the one line that has to differ.
+# Nothing here is written by hand and no repository path can reach it.
+[D-BUS Service]
+Name=io.github.yurisismotto.omnibridge
+Exec=@BINDIR@/omnibridge-gui --gapplication-service

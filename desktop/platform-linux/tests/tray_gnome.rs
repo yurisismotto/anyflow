@@ -41,10 +41,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyflow_linux::tray::activate::{ActivationError, ApplicationActivator};
-use anyflow_linux::tray::item::{ITEM_OBJECT_PATH, MENU_OBJECT_PATH};
-use anyflow_linux::tray::model::TrayAction;
-use anyflow_linux::tray::{publish, PublishedItem};
+use omnibridge_linux::tray::activate::{ActivationError, ApplicationActivator};
+use omnibridge_linux::tray::item::{ITEM_OBJECT_PATH, MENU_OBJECT_PATH};
+use omnibridge_linux::tray::model::TrayAction;
+use omnibridge_linux::tray::{publish, PublishedItem};
 use zbus::zvariant::{OwnedValue, Value};
 
 mod common;
@@ -67,7 +67,7 @@ const MENU_INTERFACE: &str = "com.canonical.dbusmenu";
 ///
 /// The `$` binds to the second alternative only, so the first is an
 /// unanchored search for "something, a dot, something". That is the branch
-/// AnyFlow's `org.kde.StatusNotifierItem-<pid>-<n>` takes, and it is written
+/// OmniBridge's `org.kde.StatusNotifierItem-<pid>-<n>` takes, and it is written
 /// out here rather than pulled in as a regex crate because the point is to
 /// reproduce the extension's decision, not to acquire a dependency.
 fn bus_address_regex_matches(name: &str) -> bool {
@@ -582,7 +582,7 @@ async fn n4_the_host_going_away_leaves_the_daemon_and_the_item_alone() {
     let caller = bus.connect().await;
     let proxy = proxy_onto(&caller, &item, ITEM_INTERFACE, ITEM_OBJECT_PATH).await;
     let title: String = proxy.get_property("Title").await.expect("Title");
-    assert_eq!(title, "AnyFlow");
+    assert_eq!(title, "OmniBridge");
 }
 
 /// N5 — a duplicate registration is not a duplicate icon.
@@ -627,12 +627,12 @@ async fn n6_the_item_is_ready_and_visible_by_the_extensions_own_rules() {
 
     let facts = log.facts_for(&item.bus_name);
     assert!(facts.is_ready(), "the extension would never draw this item");
-    assert_eq!(facts.id, "io.github.yurisismotto.anyflow");
+    assert_eq!(facts.id, "io.github.yurisismotto.omnibridge");
     assert_eq!(facts.menu_path, MENU_OBJECT_PATH);
-    assert_eq!(facts.title, "AnyFlow");
+    assert_eq!(facts.title, "OmniBridge");
 
     // `Passive` is the one status that makes the extension hide the icon.
-    // AnyFlow's `Active` is not a decoration: it is the reason the icon is on
+    // OmniBridge's `Active` is not a decoration: it is the reason the icon is on
     // the panel at all.
     assert_eq!(facts.status, "Active");
     assert!(facts.is_visible());
@@ -662,7 +662,7 @@ async fn n7_feature_detection_finds_activate_and_no_ayatana_secondary() {
     );
     assert!(
         !facts.has_ayatana_secondary,
-        "AnyFlow does not implement the Ayatana variant, and must not appear to"
+        "OmniBridge does not implement the Ayatana variant, and must not appear to"
     );
 }
 
@@ -682,7 +682,7 @@ async fn n8_the_icon_is_a_theme_name_with_no_path_and_no_pixels() {
     until("registration", || log.count() == 1).await;
 
     let facts = log.facts_for(&item.bus_name);
-    assert_eq!(facts.icon_name, "io.github.yurisismotto.anyflow");
+    assert_eq!(facts.icon_name, "io.github.yurisismotto.omnibridge");
     assert_eq!(facts.icon_theme_path, "");
     assert_eq!(facts.icon_pixmaps, 0);
 }
@@ -692,7 +692,7 @@ async fn n8_the_icon_is_a_theme_name_with_no_path_and_no_pixels() {
 /// `tools/busAnalyzer.js` walks every name on the bus and introspects it from
 /// `/` downwards looking for `org.kde.StatusNotifierItem`
 /// (`dbusUtils.js:introspectBusObject`). It exists because some applications
-/// never re-register when the extension is toggled. AnyFlow does re-register
+/// never re-register when the extension is toggled. OmniBridge does re-register
 /// — but if the object tree were not walkable from `/`, this fallback would
 /// silently not cover it, so the walk is asserted rather than assumed.
 ///
@@ -866,7 +866,7 @@ async fn n11_every_menu_property_has_the_type_the_extension_mandates() {
         .await
         .expect("GetGroupProperties");
 
-    // The subset of `MandatedTypes` AnyFlow sends anything for.
+    // The subset of `MandatedTypes` OmniBridge sends anything for.
     let mandated: HashMap<&str, &str> = [
         ("visible", "b"),
         ("enabled", "b"),
@@ -976,7 +976,7 @@ async fn n13_looking_at_the_menu_and_closing_it_opens_no_window() {
 }
 
 // ===========================================================================
-// N14–N16 — the interactions GNOME sends that AnyFlow deliberately ignores
+// N14–N16 — the interactions GNOME sends that OmniBridge deliberately ignores
 // ===========================================================================
 
 /// N14 — a middle click, and the deliberate no-op behind it.
@@ -984,7 +984,7 @@ async fn n13_looking_at_the_menu_and_closing_it_opens_no_window() {
 /// `indicatorStatusIcon.js:423` turns `BUTTON_MIDDLE` into
 /// `AppIndicator.secondaryActivate`, which offers an activation token
 /// (`appIndicator.js:820`) and then — the Ayatana variant being absent —
-/// calls plain `SecondaryActivate`. AnyFlow does nothing with it, and this
+/// calls plain `SecondaryActivate`. OmniBridge does nothing with it, and this
 /// test is what makes that a decision rather than an omission: the KDE sprint
 /// left it a no-op for want of a real host, and a real host's source now says
 /// the event arrives. It stays a no-op because on GNOME every surface is
@@ -1070,7 +1070,7 @@ async fn n15_the_menu_is_reachable_without_contextmenu_ever_being_called() {
 ///
 /// Scoped deliberately to *what GNOME reads*: every property in its own
 /// `StatusNotifierItem.xml`, plus the menu. `ToolTip` is not in that list —
-/// the extension comments it out — but AnyFlow publishes one anyway, on a
+/// the extension comments it out — but OmniBridge publishes one anyway, on a
 /// public object, so it is included here rather than excused.
 #[tokio::test(flavor = "multi_thread")]
 async fn n16_nothing_the_extension_reads_is_private() {
@@ -1114,9 +1114,9 @@ async fn n16_nothing_the_extension_reads_is_private() {
     // a compile-time constant in `model.rs` or a word from the protocol.
     let allowed = [
         "",
-        "io.github.yurisismotto.anyflow",
-        "AnyFlow",
-        "One flow. Any device.",
+        "io.github.yurisismotto.omnibridge",
+        "OmniBridge",
+        "One bridge. Any device.",
         "ApplicationStatus",
         "Active",
         "normal",
@@ -1191,7 +1191,7 @@ fn n17_no_tray_backend_dependency_was_added() {
     ] {
         assert!(
             !code.contains(forbidden),
-            "`{forbidden}` appears in anyflow-linux's dependencies; the GNOME \
+            "`{forbidden}` appears in omnibridge-linux's dependencies; the GNOME \
              extension needs none of them"
         );
     }

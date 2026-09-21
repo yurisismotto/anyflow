@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use anyflow_linux::tray::model::{
+use omnibridge_linux::tray::model::{
     self, TrayAction, DESKTOP_APP_ID, DESKTOP_APP_OBJECT_PATH, ICON_NAME, ITEM_CATEGORY, ITEM_ID,
     ITEM_STATUS, ITEM_TITLE, MENU, MENU_ROOT_ID, TOOLTIP_BODY, TOOLTIP_TITLE,
 };
@@ -275,11 +275,11 @@ fn t11_nothing_on_the_public_tray_object_is_about_a_person_or_a_file() {
         MENU[2].label,
     ];
     let allowed: HashSet<&str> = HashSet::from([
-        "io.github.yurisismotto.anyflow",
-        "AnyFlow",
+        "io.github.yurisismotto.omnibridge",
+        "OmniBridge",
         "ApplicationStatus",
         "Active",
-        "One flow. Any device.",
+        "One bridge. Any device.",
         "Quick Panel",
         "Files",
         "Settings",
@@ -336,10 +336,10 @@ fn t11_nothing_on_the_public_tray_object_is_about_a_person_or_a_file() {
 
 #[test]
 fn t12_the_icon_and_the_item_id_are_the_application_id() {
-    assert_eq!(ICON_NAME, "io.github.yurisismotto.anyflow");
+    assert_eq!(ICON_NAME, "io.github.yurisismotto.omnibridge");
     assert_eq!(ICON_NAME, DESKTOP_APP_ID);
     assert_eq!(ITEM_ID, DESKTOP_APP_ID);
-    assert_eq!(ITEM_TITLE, "AnyFlow");
+    assert_eq!(ITEM_TITLE, "OmniBridge");
 
     // A theme name, not a path and not a file. The three things it must not
     // look like are an absolute path, a URL and a filename with an extension.

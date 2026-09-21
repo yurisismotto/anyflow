@@ -1,7 +1,7 @@
 //! Transfers: what is moving, and what finished during this daemon run.
 
-use anyflow_control::{Request, Response, TransferReport};
 use gtk::prelude::*;
+use omnibridge_control::{Request, Response, TransferReport};
 
 use crate::widgets::{self, Status, SPACING_SM, SPACING_XS};
 use crate::{client, DaemonState};
@@ -39,7 +39,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState) {
     // daemon holds transfers in memory for the life of the process and writes
     // nothing about them to disk.
     container.append(&widgets::caption(
-        "This list covers the current daemon run. AnyFlow keeps no transfer history on disk.",
+        "This list covers the current daemon run. OmniBridge keeps no transfer history on disk.",
     ));
 }
 
@@ -106,7 +106,7 @@ fn transfer_card(t: &TransferReport, active: bool) -> gtk::Box {
                 },
                 |reply| {
                     if let Ok(Response::Error { message }) = reply {
-                        eprintln!("anyflow-gui: could not cancel: {message}");
+                        eprintln!("omnibridge-gui: could not cancel: {message}");
                     }
                 },
             );

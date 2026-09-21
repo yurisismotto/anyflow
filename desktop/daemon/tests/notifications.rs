@@ -5,13 +5,13 @@
 //! store. Where the capability's own suite proves the rules in isolation, this
 //! one proves they survive the transport, the negotiation and the grant
 //! plumbing — including the parts that only exist out here: that pairing alone
-//! grants nothing, that a peer AnyFlow has never granted cannot reach the
+//! grants nothing, that a peer OmniBridge has never granted cannot reach the
 //! capability at all, and that a broken sink does not take the other three
 //! capabilities down with it.
 //!
 //! The notification server is in-memory. That is not a weakening: the real
 //! `org.freedesktop.Notifications` server is exercised in
-//! `anyflow-capability-notifications`'s own `real_dbus` gate, and a suite that
+//! `omnibridge-capability-notifications`'s own `real_dbus` gate, and a suite that
 //! posted notifications onto the developer's desktop on every `cargo test`
 //! would not survive contact with anybody's patience.
 
@@ -19,9 +19,9 @@ mod common;
 
 use std::time::Duration;
 
-use anyflow_capability_notifications::backend::CloseReason;
-use anyflow_capability_notifications::{LockPolicy, NotificationPolicy, CAPABILITY_ID};
 use common::*;
+use omnibridge_capability_notifications::backend::CloseReason;
+use omnibridge_capability_notifications::{LockPolicy, NotificationPolicy, CAPABILITY_ID};
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const ORIGIN: &str = "0123456789abcdef0123456789abcdef";
@@ -864,7 +864,7 @@ async fn a_suppress_policy_refuses_over_the_transport() {
 
 #[tokio::test]
 async fn a_broken_notification_sink_does_not_break_battery_or_the_clipboard() {
-    use anyflow_capability_notifications::backend::SinkError;
+    use omnibridge_capability_notifications::backend::SinkError;
 
     let (server, client, captured, session) = paired(NotificationPolicy::default()).await;
 
@@ -890,7 +890,7 @@ async fn a_broken_notification_sink_does_not_break_battery_or_the_clipboard() {
     assert!(
         session
             .handle
-            .send_capability(anyflow_core::capability::OutboundMessage {
+            .send_capability(omnibridge_core::capability::OutboundMessage {
                 capability_id: "battery.v1".to_string(),
                 payload: <clip_pb::BatteryState as prost::Message>::encode_to_vec(
                     &clip_pb::BatteryState {
@@ -931,7 +931,7 @@ async fn a_malformed_notification_payload_does_not_close_the_session() {
     assert!(
         session
             .handle
-            .send_capability(anyflow_core::capability::OutboundMessage {
+            .send_capability(omnibridge_core::capability::OutboundMessage {
                 capability_id: CAPABILITY_ID.to_string(),
                 payload: vec![0xff, 0xff, 0xff, 0xff],
             })
@@ -960,9 +960,9 @@ async fn a_malformed_notification_payload_does_not_close_the_session() {
 
 #[tokio::test]
 async fn no_notification_content_is_written_to_disk() {
-    const CANARY_TITLE: &str = "ANYFLOW-N2-STORE-TITLE";
-    const CANARY_BODY: &str = "ANYFLOW-N2-STORE-BODY";
-    const CANARY_APP: &str = "ANYFLOW-N2-STORE-APPLABEL";
+    const CANARY_TITLE: &str = "OMNIBRIDGE-N2-STORE-TITLE";
+    const CANARY_BODY: &str = "OMNIBRIDGE-N2-STORE-BODY";
+    const CANARY_APP: &str = "OMNIBRIDGE-N2-STORE-APPLABEL";
 
     let (server, _client, captured, session) = paired(NotificationPolicy::default()).await;
 
@@ -1051,7 +1051,7 @@ async fn the_desktop_receive_switch_closes_the_mirrors_it_had_displayed() {
     );
     assert_eq!(server.notification_sink.live_count(), 1);
 
-    let response = anyflow_runtime::server::do_grant(
+    let response = omnibridge_runtime::server::do_grant(
         &server.state,
         &client.fingerprint.to_hex(),
         CAPABILITY_ID,
@@ -1059,7 +1059,7 @@ async fn the_desktop_receive_switch_closes_the_mirrors_it_had_displayed() {
     )
     .await;
     assert!(
-        matches!(response, anyflow_runtime::control::Response::Ok { .. }),
+        matches!(response, omnibridge_runtime::control::Response::Ok { .. }),
         "the daemon accepted the switch: {response:?}"
     );
 
@@ -1090,7 +1090,7 @@ async fn the_desktop_receive_switch_leaves_every_other_grant_alone() {
     let before = server.granted_capabilities(client.fingerprint).await;
     assert!(before.contains(&CAPABILITY_ID.to_string()));
 
-    anyflow_runtime::server::do_grant(
+    omnibridge_runtime::server::do_grant(
         &server.state,
         &client.fingerprint.to_hex(),
         CAPABILITY_ID,
@@ -1117,7 +1117,7 @@ async fn the_desktop_receive_switch_leaves_every_other_grant_alone() {
 /// nothing about them should be able to reach another capability's grant.
 #[tokio::test]
 async fn changing_a_notification_setting_never_touches_another_capability() {
-    use anyflow_runtime::control::NotificationSetting;
+    use omnibridge_runtime::control::NotificationSetting;
 
     let (server, client, _captured, _session) = paired(NotificationPolicy::default()).await;
     for capability in ["battery.v1", "files.v1", "clipboard.v1"] {
@@ -1140,14 +1140,14 @@ async fn changing_a_notification_setting_never_touches_another_capability() {
         NotificationSetting::DismissSync { enabled: true },
         NotificationSetting::DismissSync { enabled: false },
     ] {
-        let response = anyflow_runtime::server::do_notifications_policy(
+        let response = omnibridge_runtime::server::do_notifications_policy(
             &server.state,
             &client.fingerprint.to_hex(),
             setting,
         )
         .await;
         assert!(
-            matches!(response, anyflow_runtime::control::Response::Ok { .. }),
+            matches!(response, omnibridge_runtime::control::Response::Ok { .. }),
             "{response:?}"
         );
     }
@@ -1160,7 +1160,7 @@ async fn changing_a_notification_setting_never_touches_another_capability() {
     // The clipboard's own policy is likewise untouched.
     assert_eq!(
         server.clipboard_policy(client.fingerprint).await,
-        anyflow_capability_clipboard::policy::ClipboardPolicy::default(),
+        omnibridge_capability_clipboard::policy::ClipboardPolicy::default(),
     );
     // And the notification policy is back where it started: the last setting
     // in the loop turned dismiss sync off again, and nothing else moved.
@@ -1177,17 +1177,17 @@ async fn changing_a_notification_setting_never_touches_another_capability() {
 /// and the control socket reach the same function.
 #[tokio::test]
 async fn the_dismiss_sync_setting_changes_only_itself() {
-    use anyflow_runtime::control::NotificationSetting;
+    use omnibridge_runtime::control::NotificationSetting;
 
     let (server, client, _captured, _session) = paired(NotificationPolicy {
-        when_sink_locked: anyflow_core::notification_policy::LockPolicy::Full,
+        when_sink_locked: omnibridge_core::notification_policy::LockPolicy::Full,
         ..NotificationPolicy::default()
     })
     .await;
     let before = server.notification_policy(client.fingerprint).await;
     assert!(!before.allow_dismiss_sync, "the stored default is off");
 
-    let response = anyflow_runtime::server::do_notifications_policy(
+    let response = omnibridge_runtime::server::do_notifications_policy(
         &server.state,
         &client.fingerprint.to_hex(),
         NotificationSetting::DismissSync { enabled: true },
@@ -1195,7 +1195,7 @@ async fn the_dismiss_sync_setting_changes_only_itself() {
     .await;
     assert!(matches!(
         response,
-        anyflow_runtime::control::Response::Ok { .. }
+        omnibridge_runtime::control::Response::Ok { .. }
     ));
 
     let after = server.notification_policy(client.fingerprint).await;
@@ -1219,7 +1219,7 @@ async fn the_dismiss_sync_setting_changes_only_itself() {
 /// forbids. The phone re-sends on its next update or its next snapshot.
 #[tokio::test]
 async fn pausing_from_the_desktop_closes_mirrors_and_resuming_restores_nothing() {
-    use anyflow_runtime::control::NotificationSetting;
+    use omnibridge_runtime::control::NotificationSetting;
 
     let (server, client, captured, session) = paired(NotificationPolicy::default()).await;
     assert!(
@@ -1234,7 +1234,7 @@ async fn pausing_from_the_desktop_closes_mirrors_and_resuming_restores_nothing()
         clip_pb::NotificationOutcome::Displayed as i32
     );
 
-    anyflow_runtime::server::do_notifications_policy(
+    omnibridge_runtime::server::do_notifications_policy(
         &server.state,
         &client.fingerprint.to_hex(),
         NotificationSetting::Mirror { enabled: false },
@@ -1250,7 +1250,7 @@ async fn pausing_from_the_desktop_closes_mirrors_and_resuming_restores_nothing()
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    anyflow_runtime::server::do_notifications_policy(
+    omnibridge_runtime::server::do_notifications_policy(
         &server.state,
         &client.fingerprint.to_hex(),
         NotificationSetting::Mirror { enabled: true },
@@ -1289,8 +1289,8 @@ async fn pausing_from_the_desktop_closes_mirrors_and_resuming_restores_nothing()
 async fn the_status_the_desktop_ui_reads_carries_no_notification_content() {
     let (server, client, captured, session) = paired(NotificationPolicy::default()).await;
 
-    const TITLE: &str = "ANYFLOW-N3-STATUS-TITLE";
-    const BODY: &str = "ANYFLOW-N3-STATUS-BODY";
+    const TITLE: &str = "OMNIBRIDGE-N3-STATUS-TITLE";
+    const BODY: &str = "OMNIBRIDGE-N3-STATUS-BODY";
     assert!(
         send_notification_control(
             &session,
@@ -1351,7 +1351,10 @@ async fn the_status_the_desktop_ui_reads_carries_no_notification_content() {
 /// decides what this peer is allowed to do — so the desktop's vector is the
 /// one every test here is about. Reading the client's instead would have made
 /// the whole suite pass against no fix at all.
-async fn desktop_negotiated(server: &TestServer, peer: anyflow_core::Fingerprint) -> Vec<String> {
+async fn desktop_negotiated(
+    server: &TestServer,
+    peer: omnibridge_core::Fingerprint,
+) -> Vec<String> {
     let deadline = std::time::Instant::now() + TIMEOUT;
     loop {
         if let Some(handle) = server.state.session_for(&peer).await {
@@ -1369,8 +1372,8 @@ async fn desktop_negotiated(server: &TestServer, peer: anyflow_core::Fingerprint
 /// are different objects with different ids, minted from the same counter.
 async fn desktop_session_id(
     server: &TestServer,
-    peer: anyflow_core::Fingerprint,
-) -> anyflow_core::session::SessionId {
+    peer: omnibridge_core::Fingerprint,
+) -> omnibridge_core::session::SessionId {
     server
         .state
         .session_for(&peer)
@@ -1421,7 +1424,7 @@ async fn granting_mid_session_ends_the_session_that_cannot_use_the_grant() {
     let (server, client, session) = connected_but_not_granted().await;
     let session_id = desktop_session_id(&server, client.fingerprint).await;
 
-    let response = anyflow_runtime::server::do_grant(
+    let response = omnibridge_runtime::server::do_grant(
         &server.state,
         &client.fingerprint.to_hex(),
         CAPABILITY_ID,
@@ -1430,7 +1433,7 @@ async fn granting_mid_session_ends_the_session_that_cannot_use_the_grant() {
     .await;
 
     match response {
-        anyflow_runtime::control::Response::Ok { message } => assert!(
+        omnibridge_runtime::control::Response::Ok { message } => assert!(
             message.contains("reconnecting"),
             "the operator is told the device is being reconnected: {message}"
         ),
@@ -1487,7 +1490,7 @@ async fn the_session_the_reconnect_builds_can_actually_mirror() {
         "a session that never negotiated the capability must announce nothing"
     );
 
-    anyflow_runtime::server::do_grant(
+    omnibridge_runtime::server::do_grant(
         &server.state,
         &client.fingerprint.to_hex(),
         CAPABILITY_ID,
@@ -1542,12 +1545,12 @@ async fn the_session_the_reconnect_builds_can_actually_mirror() {
 /// first is a permission, and only the first may cost a session.
 #[tokio::test]
 async fn a_burst_of_settings_after_the_grant_causes_no_further_reconnect() {
-    use anyflow_runtime::control::NotificationSetting;
+    use omnibridge_runtime::control::NotificationSetting;
 
     let (server, client, session) = connected_but_not_granted().await;
     let device = client.fingerprint.to_hex();
 
-    anyflow_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
+    omnibridge_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
     assert_session_ends(session, "the grant widened").await;
 
     let session = client
@@ -1564,10 +1567,10 @@ async fn a_burst_of_settings_after_the_grant_causes_no_further_reconnect() {
         },
         NotificationSetting::DismissSync { enabled: true },
     ] {
-        anyflow_runtime::server::do_notifications_policy(&server.state, &device, setting).await;
+        omnibridge_runtime::server::do_notifications_policy(&server.state, &device, setting).await;
     }
     // And the grant written again, as a GUI that echoes its own switch would.
-    anyflow_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
+    omnibridge_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
 
     tokio::time::sleep(Duration::from_millis(200)).await;
     let live = server
@@ -1592,7 +1595,7 @@ async fn withdrawing_a_grant_never_rebuilds_the_session() {
     let (server, client, session) = connected_but_not_granted().await;
     let device = client.fingerprint.to_hex();
 
-    anyflow_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
+    omnibridge_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, true).await;
     assert_session_ends(session, "the grant widened").await;
 
     let session = client
@@ -1602,9 +1605,9 @@ async fn withdrawing_a_grant_never_rebuilds_the_session() {
     let id = desktop_session_id(&server, client.fingerprint).await;
 
     let response =
-        anyflow_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, false).await;
+        omnibridge_runtime::server::do_grant(&server.state, &device, CAPABILITY_ID, false).await;
     match response {
-        anyflow_runtime::control::Response::Ok { message } => assert!(
+        omnibridge_runtime::control::Response::Ok { message } => assert!(
             !message.contains("reconnecting"),
             "a withdrawal must not announce a reconnect: {message}"
         ),
@@ -1641,7 +1644,7 @@ async fn regranting_a_capability_the_session_already_has_is_inert() {
         "battery.v1 is auto-granted at pairing, so this session already has it"
     );
 
-    let response = anyflow_runtime::server::do_grant(
+    let response = omnibridge_runtime::server::do_grant(
         &server.state,
         &client.fingerprint.to_hex(),
         "battery.v1",
@@ -1649,7 +1652,7 @@ async fn regranting_a_capability_the_session_already_has_is_inert() {
     )
     .await;
     match response {
-        anyflow_runtime::control::Response::Ok { message } => assert!(
+        omnibridge_runtime::control::Response::Ok { message } => assert!(
             !message.contains("reconnecting"),
             "nothing needed rebuilding: {message}"
         ),
@@ -1686,7 +1689,7 @@ async fn the_convergence_is_not_specific_to_notifications() {
             "{capability} should not be granted by pairing alone"
         );
 
-        anyflow_runtime::server::do_grant(
+        omnibridge_runtime::server::do_grant(
             &server.state,
             &client.fingerprint.to_hex(),
             capability,
@@ -1727,7 +1730,7 @@ async fn granting_while_the_peer_is_away_converges_on_its_own() {
     })
     .await;
 
-    let response = anyflow_runtime::server::do_grant(
+    let response = omnibridge_runtime::server::do_grant(
         &server.state,
         &client.fingerprint.to_hex(),
         CAPABILITY_ID,
@@ -1735,7 +1738,7 @@ async fn granting_while_the_peer_is_away_converges_on_its_own() {
     )
     .await;
     match response {
-        anyflow_runtime::control::Response::Ok { message } => assert!(
+        omnibridge_runtime::control::Response::Ok { message } => assert!(
             !message.contains("reconnecting"),
             "there was nothing to reconnect: {message}"
         ),
@@ -1770,7 +1773,7 @@ async fn the_reconnect_keeps_the_pairing_and_every_other_capability() {
     let (server, client, session) = connected_but_not_granted().await;
     let before = server.granted_capabilities(client.fingerprint).await;
 
-    anyflow_runtime::server::do_grant(
+    omnibridge_runtime::server::do_grant(
         &server.state,
         &client.fingerprint.to_hex(),
         CAPABILITY_ID,
@@ -1871,7 +1874,7 @@ async fn the_mid_session_convergence_path_logs_no_notification_content() {
         let negotiated = desktop_negotiated(&server, client.fingerprint).await;
         assert!(!negotiated.contains(&CAPABILITY_ID.to_string()));
 
-        let response = anyflow_runtime::server::do_grant(
+        let response = omnibridge_runtime::server::do_grant(
             &server.state,
             &client.fingerprint.to_hex(),
             CAPABILITY_ID,
@@ -1879,7 +1882,7 @@ async fn the_mid_session_convergence_path_logs_no_notification_content() {
         )
         .await;
         match response {
-            anyflow_runtime::control::Response::Ok { message } => assert!(
+            omnibridge_runtime::control::Response::Ok { message } => assert!(
                 message.contains("reconnecting"),
                 "the convergence path was not taken, so this canaries nothing"
             ),
@@ -1918,14 +1921,14 @@ async fn the_mid_session_convergence_path_logs_no_notification_content() {
         // Now withdraw and re-grant with that notification live, so the
         // revocation, the mirror close and a second renegotiation decision
         // all run while there is content to leak.
-        anyflow_runtime::server::do_grant(
+        omnibridge_runtime::server::do_grant(
             &server.state,
             &client.fingerprint.to_hex(),
             CAPABILITY_ID,
             false,
         )
         .await;
-        anyflow_runtime::server::do_grant(
+        omnibridge_runtime::server::do_grant(
             &server.state,
             &client.fingerprint.to_hex(),
             CAPABILITY_ID,
@@ -1946,7 +1949,7 @@ async fn the_mid_session_convergence_path_logs_no_notification_content() {
     // rather than to an empty session that would make every assertion below
     // vacuously true.
     assert!(
-        text.contains("anyflow_"),
+        text.contains("omnibridge_"),
         "no daemon event reached the capture, so this test proves nothing:\n{text}"
     );
     for canary in [TITLE, BODY, APP_LABEL, APP_ID] {

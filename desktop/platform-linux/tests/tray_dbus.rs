@@ -21,10 +21,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyflow_linux::tray::activate::{ActivationError, ApplicationActivator};
-use anyflow_linux::tray::item::{ITEM_OBJECT_PATH, MENU_OBJECT_PATH};
-use anyflow_linux::tray::model::TrayAction;
-use anyflow_linux::tray::{publish, PublishedItem};
+use omnibridge_linux::tray::activate::{ActivationError, ApplicationActivator};
+use omnibridge_linux::tray::item::{ITEM_OBJECT_PATH, MENU_OBJECT_PATH};
+use omnibridge_linux::tray::model::TrayAction;
+use omnibridge_linux::tray::{publish, PublishedItem};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 // ===========================================================================
@@ -75,7 +75,7 @@ impl FakeWatcher {
     /// The real implementation reads a leading `/` as an object path and takes
     /// the service from the sender; anything else is a bus name and the path
     /// is `/StatusNotifierItem`. Both branches are here so that a change in
-    /// what AnyFlow sends is visible.
+    /// what OmniBridge sends is visible.
     async fn register_status_notifier_item(
         &self,
         service: String,
@@ -270,7 +270,7 @@ async fn d2_an_absent_watcher_is_not_an_error() {
     )
     .await;
     let id: String = proxy.get_property("Id").await.expect("Id");
-    assert_eq!(id, "io.github.yurisismotto.anyflow");
+    assert_eq!(id, "io.github.yurisismotto.omnibridge");
 
     // And the task that follows the shell is still alive, waiting.
     stays(
@@ -345,7 +345,7 @@ async fn d5_a_shell_that_comes_back_gets_exactly_one_new_registration() {
     let (_watcher2, second) = start_watcher(&bus).await;
     until("the second registration", || second.count() == 1).await;
 
-    // One, and it stays one: a shell restart must not leave two AnyFlow icons
+    // One, and it stays one: a shell restart must not leave two OmniBridge icons
     // behind.
     stays(
         "exactly one registration",
@@ -395,7 +395,7 @@ async fn d13_a_shell_that_announces_itself_repeatedly_is_registered_with_once() 
 // ===========================================================================
 
 #[tokio::test(flavor = "multi_thread")]
-async fn d6_the_watcher_sees_exactly_one_anyflow_item() {
+async fn d6_the_watcher_sees_exactly_one_omnibridge_item() {
     let bus = TestBus::start();
     let (watcher_conn, log) = start_watcher(&bus).await;
     let _item = start_item(&bus, &Recorder::default()).await;
@@ -410,7 +410,7 @@ async fn d6_the_watcher_sees_exactly_one_anyflow_item() {
         .get_property("RegisteredStatusNotifierItems")
         .await
         .expect("RegisteredStatusNotifierItems");
-    assert_eq!(items.len(), 1, "more than one AnyFlow item: {items:?}");
+    assert_eq!(items.len(), 1, "more than one OmniBridge item: {items:?}");
 
     // And the item's name says which process it belongs to, exactly as KDE's
     // own client names its items.
@@ -495,10 +495,10 @@ async fn d7_the_item_properties_have_the_types_and_values_the_spec_requires() {
 
     // And the values.
     assert_eq!(text("Category"), "ApplicationStatus");
-    assert_eq!(text("Id"), "io.github.yurisismotto.anyflow");
-    assert_eq!(text("Title"), "AnyFlow");
+    assert_eq!(text("Id"), "io.github.yurisismotto.omnibridge");
+    assert_eq!(text("Title"), "OmniBridge");
     assert_eq!(text("Status"), "Active");
-    assert_eq!(text("IconName"), "io.github.yurisismotto.anyflow");
+    assert_eq!(text("IconName"), "io.github.yurisismotto.omnibridge");
     assert_eq!(text("IconThemePath"), "", "the item names a directory");
     assert_eq!(text("AttentionIconName"), "");
     assert_eq!(text("AttentionMovieName"), "");
@@ -1034,11 +1034,11 @@ async fn d15_every_string_on_the_tray_objects_is_one_of_eight_constants() {
 
     let allowed = [
         "",
-        "io.github.yurisismotto.anyflow",
-        "AnyFlow",
+        "io.github.yurisismotto.omnibridge",
+        "OmniBridge",
         "ApplicationStatus",
         "Active",
-        "One flow. Any device.",
+        "One bridge. Any device.",
         "Quick Panel",
         "Files",
         "Settings",

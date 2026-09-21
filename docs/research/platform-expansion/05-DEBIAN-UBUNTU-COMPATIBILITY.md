@@ -2,10 +2,10 @@
 
 | Field | Value |
 | --- | --- |
-| **Title** | Which Debian and Ubuntu releases can run and build AnyFlow |
+| **Title** | Which Debian and Ubuntu releases can run and build OmniBridge |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
-| **Scope** | Archive-version audit against the API surface AnyFlow actually uses. Build feasibility, runtime feasibility, packaging, CI. |
+| **Scope** | Archive-version audit against the API surface OmniBridge actually uses. Build feasibility, runtime feasibility, packaging, CI. |
 | **Decision status** | PROPOSED |
 | **Evidence** | OFFICIAL DOC VERIFIED — `packages.debian.org` and `packages.ubuntu.com`, accessed 2026-08-31. REPO VERIFIED for the API inventory. |
 | **Related documents** | [04](04-LINUX-PORTABILITY.md), [06](06-KDE-PLASMA-WAYLAND.md), [07](07-LINUX-PACKAGING.md), [19](19-PACKAGING-AND-DISTRIBUTION.md) |
@@ -121,7 +121,7 @@ the default `rustc`.
 
 ### 5.1 Ubuntu 24.04 LTS sits exactly on the libadwaita floor
 
-Noble ships **libadwaita 1.5.0**. AnyFlow requires **1.5**. There is zero margin.
+Noble ships **libadwaita 1.5.0**. OmniBridge requires **1.5**. There is zero margin.
 
 This is a supported configuration and it is also a fragile one: any future use of a
 libadwaita 1.6+ API — `AdwSpinner`, `AdwBottomSheet`, newer `AdwToolbarView` properties,
@@ -216,7 +216,7 @@ Depends (gui):     libgtk-4-1 (>= 4.12), libadwaita-1-0 (>= 1.5)
 Two Debian-specific issues that do not arise on Fedora:
 
 1. **Vendored vs. unbundled crates.** Debian policy prefers `librust-*` archive packages over
-   vendored sources. AnyFlow depends on `rustls 0.23`, `tokio 1.53`, `prost 0.14`,
+   vendored sources. OmniBridge depends on `rustls 0.23`, `tokio 1.53`, `prost 0.14`,
    `rcgen 0.14`, `mdns-sd 0.15`, `x11rb 0.14`, `gtk4 0.9`, `libadwaita 0.7` and more. The
    probability that trixie's `librust-*` set satisfies all of those simultaneously is low,
    and the security-relevant ones (`rustls`, `rcgen`) are exactly the ones where a version
@@ -234,11 +234,11 @@ Two Debian-specific issues that do not arise on Fedora:
 
 | Binary package | Contents | Depends |
 | --- | --- | --- |
-| `anyflow` | `anyflowd`, `anyflow`, systemd user unit, docs | none beyond libc |
-| `anyflow-gui` | `anyflow-gui`, `.desktop`, icons, AppStream metainfo | `anyflow (= same version)`, GTK ≥ 4.12, libadwaita ≥ 1.5 |
+| `omnibridge` | `omnibridged`, `omnibridge`, systemd user unit, docs | none beyond libc |
+| `omnibridge-gui` | `omnibridge-gui`, `.desktop`, icons, AppStream metainfo | `omnibridge (= same version)`, GTK ≥ 4.12, libadwaita ≥ 1.5 |
 
 Rationale: the GTK floor is the only thing excluding a distribution, and it excludes only the
-GUI. A bookworm or jammy user with a rustup toolchain can have a fully working AnyFlow with
+GUI. A bookworm or jammy user with a rustup toolchain can have a fully working OmniBridge with
 the CLI. The same split is proposed for RPM in [07](07-LINUX-PACKAGING.md).
 
 ---
@@ -271,7 +271,7 @@ constraint shapes the whole test-lab recommendation in
 2. **Ubuntu 24.04 LTS: supported, with a CI job pinning the libadwaita 1.5 floor.**
 3. **Debian 12 / Ubuntu 22.04: daemon + CLI only, best-effort, no GUI.** Do not lower the
    libadwaita floor for them.
-4. Split into `anyflow` and `anyflow-gui`.
+4. Split into `omnibridge` and `omnibridge-gui`.
 5. Treat wl-clipboard 2.2.1 on **Ubuntu 26.04 LTS + Plasma** as a confirmed auto-send gap
    (cause known; see above). Report it upstream to Ubuntu — 2.3.0 in `resolute-updates` fixes
    this *and* `--sensitive` for every Ubuntu user.

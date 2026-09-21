@@ -5,7 +5,7 @@
 | **Title** | Turning a Fedora implementation into a Linux platform |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
-| **Scope** | Everything AnyFlow assumes about Linux, separated into *Linux requirement* vs. *Fedora implementation detail*. |
+| **Scope** | Everything OmniBridge assumes about Linux, separated into *Linux requirement* vs. *Fedora implementation detail*. |
 | **Decision status** | PROPOSED |
 | **Evidence** | REPO VERIFIED for every assumption; OFFICIAL DOC VERIFIED for distro package versions. |
 | **Related documents** | [01](01-CURRENT-ARCHITECTURE-AUDIT.md), [05](05-DEBIAN-UBUNTU-COMPATIBILITY.md), [06](06-KDE-PLASMA-WAYLAND.md), [07](07-LINUX-PACKAGING.md), [17](17-BACKGROUND-EXECUTION-MODEL.md) |
@@ -14,13 +14,13 @@
 
 ## 1. The core claim
 
-Almost nothing in AnyFlow is Fedora-specific. What exists is a *Fedora-shaped assumption
+Almost nothing in OmniBridge is Fedora-specific. What exists is a *Fedora-shaped assumption
 set*, and it is short. The certification was done on Fedora + GNOME Wayland
 (`CLIPBOARD-V1-CERTIFICATION.md`), which is why the docs read as Fedora-only; the code is
 broader than its documentation.
 
 The honest exception is the **GUI's minimum GTK/libadwaita versions**, which are a real
-constraint on which distributions can run AnyFlow at all. That is [05](05-DEBIAN-UBUNTU-COMPATIBILITY.md).
+constraint on which distributions can run OmniBridge at all. That is [05](05-DEBIAN-UBUNTU-COMPATIBILITY.md).
 
 ---
 
@@ -28,22 +28,22 @@ constraint on which distributions can run AnyFlow at all. That is [05](05-DEBIAN
 
 | # | Assumption | Where | Linux requirement or Fedora detail? |
 | --- | --- | --- | --- |
-| A1 | `rustc >= 1.82`, edition 2021 | `desktop/Cargo.toml`, `packaging/fedora/anyflow.spec` | **Linux requirement**, but a *distro-version* constraint. §3 |
-| A2 | A C toolchain (`gcc`) at build time | `anyflow.spec` `BuildRequires: gcc` | **Fedora detail, and probably wrong.** §4 |
+| A1 | `rustc >= 1.82`, edition 2021 | `desktop/Cargo.toml`, `packaging/fedora/omnibridge.spec` | **Linux requirement**, but a *distro-version* constraint. §3 |
+| A2 | A C toolchain (`gcc`) at build time | `omnibridge.spec` `BuildRequires: gcc` | **Fedora detail, and probably wrong.** §4 |
 | A3 | No `protoc` needed (protox) | `desktop/proto/Cargo.toml` | **Linux-neutral asset.** Applies to every platform. |
 | A4 | `rustls`+`ring`, no OpenSSL | `core/Cargo.toml` | **Linux-neutral asset.** §5 |
 | A5 | mDNS via the in-process `mdns-sd` responder, not Avahi | `daemon/src/mdns.rs` | **Linux-neutral asset**, with a coexistence question. §6 |
 | A6 | `$XDG_DATA_HOME` / `$XDG_RUNTIME_DIR` / `$XDG_DOWNLOAD_DIR` | `store.rs`, `control.rs`, `destination.rs` | **Linux requirement.** Correctly implemented. §7 |
 | A7 | `/etc/hostname` for the device name, fallback `"Fedora"` | `store.rs:108` | **Fedora detail.** §7 |
 | A8 | `/proc/self/status` for the uid | `control.rs:373` | **Linux requirement** (procfs). Acceptable; noted. |
-| A9 | systemd, and a `systemd --user` session | `anyflowd.service` | **Mostly Linux requirement**, with a real non-systemd tail. §8 |
+| A9 | systemd, and a `systemd --user` session | `omnibridged.service` | **Mostly Linux requirement**, with a real non-systemd tail. §8 |
 | A10 | GTK 4.12 + libadwaita 1.5 | `gui/Cargo.toml` features `v4_12`, `v1_5` | **Linux requirement, and the binding one.** §9 |
 | A11 | Wayland, detected by `WAYLAND_DISPLAY` | `clipboard/backend/mod.rs:176` | **Linux requirement**, incomplete for X11. §10 |
 | A12 | `wl-copy` / `wl-paste` on `PATH` | `backend/wayland.rs` | **Linux requirement**, an external runtime dependency. §10 |
 | A13 | Mutter implements no data-control protocol | ADR-0014, `backend/wayland.rs` | **GNOME detail**, not Linux. → [06](06-KDE-PLASMA-WAYLAND.md) |
 | A14 | UPower on D-Bus for the local battery | `capabilities/battery/src/upower.rs` | **Linux requirement**, already optional. |
 | A15 | RPM is the packaging format | `packaging/fedora/` | **Fedora detail.** → [07](07-LINUX-PACKAGING.md) |
-| A16 | No `.desktop` file, no icon, no autostart, GUI unpackaged | `anyflow.spec` `%files` | **Gap on all Linux.** §11 |
+| A16 | No `.desktop` file, no icon, no autostart, GUI unpackaged | `omnibridge.spec` `%files` | **Gap on all Linux.** §11 |
 
 ---
 
@@ -71,13 +71,13 @@ carries versioned `rustc-1.8x` packages. A Debian/Ubuntu build recipe must
 toolchain. Recorded as **LINUX-002** in [25](25-IMPLEMENTATION-BACKLOG.md).
 
 **Recommendation:** keep `rust-version` as a real MSRV and raise it only deliberately. It is
-the one number that decides whether a distro can build AnyFlow from its own archive.
+the one number that decides whether a distro can build OmniBridge from its own archive.
 
 ---
 
 ## 4. A2 — is `gcc` actually needed?
 
-`anyflow.spec` declares `BuildRequires: gcc`. The dependency tree suggests it may not be:
+`omnibridge.spec` declares `BuildRequires: gcc`. The dependency tree suggests it may not be:
 
 - `rustls` uses the **ring** provider. `ring` historically needs a C compiler *and* an
   assembler for its primitives. This is the likely reason `gcc` is there.
@@ -90,13 +90,13 @@ the one number that decides whether a distro can build AnyFlow from its own arch
   compiler one, and only for the GUI.
 
 So `gcc` is probably present for `ring` alone. **This matters** because it is the difference
-between "AnyFlow builds with a Rust toolchain" and "AnyFlow needs a full C toolchain on every
+between "OmniBridge builds with a Rust toolchain" and "OmniBridge needs a full C toolchain on every
 platform, including a Windows MSVC install". It is cheap to settle empirically and nobody
 should guess:
 
 ```
 # Verification, not part of this sprint:
-cargo build --release -p anyflow-daemon   # in a container with rust but no cc
+cargo build --release -p omnibridge-daemon   # in a container with rust but no cc
 ```
 
 If `ring` is the only reason, the alternative is `rustls`'s `aws-lc-rs` provider (also needs
@@ -118,12 +118,12 @@ visible in the source and cannot be changed by a transitive dependency's feature
 Consequences for the expansion:
 - No dependency on the distro's OpenSSL version, its ABI breaks, or its policy files
   (Fedora's crypto-policies could otherwise disable something under us).
-- No system trust store is consulted — AnyFlow's trust *is* the pin, so there is nothing to
+- No system trust store is consulted — OmniBridge's trust *is* the pin, so there is nothing to
   port.
 - The same TLS stack on Windows and macOS, which means the pinning verifier is proven once.
 
 The one thing to watch: `rustls` moves faster than a distro release. A distro packaging
-AnyFlow with `cargo build --locked` gets `Cargo.lock`'s versions; a distro that unbundles
+OmniBridge with `cargo build --locked` gets `Cargo.lock`'s versions; a distro that unbundles
 Rust crates (Debian does, for `librust-*` packages) may not. That is a real Debian packaging
 consideration → [05 §6](05-DEBIAN-UBUNTU-COMPATIBILITY.md).
 
@@ -131,7 +131,7 @@ consideration → [05 §6](05-DEBIAN-UBUNTU-COMPATIBILITY.md).
 
 ## 6. A5 — mDNS without Avahi
 
-`mdns-sd` runs its own responder thread. **AnyFlow does not use Avahi, and does not depend on
+`mdns-sd` runs its own responder thread. **OmniBridge does not use Avahi, and does not depend on
 it.** That is unusual for a Linux desktop application and it is the right call for a
 cross-platform product: `daemon/src/mdns.rs` works the same way on every OS the crate
 supports (upstream README: *"supports macOS, Linux and Windows"*).
@@ -159,7 +159,7 @@ The XDG handling is genuinely good and needs no change. `destination.rs` resolve
 through `$XDG_DOWNLOAD_DIR` → `user-dirs.dirs` → `$HOME/Downloads`, explicitly so a localised
 desktop gets `~/Transferências` rather than a hardcoded English path, and it refuses to run a
 shell to expand the config file. `store.rs` uses `$XDG_DATA_HOME` else `~/.local/share`.
-`control.rs` uses `$XDG_RUNTIME_DIR` with a `/tmp/anyflow-<uid>` fallback it creates 0700.
+`control.rs` uses `$XDG_RUNTIME_DIR` with a `/tmp/omnibridge-<uid>` fallback it creates 0700.
 
 The device name is the exception:
 
@@ -176,7 +176,7 @@ and containers frequently have neither. And the fallback string is a distributio
 will read as wrong on Debian, on KDE, and absurd on Windows.
 
 **Recommendation:** `gethostname(2)` (via `rustix` or `nix`, or `sd_booted`-free plain libc)
-with a neutral fallback such as `"AnyFlow Desktop"`, and on other platforms the native call
+with a neutral fallback such as `"OmniBridge Desktop"`, and on other platforms the native call
 (`GetComputerNameExW`, `SCDynamicStoreCopyComputerName`). Trivial; user-visible on the peer's
 screen. **LINUX-003**.
 
@@ -184,7 +184,7 @@ screen. **LINUX-003**.
 
 ## 8. A9 — systemd, and the honest size of the non-systemd tail
 
-`anyflowd.service` is a `systemd --user` unit and is unusually well hardened:
+`omnibridged.service` is a `systemd --user` unit and is unusually well hardened:
 `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only` with one `ReadWritePaths`,
 `SystemCallFilter=@system-service` minus `@privileged @resources @obsolete`,
 `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK`, `MemoryDenyWriteExecute`.
@@ -249,9 +249,9 @@ widen distro support by exactly one Debian release. Analysed in
 [05 §5](05-DEBIAN-UBUNTU-COMPATIBILITY.md); recommendation there is **do not lower it**.
 
 The daemon and CLI have **no GTK dependency at all**. A distro that cannot satisfy the GUI's
-floor can still ship `anyflowd` + `anyflow` and get every capability except the graphical
+floor can still ship `omnibridged` + `omnibridge` and get every capability except the graphical
 interface. That is a genuinely useful degradation path and the packaging should be built to
-allow it (separate `anyflow` and `anyflow-gui` binary packages) → [07](07-LINUX-PACKAGING.md).
+allow it (separate `omnibridge` and `omnibridge-gui` binary packages) → [07](07-LINUX-PACKAGING.md).
 
 ---
 
@@ -264,7 +264,7 @@ unimplemented:
 > X11 watch exists, read/write does not)"*
 
 This is honest and correct behaviour — the capability registers, answers peers with `FAILED`,
-and tells the local user exactly why. But it does mean **AnyFlow's clipboard does not work on
+and tells the local user exactly why. But it does mean **OmniBridge's clipboard does not work on
 an X11 session at all**, which still matters:
 
 - Ubuntu's GNOME session on hardware with the proprietary NVIDIA driver has historically
@@ -283,7 +283,7 @@ already exists; what is missing is selection ownership (read/write), which is th
 alive as the selection owner" problem `wl-copy` solves on Wayland. Recorded as **LINUX-006**,
 priority medium, and *not* on the critical path for Windows or macOS.
 
-`wl-clipboard` as a runtime dependency: `anyflow.spec` does **not** declare it, not even as a
+`wl-clipboard` as a runtime dependency: `omnibridge.spec` does **not** declare it, not even as a
 `Recommends:` (only `Recommends: upower` is there). The backend degrades gracefully and names
 the Fedora package in its error message — which is friendly on Fedora and unhelpful on
 Debian. Two fixes, both small: declare the dependency in each package, and make the message
@@ -293,14 +293,14 @@ name the *binary* rather than a distro-specific install command. **PKG-004**.
 
 ## 11. A16 — the desktop-integration gap
 
-`%files` in the RPM spec contains: `anyflowd`, `anyflow`, `anyflowd.service`, `LICENSE`,
+`%files` in the RPM spec contains: `omnibridged`, `omnibridge`, `omnibridged.service`, `LICENSE`,
 `README.md`, `docs/`. That is all.
 
 Missing, on **every** Linux distribution, not just Fedora:
 
 | Missing | Consequence |
 | --- | --- |
-| `anyflow-gui` binary | The GUI cannot be installed from a package at all |
+| `omnibridge-gui` binary | The GUI cannot be installed from a package at all |
 | `.desktop` entry | No application menu entry, no icon, no Sharesheet-equivalent |
 | Icon theme install (`hicolor`) | No icon anywhere |
 | AppStream metainfo (`.metainfo.xml`) | Invisible to GNOME Software / KDE Discover |
@@ -320,7 +320,7 @@ it; **PKG-001** and **PKG-002** in the backlog.
 3. Make `x11rb` an optional feature, so non-Linux builds do not pull it. (**ARCH-004**)
 4. Ship `.desktop`, icon, AppStream metainfo and an autostart entry; package the GUI.
    (**PKG-001**, **PKG-002**)
-5. Split packaging into `anyflow` (daemon+CLI) and `anyflow-gui`, so distros below the
+5. Split packaging into `omnibridge` (daemon+CLI) and `omnibridge-gui`, so distros below the
    libadwaita floor can still ship the useful half. (**PKG-005**)
 6. Declare `wl-clipboard` per distro and make the "not installed" message distro-neutral.
    (**PKG-004**)

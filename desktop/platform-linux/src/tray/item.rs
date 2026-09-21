@@ -61,7 +61,7 @@ type Pixmaps = Vec<(i32, i32, Vec<u8>)>;
 /// The tooltip struct, `(sa(iiay)ss)`: icon name, icon data, title, body.
 type ToolTip = (String, Pixmaps, String, String);
 
-/// AnyFlow's tray item.
+/// OmniBridge's tray item.
 pub struct StatusNotifierItem {
     activator: Arc<dyn ApplicationActivator>,
     /// The most recent XDG activation token the shell offered.
@@ -109,7 +109,7 @@ impl StatusNotifierItem {
                 tracing::info!(
                     action = action.gapplication_action(),
                     reason = %e,
-                    "could not present the AnyFlow window the tray asked for"
+                    "could not present the OmniBridge window the tray asked for"
                 );
             }
         });
@@ -164,7 +164,7 @@ impl StatusNotifierItem {
     /// prefers the name: the shell then resolves it through the icon theme,
     /// at the size and scale it is actually drawing, honouring the user's
     /// theme — which is how the Flow A ends up crisp on a 200% display
-    /// without AnyFlow knowing anything about the display. Sending pixels
+    /// without OmniBridge knowing anything about the display. Sending pixels
     /// would be sending a second copy of the mark, rasterised at a size
     /// guessed by the sender, that the brand documentation does not know
     /// exists. If a real KDE session ever proves the name does not resolve
@@ -209,7 +209,7 @@ impl StatusNotifierItem {
     /// `IconThemePath` is how an application that ships icons outside the
     /// theme tells the shell where to look, and it is a path out of this
     /// process into a shell — which on a Flatpak or a development checkout is
-    /// a path that means nothing on the other side. AnyFlow installs its icon
+    /// a path that means nothing on the other side. OmniBridge installs its icon
     /// into `hicolor` like any other application, so there is nothing to
     /// point at.
     #[zbus(property)]
@@ -234,7 +234,7 @@ impl StatusNotifierItem {
     /// False: the icon is a button first and a menu second.
     ///
     /// `ItemIsMenu = true` tells the shell that this item has no meaningful
-    /// primary action and that a left click should just open the menu. AnyFlow
+    /// primary action and that a left click should just open the menu. OmniBridge
     /// has a meaningful primary action — the Quick Panel — so the left click
     /// belongs to it and the menu stays on the secondary button.
     #[zbus(property)]
@@ -305,7 +305,7 @@ impl StatusNotifierItem {
     ///
     /// A wheel event is something a pointer does on the way past. Applications
     /// that bind it bind it to a volume or a workspace — a small, reversible,
-    /// continuous quantity. AnyFlow has no such quantity: everything it could
+    /// continuous quantity. OmniBridge has no such quantity: everything it could
     /// change is a device, a grant or a transfer, and none of those should
     /// ever be altered by a gesture the person may not have known they made.
     fn scroll(&self, _delta: i32, _orientation: String) {}

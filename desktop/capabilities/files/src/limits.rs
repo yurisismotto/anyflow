@@ -81,7 +81,7 @@ pub const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long the acceptor waits for the [`DataStreamAuth`] frame after the TLS
 /// handshake, before dropping the connection.
 ///
-/// [`DataStreamAuth`]: anyflow_proto::v1::capabilities::DataStreamAuth
+/// [`DataStreamAuth`]: omnibridge_proto::v1::capabilities::DataStreamAuth
 pub const STREAM_AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long a sender waits, after its last byte, for the receiver's verdict.

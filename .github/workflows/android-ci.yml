@@ -215,7 +215,7 @@ jobs:
 # `:app:lintDebug` currently reports 1 error and 47 warnings. The single error
 # is, audited:
 #
-#   app/src/main/java/io/github/yurisismotto/anyflow/ui/ClipboardTileService.kt:82
+#   app/src/main/java/io/github/yurisismotto/omnibridge/ui/ClipboardTileService.kt:82
 #   TileService#startActivityAndCollapse(Intent) is deprecated
 #   [StartActivityAndCollapseDeprecated]
 #

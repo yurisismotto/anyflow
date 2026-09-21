@@ -2,7 +2,7 @@
 //!
 //! # Why there is a queue at all
 //!
-//! `anyflow_core::session` awaits `Capability::on_message` before reading the
+//! `omnibridge_core::session` awaits `Capability::on_message` before reading the
 //! next frame, and every capability on a connection shares that one dispatch
 //! loop. So a `Notify` call that took four seconds because gnome-shell was
 //! wedged would hold up `battery.v1`, `files.v1` and `clipboard.v1` for four
@@ -43,7 +43,7 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use anyflow_core::notifications::NotificationId;
+use omnibridge_core::notifications::NotificationId;
 
 use crate::limits::MAX_QUEUED_WORK;
 
@@ -81,7 +81,7 @@ pub enum Work {
         origin_device_id: String,
     },
     /// A snapshot bracket marker, carried verbatim.
-    Sync(anyflow_proto::v1::capabilities::SyncMarker),
+    Sync(omnibridge_proto::v1::capabilities::SyncMarker),
     /// The screen locked or unlocked: re-evaluate what is on it.
     LockChanged(bool),
     /// Close every mirror this peer holds. Revocation, and the end of the
@@ -180,7 +180,7 @@ struct QueueState {
     high_water: usize,
 }
 
-/// Counters, for `anyflow notifications status` and for a log line. No
+/// Counters, for `omnibridge notifications status` and for a log line. No
 /// identities and no content.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct QueueStats {
@@ -316,7 +316,7 @@ impl QueueState {
 mod tests {
     use super::*;
     use crate::Incoming;
-    use anyflow_proto::v1::capabilities as pb;
+    use omnibridge_proto::v1::capabilities as pb;
 
     /// Sixteen bytes seeded from a `u16`, so a test can make more distinct
     /// identities than a byte allows — the queue ceiling is 256.

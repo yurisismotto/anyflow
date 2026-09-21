@@ -45,7 +45,7 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
-use anyflow_control::FileOfferRequest;
+use omnibridge_control::FileOfferRequest;
 
 use crate::client::{self, ApprovalUpdate};
 use crate::widgets::{self, SPACING_SM, SPACING_XS};
@@ -64,7 +64,7 @@ const ACCEPT: &str = "accept";
 ///
 /// `parent` is asked, each time an offer arrives, which window the question
 /// should appear over. It is a closure rather than a window because the
-/// attachment outlives any one of them: AnyFlow has a Quick Panel and a
+/// attachment outlives any one of them: OmniBridge has a Quick Panel and a
 /// Settings window, either may be closed, and closing one must not stop the
 /// machine being able to accept a file. When it answers `None` there is no
 /// window to ask over and the offer is left unanswered — which the daemon
@@ -97,7 +97,7 @@ where
                     // Said out loud because the alternative is a person
                     // waiting for a dialog that will never appear.
                     eprintln!(
-                        "anyflow-gui: the daemon is running with \
+                        "omnibridge-gui: the daemon is running with \
                          --accept-files-without-asking, so incoming files are \
                          accepted without a prompt."
                     );

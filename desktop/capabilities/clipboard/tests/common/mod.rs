@@ -10,14 +10,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyflow_capability_clipboard::backend::MemoryBackend;
-use anyflow_capability_clipboard::{
+use omnibridge_capability_clipboard::backend::MemoryBackend;
+use omnibridge_capability_clipboard::{
     ClipboardAuthorizer, ClipboardManager, ClipboardPolicy, CAPABILITY_ID,
 };
-use anyflow_core::capability::OutboundMessage;
-use anyflow_core::Fingerprint;
-use anyflow_proto::v1::capabilities as pb;
-use anyflow_proto::Message;
+use omnibridge_core::capability::OutboundMessage;
+use omnibridge_core::Fingerprint;
+use omnibridge_proto::v1::capabilities as pb;
+use omnibridge_proto::Message;
 use tokio::sync::{mpsc, RwLock};
 
 /// A fingerprint made of one repeated byte, so tests can name peers by digit.
@@ -96,7 +96,7 @@ impl Device {
         let backend = Arc::new(MemoryBackend::new());
         let manager = ClipboardManager::new(
             Arc::clone(&backend)
-                as Arc<dyn anyflow_capability_clipboard::backend::ClipboardBackend>,
+                as Arc<dyn omnibridge_capability_clipboard::backend::ClipboardBackend>,
             device_id,
         );
         let authorizer = TestAuthorizer::new();
@@ -131,7 +131,7 @@ pub fn update_payload(
         origin_device_id,
         text,
         sensitive,
-        anyflow_capability_clipboard::text::content_hash(text).to_vec(),
+        omnibridge_capability_clipboard::text::content_hash(text).to_vec(),
     )
 }
 

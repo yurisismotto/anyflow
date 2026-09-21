@@ -35,7 +35,7 @@ the iOS identity work**, which is the strongest argument for sequencing macOS fi
 | Shared with an extension | n/a | App Group + `kSecAttrAccessGroup` | **App Group + `kSecAttrAccessGroup`** — required for the Share Extension |
 | Synced to iCloud Keychain | **Never.** `ThisDeviceOnly` | Never | Never |
 
-The `ThisDeviceOnly` choice is not incidental. AnyFlow's identity is a *device* identity: a
+The `ThisDeviceOnly` choice is not incidental. OmniBridge's identity is a *device* identity: a
 key that synced across a user's devices would make two devices indistinguishable to a peer's
 pin, silently breaking the property that pairing binds one device. Enclave keys cannot sync
 anyway; the attribute matters for the software fallback.
@@ -55,7 +55,7 @@ mechanism is "designed for keys with low latency access, like in a PKCS#11 provi
 CryptoAPI, etc. so is blocking rather than asynchronous" (OFFICIAL DOC VERIFIED).
 
 A Secure Enclave key created with `.userPresence` or `.biometryCurrentSet` requires Face ID,
-Touch ID or a passcode **at every signature**. AnyFlow signs during the TLS handshake, and
+Touch ID or a passcode **at every signature**. OmniBridge signs during the TLS handshake, and
 handshakes happen:
 
 - when the app opens;
@@ -110,7 +110,7 @@ Four traps, all of which have bitten this project's Android implementation or it
 1. **Digest handling.** `.ecdsaSignatureMessageX962SHA256` hashes the message itself. rustls
    hands `sign()` the *unhashed* handshake transcript for TLS 1.3 signatures. Using a
    `…DigestX962SHA256` variant instead would double-hash and every handshake would fail with
-   a bad-signature alert. This is the exact class of error that made AnyFlow's Android v1 keys
+   a bad-signature alert. This is the exact class of error that made OmniBridge's Android v1 keys
    unusable — `DeviceIdentity.kt` records that they were generated without
    `KeyProperties.DIGEST_NONE` and *"are therefore unusable for TLS client authentication"*.
 2. **Signature encoding.** TLS 1.3 ECDSA signatures are DER `SEQUENCE { r, s }`, which is what
@@ -124,7 +124,7 @@ Four traps, all of which have bitten this project's Android implementation or it
    `Send + Sync`; the Rust wrapper must uphold that around a Core Foundation object.
 
 **POC-MAC-03 and POC-MAC-04 must be run as one exercise** ending in a completed handshake with
-the existing Linux `anyflowd`. Splitting them is how trap 1 survives to production.
+the existing Linux `omnibridged`. Splitting them is how trap 1 survives to production.
 
 ---
 
@@ -136,7 +136,7 @@ the existing Linux `anyflowd`. Splitting them is how trap 1 survives to producti
 | --- | --- |
 | `com.apple.security.app-sandbox` | **No** — see §6 |
 | Hardened Runtime | **Yes.** Required for notarization |
-| `com.apple.security.cs.allow-jit` / `…-unsigned-executable-memory` | **No.** AnyFlow JITs nothing; not requesting them is a security win and a notarization simplification |
+| `com.apple.security.cs.allow-jit` / `…-unsigned-executable-memory` | **No.** OmniBridge JITs nothing; not requesting them is a security win and a notarization simplification |
 | `keychain-access-groups` | Only if a helper or extension shares the keychain |
 
 ### macOS (App Store, sandboxed — deferred)
@@ -155,9 +155,9 @@ the existing Linux `anyflowd`. Splitting them is how trap 1 survives to producti
 | Item | Value |
 | --- | --- |
 | `NSLocalNetworkUsageDescription` | Required |
-| `NSBonjourServices` | `_anyflow._tcp` |
+| `NSBonjourServices` | `_omnibridge._tcp` |
 | `NSCameraUsageDescription` | QR pairing |
-| App Group | `group.io.github.yurisismotto.anyflow` — Share Extension ↔ app |
+| App Group | `group.io.github.yurisismotto.omnibridge` — Share Extension ↔ app |
 | `keychain-access-groups` | Matching, so the extension reaches the identity |
 | `UIBackgroundModes` | **None.** Deliberately empty — [11 §6.2](11-IOS-IPADOS-FEASIBILITY.md) |
 
@@ -172,7 +172,7 @@ contributor quietly adding `voip` to "fix" the background problem.
 **Recommendation: unsandboxed, Developer ID, notarized. Defer the Mac App Store, possibly
 permanently.**
 
-What the sandbox costs AnyFlow on macOS:
+What the sandbox costs OmniBridge on macOS:
 
 | Need | Under the App Sandbox |
 | --- | --- |
@@ -219,7 +219,7 @@ build (universal) → codesign --options runtime --timestamp (each binary, then 
 Every step needs macOS. **A Mac in CI is a hard requirement for macOS releases**, and
 [22](22-IMPLEMENTATION-ROADMAP.md) treats it as a hardware prerequisite rather than a detail.
 
-iOS adds App Store Connect, TestFlight and App Review. App Review considerations for AnyFlow:
+iOS adds App Store Connect, TestFlight and App Review. App Review considerations for OmniBridge:
 the local-network usage string must be honest and specific; an empty `UIBackgroundModes` avoids
 the most common rejection category for "sync" apps; and the pasteboard behaviour must not look
 like surveillance.
@@ -233,7 +233,7 @@ like surveillance.
 | Binding generator | **UniFFI** — production-proven for one-Rust-core-two-mobile-platforms (OFFICIAL DOC VERIFIED). Keeps a future Kotlin-consumes-Rust option open at no cost |
 | Alternative | Hand-written C ABI + Swift wrapper. Fewer dependencies, more work, worse async story |
 | **Callbacks Swift ← Rust** | The hard part. The Enclave signer means **Rust calls Swift synchronously on a rustls thread**. UniFFI supports callback interfaces; the constraint is that this callback must not touch the main actor, must not `await`, and must not deadlock |
-| Async | AnyFlow's core is `tokio`-based. The Rust side should own its runtime and expose a *blocking* or *callback* surface to Swift rather than trying to bridge `Future` to Swift concurrency |
+| Async | OmniBridge's core is `tokio`-based. The Rust side should own its runtime and expose a *blocking* or *callback* surface to Swift rather than trying to bridge `Future` to Swift concurrency |
 | Error surface | Errors crossing the FFI must not carry user content — the same rule `core/src/error.rs` and the `Error` protobuf message already enforce (*"MUST NOT contain user content … or secrets"*) |
 | Memory | UniFFI handles it; hand-rolled FFI must not free across the boundary |
 | Threading | rustls calls the signer on its own thread. `SecKey` use must be safe there |

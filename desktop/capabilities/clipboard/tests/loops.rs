@@ -19,12 +19,12 @@ mod common;
 
 use std::collections::HashMap;
 
-use anyflow_capability_clipboard::{limits, ClipboardPolicy, CAPABILITY_ID};
-use anyflow_core::capability::OutboundMessage;
-use anyflow_core::Fingerprint;
-use anyflow_proto::v1::capabilities as pb;
-use anyflow_proto::Message;
 use common::*;
+use omnibridge_capability_clipboard::{limits, ClipboardPolicy, CAPABILITY_ID};
+use omnibridge_core::capability::OutboundMessage;
+use omnibridge_core::Fingerprint;
+use omnibridge_proto::v1::capabilities as pb;
+use omnibridge_proto::Message;
 use tokio::sync::mpsc::Receiver;
 
 /// Fully automatic in both directions — the configuration a loop would need.

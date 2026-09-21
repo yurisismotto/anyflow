@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Deliberately says what it is, in the launcher and in AnyFlow's own
+    <!-- Deliberately says what it is, in the launcher and in OmniBridge's own
          app picker: somebody looking at a list of apps that may share
          notifications should be able to tell this one is a test fixture
          without opening it. -->
-    <string name="app_name">AnyFlow Fixture</string>
+    <string name="app_name">OmniBridge Fixture</string>
 </resources>

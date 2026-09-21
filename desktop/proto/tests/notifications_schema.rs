@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use prost_types::field_descriptor_proto::Type;
 use prost_types::{DescriptorProto, FileDescriptorSet};
 
-const PROTO_FILE: &str = "anyflow/v1/capabilities/notifications_v1.proto";
+const PROTO_FILE: &str = "omnibridge/v1/capabilities/notifications_v1.proto";
 
 fn descriptors() -> FileDescriptorSet {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -221,7 +221,7 @@ fn no_field_name_hints_at_a_prohibited_capability() {
 /// An arbitrary `bytes` field is the universal escape hatch — a serialized
 /// `Notification`, a `PendingIntent`, an icon, a reply payload all fit in one.
 /// Every legitimate `bytes` field here is a digest or an id with an exact
-/// width enforced in `anyflow_core::notifications`.
+/// width enforced in `omnibridge_core::notifications`.
 #[test]
 fn the_only_bytes_fields_are_fixed_width_identifiers() {
     const ALLOWED: &[&str] = &["notification_id", "sync_id", "group_id", "content_hash"];
@@ -258,7 +258,7 @@ fn no_message_carries_an_open_ended_container() {
             if f.r#type() == Type::Message {
                 let ty = f.type_name();
                 assert!(
-                    ty.starts_with(".anyflow.v1.capabilities."),
+                    ty.starts_with(".omnibridge.v1.capabilities."),
                     "{}.{} embeds {ty}, which is not part of this schema. \
                      notifications.v1 must not carry google.protobuf.Any, a \
                      map, or any type it does not define itself.",
@@ -512,7 +512,7 @@ fn the_new_schema_changes_no_existing_file() {
     );
 
     let file = &set.file[0];
-    assert_eq!(file.package(), "anyflow.v1.capabilities");
+    assert_eq!(file.package(), "omnibridge.v1.capabilities");
     assert_eq!(file.syntax(), "proto3");
     assert!(file.dependency.is_empty());
     assert!(

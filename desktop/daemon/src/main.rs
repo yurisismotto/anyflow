@@ -1,4 +1,4 @@
-//! `anyflowd` — the user-session daemon.
+//! `omnibridged` — the user-session daemon.
 //!
 //! Runs unprivileged under `systemd --user`. It binds a high TCP port, a Unix
 //! socket in `XDG_RUNTIME_DIR`, and an mDNS responder. It needs no root, no
@@ -6,23 +6,23 @@
 
 use std::sync::Arc;
 
-use anyflow_capability_battery::{BatteryCapability, BatteryState, LocalBattery, UPowerReader};
-use anyflow_capability_clipboard::{ClipboardCapability, ClipboardManager};
-use anyflow_capability_files::{
+use clap::Parser;
+use omnibridge_capability_battery::{BatteryCapability, BatteryState, LocalBattery, UPowerReader};
+use omnibridge_capability_clipboard::{ClipboardCapability, ClipboardManager};
+use omnibridge_capability_files::{
     Destination, FilesCapability, FilesConfig, StreamRole, TransferApproval, TransferManager,
 };
-use anyflow_capability_notifications::backend::{
+use omnibridge_capability_notifications::backend::{
     dbus::DbusSink, logind::LogindLock, LockSource, NoSink, NotificationSink, UnknownLock,
 };
-use anyflow_capability_notifications::{NotificationManager, NotificationsCapability};
-use anyflow_control::transport::ControlTransport;
-use anyflow_core::capability::CapabilityRegistry;
-use anyflow_daemon::{approval::FileApproval, listener, mdns, server, state::DaemonState};
-use clap::Parser;
+use omnibridge_capability_notifications::{NotificationManager, NotificationsCapability};
+use omnibridge_control::transport::ControlTransport;
+use omnibridge_core::capability::CapabilityRegistry;
+use omnibridge_daemon::{approval::FileApproval, listener, mdns, server, state::DaemonState};
 use tokio_rustls::TlsAcceptor;
 
 #[derive(Parser, Debug)]
-#[command(name = "anyflowd", about = "AnyFlow daemon", version)]
+#[command(name = "omnibridged", about = "OmniBridge daemon", version)]
 struct Args {
     /// Data directory (identity and trust store).
     #[arg(long)]
@@ -37,13 +37,13 @@ struct Args {
     #[arg(long)]
     no_mdns: bool,
 
-    /// Log filter, e.g. `info`, `anyflow_core=debug`.
+    /// Log filter, e.g. `info`, `omnibridge_core=debug`.
     #[arg(long, default_value = "info")]
     log: String,
 
     /// Directory for received files.
     ///
-    /// Defaults to `<XDG downloads>/AnyFlow`. Peers can never influence this:
+    /// Defaults to `<XDG downloads>/OmniBridge`. Peers can never influence this:
     /// an offer carries a filename and no path at all.
     #[arg(long)]
     download_dir: Option<std::path::PathBuf>,
@@ -86,11 +86,11 @@ async fn main() -> anyhow::Result<()> {
 
     let data_dir = args
         .data_dir
-        .unwrap_or_else(anyflow_linux::default_data_dir);
+        .unwrap_or_else(omnibridge_linux::default_data_dir);
     // The Linux adapter composes the store: XDG paths, 0600/0700 modes,
-    // `Platform::Linux`, `/etc/hostname`. `anyflow-core` decides the policy,
+    // `Platform::Linux`, `/etc/hostname`. `omnibridge-core` decides the policy,
     // this decides where and how.
-    let store = anyflow_linux::open_store(&data_dir)?;
+    let store = omnibridge_linux::open_store(&data_dir)?;
 
     // A `--port` override applies to this run only. Silently rewriting the
     // user's stored configuration from a command-line flag is a surprise
@@ -136,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
 
     // files.v1. Note what is NOT here: an entry in `auto_grant`. Writing a
     // file to someone's disk is a side effect, so the grant is explicit
-    // (`anyflow grant <device> files.v1`) per ADR-0008.
+    // (`omnibridge grant <device> files.v1`) per ADR-0008.
     let destination = match args.download_dir {
         Some(dir) => Destination::new(dir),
         None => Destination::default_location(),
@@ -146,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
         max_file_bytes: args
             .max_file_mib
             .map(|mib| mib.saturating_mul(1024 * 1024))
-            .unwrap_or(anyflow_capability_files::limits::DEFAULT_MAX_FILE_BYTES),
+            .unwrap_or(omnibridge_capability_files::limits::DEFAULT_MAX_FILE_BYTES),
         ..FilesConfig::default()
     };
     if let Err(e) = destination.prepare() {
@@ -184,16 +184,16 @@ async fn main() -> anyhow::Result<()> {
     // that can write your clipboard can also read what you paste next, and
     // ADR-0008 requires a side effect that large to be granted by hand.
     //
-    // The backend is probed once here so that `anyflow clipboard status` can
+    // The backend is probed once here so that `omnibridge clipboard status` can
     // report what this session can actually do — including, on GNOME, that it
     // cannot report clipboard changes at all — instead of each command
     // discovering it separately.
-    let clipboard_backend = anyflow_capability_clipboard::backend::detect();
+    let clipboard_backend = omnibridge_capability_clipboard::backend::detect();
     if let Err(why) = clipboard_backend.watch_availability() {
         tracing::info!(
             reason = %why,
             "clipboard auto-send is unavailable on this session; manual \
-             `anyflow clipboard send` still works"
+             `omnibridge clipboard send` still works"
         );
     }
     let clipboard = ClipboardManager::new(clipboard_backend, device_id.clone());
@@ -205,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
     // ADR-0015 §4 requires that to be granted by hand.
     //
     // The two platform seams are probed once, here, so that
-    // `anyflow notifications status` reports what this session can actually do
+    // `omnibridge notifications status` reports what this session can actually do
     // instead of each command discovering it separately — and so that the
     // first role announcement is a fact rather than a hope.
     //
@@ -258,7 +258,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(capabilities = ?registry.advertised(), "capabilities registered");
 
     // ---- TLS --------------------------------------------------------------
-    let tls_config = anyflow_core::tls::server_config(store.identity())?;
+    let tls_config = omnibridge_core::tls::server_config(store.identity())?;
     let acceptor = TlsAcceptor::from(tls_config);
 
     let state = Arc::new(
@@ -272,7 +272,7 @@ async fn main() -> anyhow::Result<()> {
     // The state is the authorizer: every grant question is answered from the
     // trust store, freshly, rather than from a set captured at handshake time.
     transfers
-        .set_authorizer(Arc::clone(&state) as Arc<dyn anyflow_capability_files::FilesAuthorizer>)
+        .set_authorizer(Arc::clone(&state) as Arc<dyn omnibridge_capability_files::FilesAuthorizer>)
         .await;
     let _reaper = transfers.spawn_reaper();
 
@@ -281,7 +281,7 @@ async fn main() -> anyhow::Result<()> {
     // captured at handshake time.
     clipboard
         .set_authorizer(
-            Arc::clone(&state) as Arc<dyn anyflow_capability_clipboard::ClipboardAuthorizer>
+            Arc::clone(&state) as Arc<dyn omnibridge_capability_clipboard::ClipboardAuthorizer>
         )
         .await;
     // Supervised, and idle until some peer actually asks for auto-send: with
@@ -295,9 +295,8 @@ async fn main() -> anyhow::Result<()> {
     // so after that point this is the only thing between a revoked device and
     // the screen.
     notifications
-        .set_authorizer(
-            Arc::clone(&state) as Arc<dyn anyflow_capability_notifications::NotificationAuthorizer>
-        )
+        .set_authorizer(Arc::clone(&state)
+            as Arc<dyn omnibridge_capability_notifications::NotificationAuthorizer>)
         .await;
     // The three platform signals: the desktop closing a notification, the
     // notification server appearing or going away, and the session locking.
@@ -317,11 +316,11 @@ async fn main() -> anyhow::Result<()> {
     // The control endpoint comes from the adapter, through the
     // `ControlTransport` seam. A failure to bind because another agent
     // already owns the endpoint is fatal and is *not* worked around by
-    // choosing a different name — see `anyflow_control::transport`.
-    let transport = anyflow_linux::UnixControlTransport::default_endpoint();
+    // choosing a different name — see `omnibridge_control::transport`.
+    let transport = omnibridge_linux::UnixControlTransport::default_endpoint();
     let control_listener = match ControlTransport::bind(&transport) {
         Ok(l) => l,
-        Err(e @ anyflow_control::transport::BindError::AlreadyOwned { .. }) => {
+        Err(e @ omnibridge_control::transport::BindError::AlreadyOwned { .. }) => {
             anyhow::bail!("{e}");
         }
         Err(e) => return Err(e.into()),
@@ -353,7 +352,7 @@ async fn main() -> anyhow::Result<()> {
     // an application in its system tray. The daemon owns it because the daemon
     // is the process that is always here: the GUI is two windows a person
     // opens and closes, and keeping one alive forever to hold an icon would
-    // have made AnyFlow a product with two resident processes.
+    // have made OmniBridge a product with two resident processes.
     //
     // Held, never awaited, and deliberately **not** in the `select!` below.
     // Everything in that race is load-bearing — the network listener, the
@@ -368,7 +367,7 @@ async fn main() -> anyhow::Result<()> {
     // session, which is most of them — this publishes the item, finds no host,
     // says so once, and then waits event-driven for one to appear. It never
     // polls.
-    let _tray = anyflow_linux::tray::spawn(anyflow_linux::tray::ActivatorChoice::SessionBus);
+    let _tray = omnibridge_linux::tray::spawn(omnibridge_linux::tray::ActivatorChoice::SessionBus);
 
     let net = tokio::spawn(listener::run(bound.listeners, acceptor, Arc::clone(&state)));
     let ctl = tokio::spawn(server::run(control_listener, Arc::clone(&state)));

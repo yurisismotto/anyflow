@@ -5,7 +5,7 @@
 //!
 //! The tray names four things that live somewhere else: the GtkApplication's
 //! id, the desktop entry, the D-Bus service file and the icon in the hicolor
-//! theme. `anyflow-linux` cannot depend on `anyflow-gui` — the dependency runs
+//! theme. `omnibridge-linux` cannot depend on `omnibridge-gui` — the dependency runs
 //! the other way, and it must, because the daemon would otherwise link GTK —
 //! so the agreement cannot be checked by the compiler. It is checked here, by
 //! reading the other crate's files.
@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyflow_linux::tray::model::{TrayAction, DESKTOP_APP_ID, ICON_NAME, ITEM_ID};
+use omnibridge_linux::tray::model::{TrayAction, DESKTOP_APP_ID, ICON_NAME, ITEM_ID};
 
 fn gui() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../gui")
@@ -35,7 +35,7 @@ fn app_id_from_gui_source() -> String {
     read("src/lib.rs")
         .lines()
         .find(|l| l.trim_start().starts_with("const APP_ID:"))
-        .expect("anyflow-gui declares APP_ID")
+        .expect("omnibridge-gui declares APP_ID")
         .split('"')
         .nth(1)
         .expect("APP_ID is a string literal")
@@ -99,7 +99,7 @@ fn the_tray_activates_a_bus_name_the_session_bus_can_start() {
         "the bus cannot start the name the tray calls"
     );
     // Cold activation is the case the tray exists for: a freshly booted
-    // session where `anyflowd` runs as a user service and no GUI process
+    // session where `omnibridged` runs as a user service and no GUI process
     // exists at all.
     assert!(key(&service, "[D-BUS Service]", "Exec")
         .expect("Exec")
@@ -114,7 +114,7 @@ fn every_tray_action_is_an_action_the_gui_exports() {
     let constant = |name: &str| {
         lib.lines()
             .find(|l| l.trim_start().starts_with(&format!("pub const {name}:")))
-            .unwrap_or_else(|| panic!("anyflow-gui declares {name}"))
+            .unwrap_or_else(|| panic!("omnibridge-gui declares {name}"))
             .split('"')
             .nth(1)
             .expect("a string literal")
@@ -150,7 +150,7 @@ fn every_tray_action_is_an_action_the_gui_exports() {
 
 #[test]
 fn the_daemon_starts_the_tray_and_does_not_race_it_against_anything() {
-    // The supervision decision, asserted where it can be read. `anyflowd`
+    // The supervision decision, asserted where it can be read. `omnibridged`
     // races the network listener, the control server and `ctrl_c` in a
     // `select!`, and the first of those to finish ends the process. The tray
     // must not be in that race: it is convenience, and convenience must not be
@@ -161,7 +161,7 @@ fn the_daemon_starts_the_tray_and_does_not_race_it_against_anything() {
     .expect("the daemon's main is readable");
 
     assert!(
-        main.contains("anyflow_linux::tray::spawn("),
+        main.contains("omnibridge_linux::tray::spawn("),
         "the daemon no longer starts the tray"
     );
 
@@ -176,7 +176,7 @@ fn the_daemon_starts_the_tray_and_does_not_race_it_against_anything() {
     );
 
     // And it is not spawning a process. The whole point of activating over
-    // the bus is that the GUI does not inherit `anyflowd`'s sandbox.
+    // the bus is that the GUI does not inherit `omnibridged`'s sandbox.
     for forbidden in [
         "Command::new",
         "std::process::Command",

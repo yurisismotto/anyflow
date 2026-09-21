@@ -1,8 +1,24 @@
-# AnyFlow
+# OmniBridge
 
-**One flow. Any device.**
+**One bridge. Any device.**
 
 Open-source, local-first device continuity.
+
+> **Renamed.** This project was called **AnyFlow** (*One flow. Any device.*)
+> until it was renamed to **OmniBridge** before the public v1.0.0 release.
+> The rename went all the way down — binaries, application ids, ALPN, mDNS,
+> the QR prefix, the protobuf namespace and the pairing-proof domain — with no
+> compatibility aliases, because there is no released version to stay
+> compatible with. **An existing AnyFlow build cannot talk to an OmniBridge
+> build and a development pairing must be redone once.**
+> See [ADR-0018](docs/adr/ADR-0018-rename-to-omnibridge.md) for the decision
+> and [the migration note](docs/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md) for what
+> to do about an existing checkout or test device.
+>
+> The certification reports in this repository were written under the old
+> name and keep their original wording; they are evidence, not documentation.
+> The repository URL is still `github.com/yurisismotto/anyflow` until it is
+> renamed by hand.
 
 No required cloud. No vendor lock-in. No telemetry by default.
 
@@ -26,7 +42,7 @@ keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 > Clipboard sharing is, precisely: **automatic desktop → Android sync**
 > (opt-in, per device) and **manual Android → desktop send**. It is not
 > "automatic bidirectional clipboard", and saying so would be wrong: Android
-> 10+ refuses clipboard reads to an app without input focus, and AnyFlow uses
+> 10+ refuses clipboard reads to an app without input focus, and OmniBridge uses
 > none of the techniques that defeat that. See
 > [docs/architecture/CLIPBOARD.md](docs/architecture/CLIPBOARD.md).
 
@@ -49,7 +65,7 @@ keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 ## Layout
 
 ```
-anyflow/
+omnibridge/
 ├── protocol/proto/            Wire format — compiled by BOTH implementations
 ├── desktop/                   Rust workspace
 │   ├── proto/                 Generated protobuf types
@@ -57,9 +73,9 @@ anyflow/
 │   ├── capabilities/battery/  battery.v1
 │   ├── capabilities/files/    files.v1 — transfers, filename safety, stream auth
 │   ├── capabilities/clipboard/ clipboard.v1 — text rules, policy, loop suppression
-│   ├── daemon/                anyflowd
-│   ├── cli/                   anyflow
-│   └── gui/                   anyflow-gui — GTK4 / libadwaita
+│   ├── daemon/                omnibridged
+│   ├── cli/                   omnibridge
+│   └── gui/                   omnibridge-gui — GTK4 / libadwaita
 ├── android/                   Kotlin + Compose app
 ├── browser-extension/         (placeholder)
 ├── packaging/fedora/          systemd user unit, RPM spec
@@ -136,16 +152,16 @@ sudo apt install wl-clipboard                    # clipboard, at runtime
 sudo apt install upower                          # battery.v1, optional
 ```
 
-The package names differ; the runtime binary AnyFlow actually looks for is
+The package names differ; the runtime binary OmniBridge actually looks for is
 called `wl-copy` on all of them, and the package carrying it is called
 `wl-clipboard` on all of them.
 
 ### The Rust toolchain, per distribution
 
-**AnyFlow requires Rust ≥ 1.88.** That number is not a preference: the
+**OmniBridge requires Rust ≥ 1.88.** That number is not a preference: the
 committed `Cargo.lock` contains crates (`time`, `rcgen`, `zbus`) that declare
 it, so an older toolchain fails in Cargo's resolver before compiling a line of
-AnyFlow. The distribution's own `rustc` package is **not** required — it is
+OmniBridge. The distribution's own `rustc` package is **not** required — it is
 simply the most convenient source when it is new enough.
 
 | Distribution | Its default `rustc` | Enough? | What to use |
@@ -162,7 +178,7 @@ cd desktop
 cargo build --release
 cargo test --workspace          # 717 tests
 
-./target/release/anyflowd   # foreground, or install the user unit
+./target/release/omnibridged   # foreground, or install the user unit
 ```
 
 As a service. The unit is a **user** unit — the identity key lives 0600 in
@@ -172,19 +188,19 @@ unchanged on all four targets; only the directory it currently sits in is
 Fedora-named, which is a packaging debt rather than a dependency:
 
 ```bash
-install -Dm0644 packaging/fedora/anyflowd.service \
-    ~/.config/systemd/user/anyflowd.service
-systemctl --user enable --now anyflowd.service
+install -Dm0644 packaging/fedora/omnibridged.service \
+    ~/.config/systemd/user/omnibridged.service
+systemctl --user enable --now omnibridged.service
 ```
 
 Then:
 
 ```bash
-anyflow status              # identity, port, capabilities, live connections
-anyflow pair                # opens a pairing window and prints a QR code
-anyflow devices             # paired devices
-anyflow ping <device>       # round-trip over the live session
-anyflow unpair <device>     # revoke; takes effect immediately
+omnibridge status              # identity, port, capabilities, live connections
+omnibridge pair                # opens a pairing window and prints a QR code
+omnibridge devices             # paired devices
+omnibridge ping <device>       # round-trip over the live session
+omnibridge unpair <device>     # revoke; takes effect immediately
 ```
 
 File transfer is a separately granted capability and is **never** granted
@@ -192,14 +208,14 @@ automatically — writing a file to your disk is a side effect
 ([ADR-0008](docs/adr/ADR-0008-capability-architecture.md)):
 
 ```bash
-anyflow grant <device> files.v1     # allow file transfer with this device
-anyflow send <device> ~/photo.jpg   # offer a file; streams progress
-anyflow transfers                   # everything since the daemon started
-anyflow cancel <transfer-prefix>    # stop one mid-flight
-anyflow revoke <device> files.v1    # withdraw; stops transfers already running
+omnibridge grant <device> files.v1     # allow file transfer with this device
+omnibridge send <device> ~/photo.jpg   # offer a file; streams progress
+omnibridge transfers                   # everything since the daemon started
+omnibridge cancel <transfer-prefix>    # stop one mid-flight
+omnibridge revoke <device> files.v1    # withdraw; stops transfers already running
 ```
 
-Received files land in `<XDG downloads>/AnyFlow`. An existing name is never
+Received files land in `<XDG downloads>/OmniBridge`. An existing name is never
 overwritten — `photo.jpg` becomes `photo (1).jpg`. See
 [docs/architecture/FILES.md](docs/architecture/FILES.md).
 
@@ -207,13 +223,13 @@ Clipboard sharing is likewise never granted automatically — a device that can
 write your clipboard can also see what you paste next:
 
 ```bash
-anyflow grant <device> clipboard.v1        # allow clipboard sharing
-anyflow clipboard status                   # what works here, and per-device policy
-anyflow clipboard send <device>            # send the current clipboard, now
-anyflow clipboard send <device> --sensitive  # ask the phone to mark it sensitive
-anyflow clipboard apply <device>           # apply a clip that is waiting
-anyflow clipboard auto-send <device> on    # push every local copy to that device
-anyflow clipboard auto-receive <device> on # apply its clips as they arrive
+omnibridge grant <device> clipboard.v1        # allow clipboard sharing
+omnibridge clipboard status                   # what works here, and per-device policy
+omnibridge clipboard send <device>            # send the current clipboard, now
+omnibridge clipboard send <device> --sensitive  # ask the phone to mark it sensitive
+omnibridge clipboard apply <device>           # apply a clip that is waiting
+omnibridge clipboard auto-send <device> on    # push every local copy to that device
+omnibridge clipboard auto-receive <device> on # apply its clips as they arrive
 ```
 
 Granting is one decision; automation is another. A freshly granted device can
@@ -224,7 +240,7 @@ is never written to disk and never logged, at any level. See
 [docs/architecture/CLIPBOARD.md](docs/architecture/CLIPBOARD.md).
 
 The daemon has no terminal, so it cannot prompt: it **declines** incoming
-files and logs why. `anyflowd --accept-files-without-asking` is the documented
+files and logs why. `omnibridged --accept-files-without-asking` is the documented
 escape hatch for an unattended test rig.
 
 `<device>` is a device id or a fingerprint prefix of at least 8 characters. An
@@ -240,7 +256,7 @@ Needs JDK 21 and Android SDK platform 35. See
 
 ## Pairing
 
-1. On the computer: `anyflow pair`. A QR code appears; it is valid for 120
+1. On the computer: `omnibridge pair`. A QR code appears; it is valid for 120
    seconds
    and works once.
 2. On the phone: **Scan pairing code**.
@@ -278,7 +294,7 @@ cd desktop && cargo test --workspace              # 292 tests
 cd android && ./gradlew :app:testDebugUnitTest    # 206 tests
 
 # Touches the real system clipboard, so it is opt-in:
-cd desktop && cargo test -p anyflow-capability-clipboard --test real_backend \
+cd desktop && cargo test -p omnibridge-capability-clipboard --test real_backend \
     -- --ignored --test-threads=1                 # 9 tests
 
 # On a connected Android device:
@@ -305,21 +321,21 @@ implementations cannot drift apart silently:
 ## Known limitations
 
 * **`files.v1` has not run against a physical phone.** It is exercised end to
-  end against the real `anyflowd` binary over real TLS, in both directions,
+  end against the real `omnibridged` binary over real TLS, in both directions,
   with SHA-256 verification — but by `fake_phone`, which is a test client and
   must never be reported as a phone. The Android send and receive paths
   (Sharesheet intent handling, `ContentResolver` reads, MediaStore writes) are
   covered by unit and instrumented tests but have not been run on a device.
 * **Widening a capability grant takes effect on the next connection.** A
   session's effective capability set is fixed at handshake time, so after
-  `anyflow grant … files.v1` the phone must reconnect. *Narrowing* is
+  `omnibridge grant … files.v1` the phone must reconnect. *Narrowing* is
   immediate, including against a transfer already running — the asymmetry
   fails in the safe direction, but it is a rough edge.
 * **No resume.** A transfer interrupted by a disconnect fails and its partial
   file is deleted. The receiver already knows the expected size and digest, so
   resume is tractable, but it needs durable partial state that this version
   deliberately does not keep.
-* **One file per share.** `ACTION_SEND_MULTIPLE` is registered so AnyFlow
+* **One file per share.** `ACTION_SEND_MULTIPLE` is registered so OmniBridge
   appears for multi-select, but only the first item is sent.
 * The trust store's persistence path is not covered by the local JVM unit
   tests: it needs a real `Context` and `filesDir`. Its pure logic is tested,
@@ -328,7 +344,7 @@ implementations cannot drift apart silently:
   Android 10+ refuses clipboard reads to an app without input focus, and every
   way around it is forbidden or user-hostile. Android → desktop is a deliberate
   action: the Send clipboard button, the Quick Settings tile, or sharing text
-  to AnyFlow. Verified on an SM-X620 (Android 16): background read REFUSED,
+  to OmniBridge. Verified on an SM-X620 (Android 16): background read REFUSED,
   focused read ALLOWED, background `setPrimaryClip` APPLIED.
 * **The desktop clipboard needs an unlocked session.** On GNOME Wayland,
   `wl-copy` and `wl-paste` block behind the lock screen rather than failing.
@@ -338,19 +354,19 @@ implementations cannot drift apart silently:
   phone marks as a password or other secret is written with `wl-copy
   --sensitive`, which tells clipboard managers to keep it out of their
   history. That option arrived in wl-clipboard 2.3.0, and Ubuntu 24.04,
-  Ubuntu 26.04 and Debian 13 all ship 2.2.1 — so on those three, **AnyFlow
+  Ubuntu 26.04 and Debian 13 all ship 2.2.1 — so on those three, **OmniBridge
   refuses such a clip rather than writing it unmarked**, because an unmarked
   password silently persisted in a history file is the worse outcome. Ordinary
-  clipboard sharing is unaffected. `anyflow clipboard status` and the GUI's
+  clipboard sharing is unaffected. `omnibridge clipboard status` and the GUI's
   clipboard page both say so up front rather than at the moment a password
-  fails to arrive. AnyFlow decides this by asking `wl-copy --help` for the
+  fails to arrive. OmniBridge decides this by asking `wl-copy --help` for the
   option, never by reading its version — Fedora's `2.2.1^git…` has the flag
   and Debian's `2.2.1` does not, with the same version string.
 * **Clipboard auto-send needs a compositor that can report clipboard changes.**
-  GNOME implements neither wlr- nor ext-data-control, so AnyFlow watches via
+  GNOME implements neither wlr- nor ext-data-control, so OmniBridge watches via
   XFIXES on the Xwayland `CLIPBOARD` selection instead (ADR-0014). Without
   Xwayland there is no watcher and `auto-send` degrades to manual sending,
-  which `anyflow clipboard status` reports.
+  which `omnibridge clipboard status` reports.
 * The desktop private key is protected by filesystem permissions, not by
   hardware. TPM2 sealing is the top security debt
   ([ADR-0006](docs/adr/ADR-0006-device-identity-and-pairing.md)).

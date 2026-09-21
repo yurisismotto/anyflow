@@ -1,4 +1,4 @@
-# AnyFlow — `notifications.v1` research and specification
+# OmniBridge — `notifications.v1` research and specification
 
 **Mirror the phone's notifications onto the desktop. Dismiss them once.**
 
@@ -18,7 +18,7 @@
 
 The answer to one question:
 
-> *What does AnyFlow need to define before it can mirror Android notifications
+> *What does OmniBridge need to define before it can mirror Android notifications
 > to a Linux desktop without an unresolved architectural or privacy ambiguity?*
 
 It is research, a specification and a plan. **No production source file was

@@ -1,4 +1,4 @@
-//! The AnyFlow desktop component set.
+//! The OmniBridge desktop component set.
 //!
 //! Every screen is assembled from these, so a card, a status or a button
 //! cannot look one way on the dashboard and another on the pairing page. The
@@ -108,8 +108,8 @@ impl Status {
     /// a session that has gone quiet is exactly the case where anything the
     /// device last told us is history, and showing it as live is the bug
     /// `DeviceState` was introduced to prevent.
-    pub fn from_device_state(state: anyflow_control::DeviceState) -> Self {
-        use anyflow_control::DeviceState as D;
+    pub fn from_device_state(state: omnibridge_control::DeviceState) -> Self {
+        use omnibridge_control::DeviceState as D;
         match state {
             D::Connected => Status::Connected,
             D::Stale => Status::Stale,
@@ -348,9 +348,9 @@ pub fn security_notice(title_text: &str, body_text: &str, caution: bool) -> gtk:
 
 /// Nothing here yet.
 ///
-/// Uses the connection ribbon rather than a stock illustration: the mark
-/// already means "two devices, one flow", which is what the person is being
-/// invited to create.
+/// Uses the OmniBridge mark rather than a stock illustration: the mark already
+/// means "one bridge, any device", which is what the person is being invited to
+/// create.
 pub fn empty_state(title_text: &str, subtitle_text: &str) -> gtk::Box {
     let b = column(space::SM);
     b.set_halign(gtk::Align::Center);
@@ -359,8 +359,8 @@ pub fn empty_state(title_text: &str, subtitle_text: &str) -> gtk::Box {
     b.set_margin_top(space::XXL);
     b.set_margin_bottom(space::XXL);
 
-    let art = gtk::Picture::for_resource("/io/github/yurisismotto/anyflow/ribbon-connection.svg");
-    art.set_size_request(200, 72);
+    let art = gtk::Picture::for_resource("/io/github/yurisismotto/omnibridge/omnibridge-mark.svg");
+    art.set_size_request(200, 155);
     art.set_can_shrink(true);
     // Decoration: the text below says the same thing.
     art.set_accessible_role(gtk::AccessibleRole::Presentation);
@@ -379,33 +379,21 @@ pub fn empty_state(title_text: &str, subtitle_text: &str) -> gtk::Box {
     b
 }
 
-/// The Flow A — the AnyFlow mark.
+/// The OmniBridge mark.
 ///
-/// One mark, everywhere. The product used to carry two: a filled "A" for
-/// institutional use and a teal-to-violet ribbon between two dots as the
-/// product and application icon. The ribbon-and-dots was the weaker half of
-/// that pair — at 16 px it reduces to two blobs and a hairline, it has no
-/// letterform to hold on to, and "a line between two dots" is the single most
-/// crowded space in this category. It is no longer the primary mark.
+/// One mark, everywhere: this is `docs/design/assets/omnibridge-mark.svg`, the
+/// same artwork the launcher icon wears on Android and the same one the tray and
+/// the application icon wear here. `desktop/gui/tests/brand_assets.rs` asserts
+/// that this is the file being drawn.
 ///
-/// What replaced it is *one continuous ribbon that draws an A*: up the right
-/// leg to the apex, down the left leg, round a hook at the foot, and out
-/// again as the crossbar. Continuity is the brand idea and here it is
-/// literal — the mark is a single unbroken path, so there is nothing to come
-/// apart at small sizes and nothing that depends on colour to be read.
-///
-/// The two-node ribbon survives where it is actually about a connection —
-/// [`empty_state`]'s illustration — which is the job it was always best at.
+/// There is no second, heavier cut for small sizes any more, and that is a
+/// property of the artwork rather than an omission. The mark the AnyFlow era
+/// drew was a *stroked* ribbon, so below about 24 px its 8-unit stroke fell
+/// under a pixel and a half and greyed out, which is why a thicker variant had
+/// to exist. The OmniBridge mark is filled, so it has no stroke to thin: it
+/// scales down as area, not as line weight, and one file answers for every size.
 pub fn brand_mark(size: i32) -> gtk::Picture {
-    // Below about 24 px the 8-unit stroke lands under a pixel and a half and
-    // starts to grey out, so a slightly heavier cut of the same geometry
-    // takes over. Same path, same terminals, one step of weight.
-    let asset = if size < 24 {
-        "logo-flow-a-small.svg"
-    } else {
-        "logo-flow-a.svg"
-    };
-    let p = gtk::Picture::for_resource(&format!("/io/github/yurisismotto/anyflow/{asset}"));
+    let p = gtk::Picture::for_resource("/io/github/yurisismotto/omnibridge/omnibridge-mark.svg");
     p.set_size_request(size, size);
     p.set_can_shrink(true);
     p.set_accessible_role(gtk::AccessibleRole::Presentation);

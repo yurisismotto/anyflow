@@ -2,20 +2,20 @@
 
 | Field | Value |
 | --- | --- |
-| **Title** | The AnyFlow Agent: one concept, five lifetimes |
+| **Title** | The OmniBridge Agent: one concept, five lifetimes |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
-| **Scope** | How AnyFlow stays running on each platform, and what "running" means there. |
+| **Scope** | How OmniBridge stays running on each platform, and what "running" means there. |
 | **Decision status** | PROPOSED |
 | **Evidence** | REPO VERIFIED for Linux and Android; OFFICIAL DOC VERIFIED for Windows/Apple mechanisms. |
-| **⚠ Verification update** | The **AnyFlow Agent** concept is confirmed, and two lifetimes are sharpened. **Windows:** a Session 0 service *cannot* see the user's clipboard (*"Services cannot directly interact with a user as of Windows Vista"*, noninteractive window station) — and `AddClipboardFormatListener` needs an `HWND` **and a message pump**, so the agent is a windowed process. **macOS:** *"the exception for `launchd` daemons doesn't apply to `launchd` agents"* — a per-user agent **does** face the Local Network prompt (macOS 15+), and must **not exit** on a network failure (Apple FB16131937). See [26 §9.1, §V-05](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). |
+| **⚠ Verification update** | The **OmniBridge Agent** concept is confirmed, and two lifetimes are sharpened. **Windows:** a Session 0 service *cannot* see the user's clipboard (*"Services cannot directly interact with a user as of Windows Vista"*, noninteractive window station) — and `AddClipboardFormatListener` needs an `HWND` **and a message pump**, so the agent is a windowed process. **macOS:** *"the exception for `launchd` daemons doesn't apply to `launchd` agents"* — a per-user agent **does** face the Local Network prompt (macOS 15+), and must **not exit** on a network failure (Apple FB16131937). See [26 §9.1, §V-05](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). |
 | **Related documents** | [08](08-WINDOWS-FEASIBILITY.md), [10](10-MACOS-FEASIBILITY.md), [11](11-IOS-IPADOS-FEASIBILITY.md), [03](03-PLATFORM-CAPABILITY-MATRIX.md) |
 
 ---
 
 ## 1. Why this document exists
 
-The word "daemon" appears throughout AnyFlow's code and documentation. It is accurate on Linux
+The word "daemon" appears throughout OmniBridge's code and documentation. It is accurate on Linux
 and misleading everywhere else. Carrying it forward would produce, in order: a Windows Service
 that cannot see the clipboard, a macOS `LaunchDaemon` running as root with no user pasteboard,
 and an iOS design that assumes a process which the OS will not let exist.
@@ -28,7 +28,7 @@ word, not a universal one.
 
 ## 2. The abstraction
 
-> **AnyFlow Agent** — the process that owns the device identity, holds the trust store,
+> **OmniBridge Agent** — the process that owns the device identity, holds the trust store,
 > maintains authenticated sessions with paired peers, and hosts the capability handlers. It
 > runs **as one specific human user, unprivileged, inside that user's interactive context**,
 > for as long as the platform permits.
@@ -76,7 +76,7 @@ should be documented rather than smoothed over.
 user-session agent gets nothing: if it crashes it is gone until next login. Options are a
 watchdog (another process — more surface), relying on the UI to relaunch it, or simply not
 crashing and logging when it does. **Recommendation: no watchdog in v1.** Log to the Event Log,
-let the UI offer "start AnyFlow", and treat repeated crashes as the bug they are.
+let the UI offer "start OmniBridge", and treat repeated crashes as the bug they are.
 **WIN-010.**
 
 ---
@@ -135,14 +135,14 @@ Recommendation, applied consistently in new code and docs:
 
 | Context | Term |
 | --- | --- |
-| Abstract concept | **AnyFlow Agent** |
-| Linux process | `anyflowd` (keep — it is a daemon there, and changing it breaks users' unit files) |
-| Windows process | `AnyFlowAgent.exe` |
+| Abstract concept | **OmniBridge Agent** |
+| Linux process | `omnibridged` (keep — it is a daemon there, and changing it breaks users' unit files) |
+| Windows process | `OmniBridgeAgent.exe` |
 | macOS process | the app's bundled login-item helper |
 | Android | `ConnectionService` (keep) |
 | iOS | *there is no agent* — say so plainly |
 
-Do **not** rename `anyflowd` or the systemd unit. The cost of breaking existing installations
+Do **not** rename `omnibridged` or the systemd unit. The cost of breaking existing installations
 exceeds the benefit of terminological purity, and the Linux name is accurate.
 
 ---
@@ -151,7 +151,7 @@ exceeds the benefit of terminological purity, and the Linux name is accurate.
 
 | ID | Item | Priority |
 | --- | --- | --- |
-| **ARCH-003** | Split `anyflow-daemon` into `anyflow-runtime` (portable) + `anyflow-linux` | Wave 0 |
+| **ARCH-003** | Split `omnibridge-daemon` into `omnibridge-runtime` (portable) + `omnibridge-linux` | Wave 0 |
 | **ARCH-008** | Document the Agent concept and its per-platform lifetimes in `docs/architecture/` | Low |
 | **WIN-010** | Decide crash-recovery policy for the Windows agent (recommendation: none, log it) | Medium |
 | **LINUX-005** | XDG autostart entry alongside the systemd unit | Medium |

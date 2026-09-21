@@ -8,13 +8,13 @@
 
 use std::collections::BTreeSet;
 
-use anyflow_core::capability::CapabilityRegistry;
-use anyflow_core::notifications::{
+use omnibridge_core::capability::CapabilityRegistry;
+use omnibridge_core::notifications::{
     self as notif, PeerRoles, Rejection, Role, RolesRejection, Snapshot, SnapshotRejection,
     SnapshotStep,
 };
-use anyflow_proto::v1::capabilities as pb;
-use anyflow_proto::Message;
+use omnibridge_proto::v1::capabilities as pb;
+use omnibridge_proto::Message;
 
 const SYNTHETIC_DEVICE: &str = "0123456789abcdef0123456789abcdef";
 
@@ -74,7 +74,7 @@ fn the_capability_id_is_the_canonical_one() {
 
 /// N0 defines the id and registers nothing. The Android source (N1) and the
 /// Linux sink (N2) add the two implementations; until then the id must never
-/// reach a `HELLO`, or a peer would be told AnyFlow can mirror notifications
+/// reach a `HELLO`, or a peer would be told OmniBridge can mirror notifications
 /// when no code exists to do it.
 #[test]
 fn nothing_advertises_notifications_v1_after_n0() {
@@ -297,7 +297,7 @@ fn every_body_round_trips() {
     }
 }
 
-/// Posted and Updated are one message on purpose: no platform AnyFlow targets
+/// Posted and Updated are one message on purpose: no platform OmniBridge targets
 /// has a separate update operation, so the same identity carrying different
 /// content is the whole update mechanism.
 #[test]
@@ -563,7 +563,9 @@ fn optional_digests_are_absent_or_exact() {
 /// the ceiling is refused for being past the ceiling.
 #[test]
 fn the_message_ceiling_is_enforced_and_sits_below_the_frame_limit() {
-    assert!((notif::MAX_NOTIFICATION_BYTES as u64) < anyflow_core::framing::MAX_FRAME_LEN as u64);
+    assert!(
+        (notif::MAX_NOTIFICATION_BYTES as u64) < omnibridge_core::framing::MAX_FRAME_LEN as u64
+    );
 
     let control = pb::NotificationControl {
         body: Some(pb::notification_control::Body::Upsert(upsert(0x16))),
@@ -886,7 +888,7 @@ fn a_dismiss_for_a_third_devices_notification_is_representable_and_refusable() {
 ///
 /// If this changes, the wire format changed. That is a protocol decision, not
 /// a test to update — see ADR-0016 and the field-number pins in
-/// `anyflow-proto`'s `notifications_schema` test.
+/// `omnibridge-proto`'s `notifications_schema` test.
 pub const CANONICAL_UPSERT_HEX: &str = "\
 12bd010a10000102030405060708090a0b0c0d0e0f1220303132333435363738396162636465663031323334353637383961626364656\
 61a136578616d706c652e666978747572652e617070220b46697874757265204170702a0d46495854555245205449544c45320c464958\
@@ -951,7 +953,7 @@ fn the_shared_vector_decodes_and_validates() {
 //
 // ADR-0016 §12 puts the derivation in the **source platform adapter**, because
 // it needs that device's secret, and N1 implements it in Kotlin. Nothing here
-// implements Android source behaviour in portable code: `anyflow_core::
+// implements Android source behaviour in portable code: `omnibridge_core::
 // notifications` still defines only the type, the width and the validation,
 // and `NotificationId` is deliberately opaque.
 //
@@ -972,9 +974,9 @@ use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
 /// ADR-0016 §1. Pinned as a constant so a change to it is a visible diff.
-const ID_DOMAIN: &str = "anyflow/notifications.v1/id/v1";
+const ID_DOMAIN: &str = "omnibridge/notifications.v1/id/v1";
 /// [02 §6.5].
-const GROUP_DOMAIN: &str = "anyflow/notifications.v1/group/v1";
+const GROUP_DOMAIN: &str = "omnibridge/notifications.v1/group/v1";
 
 /// The same 32 bytes `NotificationSecretTest` uses. Obviously not from a
 /// CSPRNG, and therefore obviously a test.
@@ -1023,7 +1025,7 @@ fn the_notification_id_derivation_matches_the_android_vector() {
             &fixture_secret(),
             FIXTURE_PLATFORM_KEY
         )),
-        "3de5b61a1978912deb452f36b9a61c7a",
+        "3c8effce6feb1582a65e100aeea1a810",
     );
 }
 
@@ -1031,7 +1033,7 @@ fn the_notification_id_derivation_matches_the_android_vector() {
 fn the_group_id_derivation_matches_the_android_vector() {
     assert_eq!(
         to_hex(&derive_group_id("0|example.fixture.app|g:chat")),
-        "ff4aae015474d140",
+        "b9f8d940e134bccb",
     );
 }
 
@@ -1049,11 +1051,11 @@ fn a_different_key_or_secret_derives_a_different_id() {
 
     assert_eq!(
         to_hex(&derive_notification_id(&secret, other_key)),
-        "86726a05ec81785ead37dcb41907d8e1",
+        "3561179daf1a26a8a047f3f44758eaf3",
     );
     assert_eq!(
         to_hex(&derive_notification_id(&other_secret, FIXTURE_PLATFORM_KEY)),
-        "b1904b490581ba28fb9e736d351fc776",
+        "e88bcb16b74b498c91090bc76fc3b2d9",
     );
 }
 

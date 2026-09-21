@@ -31,7 +31,7 @@
 > | Item | Change |
 > | --- | --- |
 > | **Wave 0 size** | ≈**17 engineer-days**, nine PRs ([28 §16](28-WAVE-0-IMPLEMENTATION-SPEC.md)). Smaller than "M" — the identity refactor is two call sites — but it absorbs two new defect fixes |
-> | **Wave 0 gate** | The proposed Linux cross-compile **does not work**: `ring` needs MSVC (V-10). Corrected to `cargo check` on a **Windows CI runner**, excluding `anyflow-runtime` |
+> | **Wave 0 gate** | The proposed Linux cross-compile **does not work**: `ring` needs MSVC (V-10). Corrected to `cargo check` on a **Windows CI runner**, excluding `omnibridge-runtime` |
 > | **Wave 0 hardware** | **None beyond what the project already has** — Fedora, an Android device, and a CI Windows runner |
 > | **Wave 2** | Gains **LINUX-010 (P0)**: `sensitive_hint` clips fail on Debian 13 and every current Ubuntu LTS |
 > | **Wave 3** | **Cheaper.** POC-KDE-01's central question is answered; only the Xwayland fallback needs measuring |
@@ -76,7 +76,7 @@ architecture, and macOS then inherits a proven pattern.
 | **Objective** | Create the platform boundary that does not exist today, without changing behaviour on Linux |
 | **Dependencies** | none |
 | **Branch** | `feature/core-platform-abstraction-v1` |
-| **Deliverables** | `IdentitySigner` (ARCH-002); `StateStore`/`SecretFile` split of `store.rs`; `FileSink` (ARCH-006); `ControlTransport` (ARCH-003); `anyflow-daemon` → `anyflow-runtime` + `anyflow-linux`; control types extracted into their own crate; `x11rb` made optional (ARCH-004); `ClipboardBackend` polling contract amended (ARCH-005) |
+| **Deliverables** | `IdentitySigner` (ARCH-002); `StateStore`/`SecretFile` split of `store.rs`; `FileSink` (ARCH-006); `ControlTransport` (ARCH-003); `omnibridge-daemon` → `omnibridge-runtime` + `omnibridge-linux`; control types extracted into their own crate; `x11rb` made optional (ARCH-004); `ClipboardBackend` polling contract amended (ARCH-005) |
 | **Gates** | **Zero behavioural change on Linux.** The entire existing suite passes unmodified, including `core/tests/identity_and_store.rs`, `daemon/tests/e2e.rs` and the clipboard tests. Interop with the shipping Android app is unchanged. `cargo build --target x86_64-pc-windows-gnu` succeeds for the portable crates |
 | **PoCs** | POC-CORE-01, -02, -03 |
 | **Hardware** | Linux dev machine |
@@ -90,7 +90,7 @@ architecture, and macOS then inherits a proven pattern.
 | **Objective** | Turn Fedora-specific details into Linux behaviour |
 | **Dependencies** | Wave 0 |
 | **Branch** | `feature/linux-portability-v1` |
-| **Deliverables** | `gethostname` instead of `/etc/hostname`+`"Fedora"` (LINUX-003); settle the `gcc`/`ring` question (LINUX-001); `.desktop`, icons, AppStream metainfo (PKG-001); package the GUI (PKG-002); XDG autostart (PKG-003/LINUX-005); declare `wl-clipboard` (PKG-004); split `anyflow`/`anyflow-gui` (PKG-005); firewalld service definition, not auto-enabled (PKG-008) |
+| **Deliverables** | `gethostname` instead of `/etc/hostname`+`"Fedora"` (LINUX-003); settle the `gcc`/`ring` question (LINUX-001); `.desktop`, icons, AppStream metainfo (PKG-001); package the GUI (PKG-002); XDG autostart (PKG-003/LINUX-005); declare `wl-clipboard` (PKG-004); split `omnibridge`/`omnibridge-gui` (PKG-005); firewalld service definition, not auto-enabled (PKG-008) |
 | **Gates** | Fresh Fedora install: menu entry, icon, starts at login, clipboard works, file received, no manual `systemctl` step required |
 | **PoCs** | none |
 | **Hardware** | Fedora VM |
@@ -129,7 +129,7 @@ architecture, and macOS then inherits a proven pattern.
 
 | | |
 | --- | --- |
-| **Objective** | Users can install AnyFlow without building it |
+| **Objective** | Users can install OmniBridge without building it |
 | **Dependencies** | Waves 1–3 |
 | **Branch** | `feature/linux-distribution-v1` |
 | **Deliverables** | Signed RPM repo (COPR); signed DEB repo; release tarballs + checksums; optionally POC-LINUX-03's Flatpak verdict |
@@ -138,7 +138,7 @@ architecture, and macOS then inherits a proven pattern.
 | **Hardware** | VMs |
 | **Effort** | **S–M** |
 
-> **Waves 0–4 are the point at which AnyFlow can honestly say it supports "Linux" rather than
+> **Waves 0–4 are the point at which OmniBridge can honestly say it supports "Linux" rather than
 > "Fedora".** If the expansion stopped here it would still be a significant improvement, and
 > nothing after this point is required for it. That is a deliberate property of the ordering.
 
@@ -353,7 +353,7 @@ cost and a queue.
 
 **The single most valuable CI addition** is a matrix build across `x86_64-unknown-linux-gnu`,
 `x86_64-pc-windows-msvc` and `aarch64-apple-darwin` for the *portable* crates, gated from Wave 0
-onward. It turns "someone accidentally added a Unix-only call to `anyflow-core`" from a
+onward. It turns "someone accidentally added a Unix-only call to `omnibridge-core`" from a
 discovery made months later into a failed PR. **CI-001.**
 
 Second most valuable: the Ubuntu 24.04 libadwaita-floor job (**CI-003**), because that failure

@@ -2,12 +2,12 @@
 
 | Field | Value |
 | --- | --- |
-| **Title** | AnyFlow on macOS |
+| **Title** | OmniBridge on macOS |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
 | **Scope** | Rust on macOS, discovery, identity, clipboard, background agent, UI, packaging. |
 | **Decision status** | PROPOSED. **PLAT-DEC-004** (Secure Enclave strategy) and **PLAT-DEC-009** (polling clipboard watch) are OPEN. |
-| **Evidence** | OFFICIAL DOC VERIFIED from `developer.apple.com` where retrievable; several Apple pages could not be fetched in this session and are marked **EXTERNAL VERIFICATION REQUIRED**. REPO VERIFIED for AnyFlow's own behaviour. |
+| **Evidence** | OFFICIAL DOC VERIFIED from `developer.apple.com` where retrievable; several Apple pages could not be fetched in this session and are marked **EXTERNAL VERIFICATION REQUIRED**. REPO VERIFIED for OmniBridge's own behaviour. |
 | **Related documents** | [11](11-IOS-IPADOS-FEASIBILITY.md), [12](12-APPLE-SECURITY-AND-INTEGRATION.md), [15](15-CROSS-PLATFORM-CLIPBOARD.md), [17](17-BACKGROUND-EXECUTION-MODEL.md), [19](19-PACKAGING-AND-DISTRIBUTION.md) |
 
 ---
@@ -43,7 +43,7 @@ effort-per-user, not on difficulty.
 
 Tier 2 rather than Tier 1 is worth a note: it means Rust builds the standard library and
 checks that the target compiles, but does not run the full test suite there. In practice
-`*-apple-darwin` is heavily used and stable; the practical risk is low. It does mean AnyFlow's
+`*-apple-darwin` is heavily used and stable; the practical risk is low. It does mean OmniBridge's
 own test suite must actually run on macOS in CI rather than being assumed to pass.
 
 ---
@@ -69,14 +69,14 @@ Network.framework's TLS** — see §4.2.
 **Recommendation: try `mdns-sd` (POC-MAC-02) but expect to fall back to the platform API,
 and budget for the fallback.** macOS is the platform where "run your own responder" is most
 likely to fail, and the platform API here is genuinely good — `mDNSResponder` is the reference
-implementation of the protocol AnyFlow speaks.
+implementation of the protocol OmniBridge speaks.
 
 If the fallback is needed, the cleanest route is the `dnssd` C API (`DNSServiceRegister`,
 `DNSServiceBrowse`) rather than Network.framework, because it is C-callable from Rust with no
 Swift bridge and no `NWListener` lifecycle to model. That keeps the adapter in Rust and out of
 the Swift app.
 
-Either way the **wire format is unchanged**: `_anyflow._tcp.local.` with the `v`/`pv`/`id`/`dn`
+Either way the **wire format is unchanged**: `_omnibridge._tcp.local.` with the `v`/`pv`/`id`/`dn`
 TXT keys, which is what preserves interoperability with today's Android client.
 
 ### 4.2 Why not Network.framework for the connection itself
@@ -94,14 +94,14 @@ not do that. Use `mdns-sd`/`dnssd` for *discovery* and rustls over a plain
 
 ### 5.1 The good news
 
-AnyFlow's identity key is **ECDSA P-256**, chosen back in
+OmniBridge's identity key is **ECDSA P-256**, chosen back in
 [ADR-0006](../../adr/ADR-0006-device-identity-and-pairing.md) for Android Keystore compatibility.
 
 The Apple Secure Enclave supports **only** 256-bit elliptic-curve keys — P-256/secp256r1 — for
 both ECDSA signing and ECDH (OFFICIAL DOC VERIFIED, `kSecAttrTokenIDSecureEnclave` and
 `SecureEnclave.P256` in CryptoKit).
 
-So AnyFlow's key algorithm is not merely *compatible* with the Secure Enclave; it is the only
+So OmniBridge's key algorithm is not merely *compatible* with the Secure Enclave; it is the only
 algorithm the Secure Enclave would have accepted. A project that had picked Ed25519 — the
 better primitive on paper — would be unable to use hardware-backed identity on **either**
 mobile platform. This is the most consequential piece of good luck (or good judgement) in the
@@ -137,7 +137,7 @@ Two constraints that must be designed for, not discovered:
    unrecoverable for already-paired users.**
 
 **POC-MAC-03 + POC-MAC-04 must be run together and must complete a real handshake against the
-existing Linux `anyflowd`.** Proving "we can sign" and "rustls accepts a custom signer"
+existing Linux `omnibridged`.** Proving "we can sign" and "rustls accepts a custom signer"
 separately would repeat exactly the Android v1 mistake.
 
 ### 5.3 Fallback
@@ -173,7 +173,7 @@ On macOS that rule cannot be satisfied. Three ways forward:
 
 | Option | Consequence |
 | --- | --- |
-| **(a)** Amend the contract: polling allowed *only* where the platform offers nothing else, and the backend must declare it | Honest; costs nothing on Linux/Windows, where the rule still holds; `describe()` already exists to surface "polling every N ms" to `anyflow clipboard status`. **Recommended.** |
+| **(a)** Amend the contract: polling allowed *only* where the platform offers nothing else, and the backend must declare it | Honest; costs nothing on Linux/Windows, where the rule still holds; `describe()` already exists to surface "polling every N ms" to `omnibridge clipboard status`. **Recommended.** |
 | (b) No automatic clipboard send on macOS | Throws away the capability the product is most known for, on a platform where it is achievable |
 | (c) Private/undocumented API | Never. Notarization risk and it would break. |
 
@@ -203,7 +203,7 @@ programmatic access… Once programmatic pasteboard access triggers the first pa
 alert, the state automatically changes to [ask]."* And on `.ask`: *"access that is both **user
 originated and paste related** will always be allowed, and will not result in a notification."*
 
-**So AnyFlow's automatic clipboard send — programmatic, not user-originated — is user-gated on
+**So OmniBridge's automatic clipboard send — programmatic, not user-originated — is user-gated on
 macOS 15.4+.** It does not make polling impossible, but it makes silent auto-send conditional on
 the user choosing `.alwaysAllow`. That is a product statement and
 [03](03-PLATFORM-CAPABILITY-MATRIX.md) is updated accordingly.
@@ -228,11 +228,11 @@ macOS is the closest of the three desktops to Linux's model.
 | `LaunchAgent` plist in `~/Library/LaunchAgents` | The classic route; still works; less discoverable for the user and messier to uninstall |
 | `LaunchDaemon` | Runs as root outside a user session — **wrong**, for the same reason a Windows Service is wrong ([08 §5](08-WINDOWS-FEASIBILITY.md)): no user pasteboard, no user Downloads, no human |
 
-**Architecture: an `AnyFlow.app` whose bundled helper is registered as a login-item agent via
+**Architecture: an `OmniBridge.app` whose bundled helper is registered as a login-item agent via
 `SMAppService`.** The agent hosts the portable Rust runtime, holds the TLS listener, the
 discovery registration and the pasteboard poller, and exposes a control channel to the UI.
 The main app is a menu-bar item plus windows — it can be quit without stopping the agent, and
-this mirrors the Linux `anyflowd` + `anyflow-gui` split exactly.
+this mirrors the Linux `omnibridged` + `omnibridge-gui` split exactly.
 
 Two macOS-specific behaviours to design for:
 
@@ -256,7 +256,7 @@ just once on the developer's machine.
 | Concern | macOS |
 | --- | --- |
 | Downloads | `FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)`. Replaces the XDG chain. |
-| Data directory | `~/Library/Application Support/AnyFlow` |
+| Data directory | `~/Library/Application Support/OmniBridge` |
 | File modes | POSIX modes work. `store.rs`'s `require_private_mode`/`harden_dir` and `destination.rs`'s `O_EXCL` + 0600 **compile and behave correctly as written** — macOS is the one non-Linux platform where the existing unix code is right rather than merely portable |
 | Sandbox | An unsandboxed Developer-ID app has full access with user consent (TCC prompts for Desktop/Documents/Downloads). A sandboxed (App Store) build would need `com.apple.security.files.downloads.read-write` and a security-scoped bookmark → §10 |
 | Filename rules | macOS is POSIX-ish, but HFS+/APFS normalise Unicode (NFD) and `:` is historically a separator in the Finder. The Windows rule set from [09 §6](09-WINDOWS-SECURITY-AND-INTEGRATION.md) applied everywhere covers the `:` case. |
@@ -279,7 +279,7 @@ just once on the developer's machine.
 The UI talks to the agent over the control channel, not through FFI — same reasoning as
 [08 §9](08-WINDOWS-FEASIBILITY.md). On macOS the channel can simply be a **Unix domain socket**,
 which means `daemon/src/server.rs`'s existing implementation works with only a path change
-(`~/Library/Application Support/AnyFlow/control.sock` or a sandbox-appropriate location).
+(`~/Library/Application Support/OmniBridge/control.sock` or a sandbox-appropriate location).
 macOS is the platform where the existing IPC transfers wholesale.
 
 If the app is ever sandboxed, XPC becomes necessary instead; that is one more reason to prefer
@@ -292,7 +292,7 @@ Developer ID distribution over the App Store (§10).
 | Option | Assessment |
 | --- | --- |
 | **`.app` in a signed, notarized DMG** | The standard for a utility like this. Drag to Applications. **Recommended primary.** |
-| **Homebrew Cask** | A `brew install --cask anyflow` pointing at the DMG. High-value for the target audience at near-zero cost. **Recommended secondary.** |
+| **Homebrew Cask** | A `brew install --cask omnibridge` pointing at the DMG. High-value for the target audience at near-zero cost. **Recommended secondary.** |
 | `.pkg` installer | Needed only if something must be installed outside the app bundle. `SMAppService` removes that need. **Not recommended.** |
 | Mac App Store | Requires the App Sandbox. Local networking, a background agent, pasteboard polling and arbitrary Downloads writes are all sandbox-hostile, and `SMAppService` login items in a sandboxed app are constrained. **Deferred**, possibly permanently. |
 
@@ -310,7 +310,7 @@ Practical consequences for the roadmap:
   and `stapler staple` — all of which require **a Mac in CI**, or a self-hosted runner.
 - Notarization is per-build and takes minutes; it must be in the release job, not a manual step.
 - The Rust binary inside the bundle must itself be signed, and the hardened runtime interacts
-  with anything that allocates executable memory (nothing in AnyFlow does).
+  with anything that allocates executable memory (nothing in OmniBridge does).
 
 This is the single largest *non-engineering* cost in the whole expansion and it should be
 surfaced in planning rather than discovered at release time.
@@ -322,7 +322,7 @@ surfaced in planning rather than discovered at release time.
 | ID | Question |
 | --- | --- |
 | **POC-MAC-01** | Does the workspace compile and pass its portable tests on `aarch64-apple-darwin`? |
-| **POC-MAC-02** | Can `mdns-sd` advertise `_anyflow._tcp.local.` alongside `mDNSResponder`, such that the Android app finds it? If not, does `DNSServiceRegister` work from Rust? |
+| **POC-MAC-02** | Can `mdns-sd` advertise `_omnibridge._tcp.local.` alongside `mDNSResponder`, such that the Android app finds it? If not, does `DNSServiceRegister` work from Rust? |
 | **POC-MAC-03** | Secure Enclave P-256 key + certificate built around its public key + SPKI fingerprint. |
 | **POC-MAC-04** | A `rustls::sign::SigningKey` backed by `SecKeyCreateSignature`, completing a mutual TLS 1.3 handshake with SPKI pinning **against the existing Linux daemon**. |
 | **POC-MAC-05** | `NSPasteboard` read/write/`changeCount` polling. **First measure whether reading prompts the user** on current macOS for a signed, notarized, unsandboxed background agent. |

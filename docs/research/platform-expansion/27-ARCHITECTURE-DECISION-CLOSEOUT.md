@@ -91,7 +91,7 @@ ordinary bugs.
 
 - `unsafe_code = "forbid"` is workspace-wide and `forbid` cannot be locally overridden. Every
   adapter needs `unsafe`. The lint must move to per-crate scope, keeping `forbid` on
-  `anyflow-core` and the capability crates ([26 §11.1](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)).
+  `omnibridge-core` and the capability crates ([26 §11.1](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)).
 - `ring` requires a C toolchain, and MSVC on Windows. The Wave 0 acceptance gate cannot be a bare
   Linux cross-compile ([26 §V-10](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)).
 
@@ -122,7 +122,7 @@ the logged-in user's `WinSta0`, and `NoInteractiveServices` defaults to 1, so
 `SERVICE_INTERACTIVE_PROCESS` is inert. **(b) cannot read the user's clipboard.** This is no longer
 an inference from architecture; it is the vendor saying so.
 
-Microsoft's recommended shape is the one AnyFlow already implements on Linux: a per-session
+Microsoft's recommended shape is the one OmniBridge already implements on Linux: a per-session
 process, talking to the rest over named-pipe IPC, registered per-session via `Run`, with per-session
 pipe names. Two verbatim lines matter for [28](28-WAVE-0-IMPLEMENTATION-SPEC.md):
 
@@ -179,7 +179,7 @@ The revisit conditions from [06 §7](06-KDE-PLASMA-WAYLAND.md) stand unchanged a
 
 **New evidence** ([26 §13](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)), all verbatim from Apple:
 
-- *"Works only with NIST P-256 elliptic curve keys"* — AnyFlow's algorithm, verified not inferred.
+- *"Works only with NIST P-256 elliptic curve keys"* — OmniBridge's algorithm, verified not inferred.
 - *"Not having a mechanism to transfer plain-text key data into or out of the Secure Enclave is
   fundamental to its security"* — confirms the seam is mandatory.
 - `SecKeyCreateSignature` is synchronous; `.ecdsaSignatureMessageX962SHA256` hashes internally and
@@ -203,7 +203,7 @@ Three findings change the shape of the decision without changing its direction:
 **Why still RECOMMENDED and not READY FOR RFC.** Every *component* is verified, but the one thing
 no document establishes is that a certificate built around an Enclave public key yields an SPKI
 byte-identical to what `Fingerprint::from_certificate_der` extracts. That is the trust anchor, and
-AnyFlow has already been burned by exactly this class of "the pieces worked separately" error on
+OmniBridge has already been burned by exactly this class of "the pieces worked separately" error on
 Android. POC-MAC-03 + POC-MAC-04 must end in a completed pinned handshake.
 
 | Field | Value |
@@ -232,7 +232,7 @@ Android. POC-MAC-03 + POC-MAC-04 must end in a completed pinned handshake.
   needs no Local Network privilege. It is Bonjour (register/browse/resolve) and *outgoing*
   connections that do. This does not rescue background operation, but it means the permission
   story is narrower than feared, and it shapes what POC-IOS-02 should measure.
-- Multicast entitlement: required for arbitrary service types and for browsing all types. AnyFlow
+- Multicast entitlement: required for arbitrary service types and for browsing all types. OmniBridge
   browses one fixed type declared in `NSBonjourServices`, so it is probably **not** needed —
   probably, because TN3179 does not state the boundary precisely. POC-IOS-01 must confirm.
 - Share Extension inherits the container app's privilege (V-09), with an undetermined-state edge
@@ -288,7 +288,7 @@ staleness that implies) or be wrong.
    `detect_watch_source()` probes rather than assumes; `probe_data_control()` runs the real tool
    and observes. That pattern — *ask the system, do not infer from a label* — is correct and should
    be extended (to `--sensitive` support, and to `NSPasteboard.accessBehavior` on macOS).
-2. **Surface it locally, in `anyflow clipboard status` and the UI.** A user must be able to learn
+2. **Surface it locally, in `omnibridge clipboard status` and the UI.** A user must be able to learn
    that auto-send is off *and why*, naming the missing protocol or the System Settings toggle.
 3. **Do not put it on the wire yet.** Design (a) so it is ready, keep it deferred.
 
@@ -319,15 +319,15 @@ unchanged, `PROTOCOL_VERSION_MAX` moves.
 
 **New evidence** — none directly, but two adjacent results matter.
 
-The `--sensitive` finding ([26 §5.1](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)) shows AnyFlow's
+The `--sensitive` finding ([26 §5.1](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)) shows OmniBridge's
 clipboard path depends on the *version of an external binary on `PATH`*. Inside a Flatpak sandbox
 that binary is the runtime's, not the host's — which cuts both ways: the runtime version is
-**predictable** (an advantage), but it is **not the host's**, so a Flatpak AnyFlow could honour
+**predictable** (an advantage), but it is **not the host's**, so a Flatpak OmniBridge could honour
 `sensitive_hint` on a host whose own `wl-copy` is too old, or fail on a host where it would have
 worked. Either way it is a *third* wl-clipboard version to reason about.
 
 Combined with v1's finding that the GNOME clipboard watch needs `--socket=x11`, the case for
-"experimental, not primary" strengthens. AnyFlow is closer to a system agent than an application,
+"experimental, not primary" strengthens. OmniBridge is closer to a system agent than an application,
 and its clipboard path is unusually sensitive to what is on `PATH`.
 
 | Field | Value |
@@ -421,7 +421,7 @@ macOS satisfies this: `changeCount` is a cheap integer, and content is read only
 
 `Signer::sign` receives an **unhashed** message and must apply the scheme's hash itself
 ([26 §10](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)). On Android that maps to
-`Signature.getInstance("SHA256withECDSA")`, which hashes internally — *the exact thing AnyFlow's v1
+`Signature.getInstance("SHA256withECDSA")`, which hashes internally — *the exact thing OmniBridge's v1
 Keystore keys could not do*, because they were created with `DIGEST_NONE`, and the authorisations
 are immutable. A Rust-over-JNI signer would re-enter that minefield to reach a place Kotlin already
 occupies safely, with hardware-backed Keystore identity already wired through Conscrypt and ~20
@@ -474,7 +474,7 @@ where a substitution matters most.
 **New evidence** makes the *local* half more important without changing the wire answer.
 
 Because the Enclave cannot import preexisting keys, and because Intel Macs have no Enclave at all,
-a real population of AnyFlow installs will run software-backed keys on machines the user assumes
+a real population of OmniBridge installs will run software-backed keys on machines the user assumes
 are hardware-backed. The local display therefore stops being a nicety.
 
 The argument against putting it on the wire is unchanged and correct: it is an **unverifiable
@@ -484,7 +484,7 @@ than no decoration.
 
 | Field | Value |
 | --- | --- |
-| **Recommended** | **(b)** local display only. Show backing in `anyflow status` and the UI; no protocol change |
+| **Recommended** | **(b)** local display only. Show backing in `omnibridge status` and the UI; no protocol change |
 | **Rejected options** | **(a) REJECTED** — unverifiable self-report presented as a security property |
 | **Implementation dependency** | ARCH-002 must expose `KeyBacking`; SEC-002 verifies protection per backing |
 | **Status** | **READY FOR RFC** |
@@ -502,7 +502,7 @@ than no decoration.
 | **Options** | (a) probe once; on old `wl-copy`, refuse the clip and tell the user why; (b) probe once; write without the flag and warn prominently; (c) leave as-is (unexplained failure); (d) require wl-clipboard ≥ 2.3 in packaging |
 
 **Evidence.** `wl-copy` 2.2.1's option table has no `sensitive` entry and its unknown-option path
-is `print_usage(stderr); exit(1)`. AnyFlow maps a non-zero exit to `BackendError::Failed`
+is `print_usage(stderr); exit(1)`. OmniBridge maps a non-zero exit to `BackendError::Failed`
 (`backend/wayland.rs:310-315`). The current behaviour is therefore (c) by accident: the clip fails,
 and nothing explains it.
 
@@ -656,7 +656,7 @@ grounds. Recording them plainly so a future sprint does not quietly reopen them:
 | --- | --- |
 | What would it solve? | Waking a suspended iOS app so a clip could arrive without the user opening it |
 | What would it *not* solve? | Everything else. The app still cannot hold a socket; a push is a wake, not a session. Payload limits mean the clip itself still needs a fetch |
-| External infrastructure? | **Yes** — an APNs-authorised server AnyFlow would have to operate |
+| External infrastructure? | **Yes** — an APNs-authorised server OmniBridge would have to operate |
 | Impact on local-first | Fatal. A LAN-only product would require an internet round trip through infrastructure the maintainer runs |
 | Impact on privacy | The relay learns device identities, timing and volume — a metadata channel that does not exist today |
 | Could it ever be optional? | Only as an opt-in that is off by default and whose absence changes nothing. No such design has been produced, and none is requested |
@@ -718,9 +718,9 @@ Sixteen risks reviewed. Three were named as defects; all three change materially
 
 | Field | Value |
 | --- | --- |
-| **Failure scenario** | (i) A local process creates `\\.\pipe\anyflow-…` before the agent starts; the CLI/GUI connect to it and hand over control-plane traffic. (ii) The agent passes `NULL` for `lpSecurityAttributes`, and the default DACL grants **read to Everyone and to anonymous** |
+| **Failure scenario** | (i) A local process creates `\\.\pipe\omnibridge-…` before the agent starts; the CLI/GUI connect to it and hand over control-plane traffic. (ii) The agent passes `NULL` for `lpSecurityAttributes`, and the default DACL grants **read to Everyone and to anonymous** |
 | **Required mitigation** | Explicit `SECURITY_ATTRIBUTES` with a DACL granting only the owning user's SID — **never `NULL`**. `PIPE_REJECT_REMOTE_CLIENTS`. `FILE_FLAG_FIRST_PIPE_INSTANCE`, and on `ERROR_ACCESS_DENIED` **abort naming the squatter — never retry, never fall back to another name**. Per-session pipe name (Microsoft's own guidance). Verify the caller with `GetNamedPipeClientProcessId` |
-| **Where** | `anyflow-windows` adapter, `ControlTransport` impl |
+| **Where** | `omnibridge-windows` adapter, `ControlTransport` impl |
 | **Wave** | **5** |
 | **Test** | POC-WIN-07 with a hostile squatter started first; assert the agent refuses to start |
 | **Blocking severity** | **P0 for Wave 5.** Not a Wave 0 item — but the `ControlTransport` trait designed in Wave 0 must not make the safe implementation awkward. [28 §6](28-WAVE-0-IMPLEMENTATION-SPEC.md) requires a fallible bind returning a distinguishable "name already owned" error |

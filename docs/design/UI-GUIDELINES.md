@@ -1,4 +1,4 @@
-# AnyFlow — UI guidelines
+# OmniBridge — UI guidelines
 
 How the [brand](BRAND.md) is applied on each platform, and the rules that are
 not negotiable.
@@ -18,7 +18,7 @@ is true right now.
 
 Every status is **a dot, an icon and a word**, and the word carries the
 meaning. Both platforms declare the vocabulary in one place —
-`AnyFlowStatus` (Kotlin) and `widgets::Status` (Rust) — with all three
+`OmniBridgeStatus` (Kotlin) and `widgets::Status` (Rust) — with all three
 required by the type, so a status cannot be added as a colour and nothing
 else.
 
@@ -36,14 +36,14 @@ full, in monospace, selectable, grouped in fours. Aesthetics do not get a vote.
 ### 4. Nothing is stored to make a screen look better
 
 The reference shows a **clipboard history** panel and a persistent transfer
-**History** tab. AnyFlow has neither, by design: clipboard text never reaches
+**History** tab. OmniBridge has neither, by design: clipboard text never reaches
 disk and the control socket carries no clip content at all — a pending clip is
 size, hash prefix and age.
 
 Both were removed rather than faked. What replaced them says plainly what is
 and is not kept:
 
-> *"AnyFlow keeps no clipboard history. A received clip waits in memory with a
+> *"OmniBridge keeps no clipboard history. A received clip waits in memory with a
 > five-minute expiry and is gone once applied, dismissed or expired."*
 
 Transfers are listed for the current daemon run, under a line saying so.
@@ -55,7 +55,7 @@ says:
 
 > **Secure connection** · *Direct connection · TLS 1.3, pinned · local network*
 
-with the detail in a tooltip: TLS 1.3 with ALPN `anyflow/1`, mutually
+with the detail in a tooltip: TLS 1.3 with ALPN `omnibridge/1`, mutually
 authenticated, pinned to the key approved at pairing, no relay and no cloud.
 That is precise and checkable. Reaching for a phrase whose meaning does not
 exactly match is how a security claim quietly becomes untrue.
@@ -95,21 +95,21 @@ Both platforms carry the same vocabulary under the same names.
 
 | Concept | Android (`ui/components`) | Desktop (`gui/src/widgets.rs`) |
 |---|---|---|
-| Card | `AnyFlowCard` | `card()` |
-| Section heading | `AnyFlowSectionLabel` | `section_label()` |
-| Status | `AnyFlowStatusBadge` | `status_badge()` |
-| Primary action | `AnyFlowPrimaryButton` | `cta_button()` |
-| Secondary action | `AnyFlowSecondaryButton` | `secondary_button()` |
-| Destructive action | `AnyFlowDestructiveButton` | `destructive_button()` |
-| Permission row | `AnyFlowCapabilityRow` | `policy_switch()` |
-| Device | `AnyFlowDeviceCard` | `device_card()` |
-| Transfer | `AnyFlowTransferCard` | `transfer_card()` |
-| Security notice | `AnyFlowSecurityNotice` | `security_notice()` |
-| Empty state | `AnyFlowEmptyState` | `empty_state()` |
-| Tinted icon | `AnyFlowIconTile` | `icon_tile()` |
-| Fingerprint | `AnyFlowFingerprint` | `fingerprint()` |
-| Brand mark | `AnyFlowGradientMark` / `AnyFlowBrandMark` | `brand_mark()` / `brand_logo()` |
-| Progress | `AnyFlowProgressBar` | `progress()` |
+| Card | `OmniBridgeCard` | `card()` |
+| Section heading | `OmniBridgeSectionLabel` | `section_label()` |
+| Status | `OmniBridgeStatusBadge` | `status_badge()` |
+| Primary action | `OmniBridgePrimaryButton` | `cta_button()` |
+| Secondary action | `OmniBridgeSecondaryButton` | `secondary_button()` |
+| Destructive action | `OmniBridgeDestructiveButton` | `destructive_button()` |
+| Permission row | `OmniBridgeCapabilityRow` | `policy_switch()` |
+| Device | `OmniBridgeDeviceCard` | `device_card()` |
+| Transfer | `OmniBridgeTransferCard` | `transfer_card()` |
+| Security notice | `OmniBridgeSecurityNotice` | `security_notice()` |
+| Empty state | `OmniBridgeEmptyState` | `empty_state()` |
+| Tinted icon | `OmniBridgeIconTile` | `icon_tile()` |
+| Fingerprint | `OmniBridgeFingerprint` | `fingerprint()` |
+| Brand mark | `OmniBridgeGradientMark` / `OmniBridgeBrandMark` | `brand_mark()` / `brand_logo()` |
+| Progress | `OmniBridgeProgressBar` | `progress()` |
 
 ### Cards
 
@@ -156,7 +156,7 @@ and the system's accessibility settings because it is built from the
 platform's own widgets.
 
 **Structure.** `AdwApplicationWindow` → `AdwToolbarView` (`AdwHeaderBar` with
-the ribbon + wordmark) → `AdwNavigationSplitView` (sidebar + content) → a
+the mark + wordmark) → `AdwNavigationSplitView` (sidebar + content) → a
 `GtkStack` of pages, with a status strip pinned along the bottom.
 
 **Navigation.** Dashboard · Files · Clipboard · Devices · Trusted peers ·
@@ -184,8 +184,8 @@ be a filter over the light one.
 
 ## Android — Compose / Material 3
 
-Material semantics are kept, not replaced. AnyFlow should look like
-**AnyFlow on Android**, not like a foreign design language pasted onto the
+Material semantics are kept, not replaced. OmniBridge should look like
+**OmniBridge on Android**, not like a foreign design language pasted onto the
 platform: a `Switch` still behaves and reads as an Android switch, a dialog
 still sits where Android puts one.
 

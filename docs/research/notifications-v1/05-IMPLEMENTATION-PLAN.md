@@ -53,7 +53,7 @@ behaviour.
 
 | Deliverable | Path |
 | --- | --- |
-| Capability schema | `protocol/proto/anyflow/v1/capabilities/notifications_v1.proto` |
+| Capability schema | `protocol/proto/omnibridge/v1/capabilities/notifications_v1.proto` |
 | ~~**ADR-0015** — Notification access and the manifest stance~~ | `docs/adr/ADR-0015-notification-access.md` — **written and Accepted, 2026-09-08** |
 | **ADR-0016** — Notification identity and update semantics | `docs/adr/ADR-0016-notification-identity.md` |
 | **ADR-0017** — Capability roles inside a capability | `docs/adr/ADR-0017-capability-roles.md` |
@@ -98,7 +98,7 @@ to turn it on, no dismissal handling yet.
 
 | Area | Files |
 | --- | --- |
-| Listener | `android/app/src/main/java/…/notifications/AnyFlowNotificationListener.kt` |
+| Listener | `android/app/src/main/java/…/notifications/OmniBridgeNotificationListener.kt` |
 | Extraction and text rules | `…/notifications/NotificationSnapshot.kt`, `NotificationText.kt` |
 | Identity derivation + key map | `…/notifications/NotificationIdentity.kt` |
 | Filtering | `…/notifications/NotificationFilter.kt` |
@@ -116,7 +116,7 @@ Design points that are easy to get wrong and must be in review:
 * The listener is bound **on demand** (`META_DATA_DEFAULT_AUTOBIND = false`,
   `requestRebind` / `requestUnbind`) and only while a granted peer is connected
   ([01 §4](01-FUNCTIONAL-SPECIFICATION.md)).
-* Drop AnyFlow's own package first, before every other check
+* Drop OmniBridge's own package first, before every other check
   ([02 §9.4](02-PROTOCOL-AND-EVENT-MODEL.md)).
 * `getActiveNotifications()` on `onListenerConnected` rebuilds the id map
   ([02 §5.2](02-PROTOCOL-AND-EVENT-MODEL.md)).
@@ -144,12 +144,12 @@ content in logcat at any level.
 **Scope.** Display, update in place, close, and the platform seam Wave 0
 deliberately did not create
 ([platform-expansion 28](../platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md):
-*"AnyFlow implements no notifications on any platform. Nothing to abstract"* —
+*"OmniBridge implements no notifications on any platform. Nothing to abstract"* —
 no longer true).
 
 | Area | Path |
 | --- | --- |
-| New crate | `desktop/capabilities/notifications/` (`anyflow-capability-notifications`) |
+| New crate | `desktop/capabilities/notifications/` (`omnibridge-capability-notifications`) |
 | Portable half | `src/lib.rs`, `src/identity.rs`, `src/text.rs`, `src/limits.rs`, `src/dedup.rs`, `src/policy.rs`, `src/redact.rs` |
 | Backend seam | `src/backend/mod.rs` — `NotificationSink` trait, mirroring `ClipboardBackend` |
 | Linux impl | `src/backend/dbus.rs` (default-on feature), `src/backend/lock.rs` |
@@ -196,7 +196,7 @@ over real TLS with real pinning and the real trust store, with a fake sink.
 
 **Security gates.** NOTIF-SEC-01…09, -12, -16, -20, -21, -27.
 
-**Exit criteria.** `anyflow notifications status` reports the real server, the
+**Exit criteria.** `omnibridge notifications status` reports the real server, the
 real capability list and the real lock source. `--no-default-features` build of
 the new crate is clean on `x86_64-pc-windows-msvc`. Rust suite green.
 
@@ -238,7 +238,7 @@ a test, not by inspection.
 | Area | Path |
 | --- | --- |
 | Sink → request | `desktop/capabilities/notifications/src/lib.rs` (reason-2 filter), `backend/dbus.rs` |
-| Source → cancel | `…/notifications/AnyFlowNotificationListener.kt`, `…/capability/NotificationsCapability.kt` |
+| Source → cancel | `…/notifications/OmniBridgeNotificationListener.kt`, `…/capability/NotificationsCapability.kt` |
 | Echo suppression | `…/notifications/NotificationCaches.kt`, `src/dedup.rs` |
 
 **Tests.** Reason 1 and reason 3 produce **no** dismissal request — this is the

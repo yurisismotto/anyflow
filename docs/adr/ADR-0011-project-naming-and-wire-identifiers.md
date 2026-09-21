@@ -1,6 +1,18 @@
 # ADR-0011 — Project naming and wire identifiers
 
-Status: Accepted
+Status: Accepted, but **its identifier tables are superseded by
+[ADR-0018](ADR-0018-rename-to-omnibridge.md).**
+
+> **⚠ Historical.** This ADR records the *Fedroid Bridge → AnyFlow* rename. The
+> project was renamed again, to **OmniBridge**, before the public v1.0.0
+> release. Every `anyflow` value in the tables below has since moved to its
+> `omnibridge` equivalent — see ADR-0018 for the current values and
+> `docs/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md` for what that means for a
+> development checkout.
+>
+> The text is left exactly as written. It is the record of a decision that was
+> actually taken, and ADR-0018 reuses its reasoning rather than restating it;
+> rewriting it to say "OmniBridge" would destroy both.
 
 ## Context
 

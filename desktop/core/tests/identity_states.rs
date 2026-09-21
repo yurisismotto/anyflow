@@ -19,10 +19,10 @@
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
-use anyflow_core::identity::{IdentityBackend, IdentityState, KeyBacking, SoftwareBacking};
-use anyflow_core::secret_store::{SecretStore, StoreAccessError, StoreResult, IDENTITY_SECRET};
-use anyflow_core::store::{Store, StoreConfig};
-use anyflow_core::Fingerprint;
+use omnibridge_core::identity::{IdentityBackend, IdentityState, KeyBacking, SoftwareBacking};
+use omnibridge_core::secret_store::{SecretStore, StoreAccessError, StoreResult, IDENTITY_SECRET};
+use omnibridge_core::store::{Store, StoreConfig};
+use omnibridge_core::Fingerprint;
 
 /// A store with an identity in it, plus a snapshot of what is on disk.
 struct Fixture {
@@ -110,7 +110,7 @@ fn an_empty_directory_is_not_created_and_may_generate() {
 #[test]
 fn a_directory_that_does_not_exist_yet_is_also_a_first_run() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let nested = dir.path().join("a/b/anyflow");
+    let nested = dir.path().join("a/b/omnibridge");
     let store = Store::open(&nested).expect("first run must succeed");
     assert!(nested.join("identity.key").exists());
     assert_eq!(store.key_backing(), KeyBacking::Software);
@@ -354,7 +354,7 @@ fn a_schema_1_state_file_loads_and_reads_back_as_software() {
 /// than of one implementation.
 #[derive(Debug)]
 struct FaultyStore {
-    inner: anyflow_core::platform::unix_fs::FileSecretStore,
+    inner: omnibridge_core::platform::unix_fs::FileSecretStore,
     fault: Option<StoreAccessError>,
     on_state: bool,
     writes: std::sync::Mutex<Vec<&'static str>>,
@@ -363,7 +363,7 @@ struct FaultyStore {
 impl FaultyStore {
     fn new(dir: &std::path::Path, fault: Option<StoreAccessError>, on_state: bool) -> Arc<Self> {
         Arc::new(Self {
-            inner: anyflow_core::platform::unix_fs::FileSecretStore::new(dir),
+            inner: omnibridge_core::platform::unix_fs::FileSecretStore::new(dir),
             fault,
             on_state,
             writes: std::sync::Mutex::new(Vec::new()),
@@ -415,7 +415,7 @@ fn config(secrets: Arc<FaultyStore>) -> StoreConfig {
     StoreConfig {
         secrets,
         backend: Arc::new(SoftwareBacking),
-        platform: anyflow_proto::v1::Platform::Linux,
+        platform: omnibridge_proto::v1::Platform::Linux,
         default_device_name: "Test Device".into(),
     }
 }
@@ -528,7 +528,7 @@ fn every_fault_leaves_the_identity_intact_and_only_absence_creates() {
             "{name}: this state must never be allowed to create an identity"
         );
 
-        // Whatever the fault did, AnyFlow did not add to it.
+        // Whatever the fault did, OmniBridge did not add to it.
         std::fs::write(f.state_path(), &state_before).expect("restore state");
         std::fs::write(f.key_path(), &key_before).expect("restore key");
         std::fs::set_permissions(f.key_path(), std::fs::Permissions::from_mode(0o600))

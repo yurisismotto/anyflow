@@ -28,10 +28,10 @@ mod common;
 
 use std::time::Duration;
 
-use anyflow_capability_notifications::backend::{CloseReason, MemorySink, SinkError};
-use anyflow_capability_notifications::{LockPolicy, NotificationPolicy};
-use anyflow_proto::v1::capabilities as pb;
 use common::*;
+use omnibridge_capability_notifications::backend::{CloseReason, MemorySink, SinkError};
+use omnibridge_capability_notifications::{LockPolicy, NotificationPolicy};
+use omnibridge_proto::v1::capabilities as pb;
 
 /// Short enough to cross inside a test, long enough that the worker is not
 /// racing it.
@@ -126,8 +126,12 @@ async fn a_disconnect_longer_than_the_grace_closes_the_mirrors() {
 async fn a_peer_that_never_returns_leaves_no_mirrors_and_no_content() {
     let mut h = Harness::start().await;
     h.manager.set_reconnect_grace(SHORT_GRACE);
-    h.send_upsert(upsert(1, "ANYFLOW-N5-GRACE-TITLE", "ANYFLOW-N5-GRACE-BODY"))
-        .await;
+    h.send_upsert(upsert(
+        1,
+        "OMNIBRIDGE-N5-GRACE-TITLE",
+        "OMNIBRIDGE-N5-GRACE-BODY",
+    ))
+    .await;
     h.expect_outcome(pb::NotificationOutcome::Displayed).await;
 
     h.detach().await;
@@ -137,7 +141,7 @@ async fn a_peer_that_never_returns_leaves_no_mirrors_and_no_content() {
     let reports = h.manager.peer_reports().await;
     let rendered = format!("{reports:?}");
     assert!(!rendered.is_empty());
-    for canary in ["ANYFLOW-N5-GRACE-TITLE", "ANYFLOW-N5-GRACE-BODY"] {
+    for canary in ["OMNIBRIDGE-N5-GRACE-TITLE", "OMNIBRIDGE-N5-GRACE-BODY"] {
         assert!(
             !rendered.contains(canary),
             "a departed peer's report carried {canary}"
@@ -154,7 +158,7 @@ async fn a_peer_that_never_returns_leaves_no_mirrors_and_no_content() {
 /// goes with it. Resetting it only on the *next* `attach_session` was almost
 /// enough and left one real gap: a session rebuilt without this capability
 /// negotiated never calls `attach_session`, so the previous session's roles
-/// survived it and `anyflow notifications status` went on reporting "the
+/// survived it and `omnibridge notifications status` went on reporting "the
 /// device can source notifications (epoch 2)" for a peer that had no channel
 /// to say so on. Observed on hardware during the N5 §5 gate.
 ///
@@ -1434,8 +1438,8 @@ async fn a_dead_outbound_channel_does_not_stall_the_worker() {
 /// things are going wrong is exactly where content leaks.
 #[tokio::test]
 async fn no_failure_path_puts_content_in_a_report() {
-    const TITLE: &str = "ANYFLOW-N5-FAIL-TITLE";
-    const BODY: &str = "ANYFLOW-N5-FAIL-BODY";
+    const TITLE: &str = "OMNIBRIDGE-N5-FAIL-TITLE";
+    const BODY: &str = "OMNIBRIDGE-N5-FAIL-BODY";
 
     let mut h = Harness::start_dismissing().await;
     h.send_upsert(upsert(1, TITLE, BODY)).await;

@@ -10,7 +10,7 @@ are handed out by DHCP and change. No cloud rendezvous service is permitted
 
 ## Decision
 
-DNS-SD over mDNS, service type `_anyflow._tcp.local.`
+DNS-SD over mDNS, service type `_omnibridge._tcp.local.`
 
 **The desktop advertises; the phone browses and always initiates the
 connection.** The direction is fixed.

@@ -4,7 +4,7 @@
 //! real session.
 //!
 //! ```console
-//! cargo test -p anyflow-capability-notifications --test real_lock -- --ignored --nocapture
+//! cargo test -p omnibridge-capability-notifications --test real_lock -- --ignored --nocapture
 //! ```
 //!
 //! **It does not lock the screen.** Locking a maintainer's session from a test
@@ -29,7 +29,7 @@
 // can build every test target in this crate without an exclusion list.
 #![cfg(feature = "linux-dbus")]
 
-use anyflow_capability_notifications::backend::{logind::LogindLock, LockSource, UnknownLock};
+use omnibridge_capability_notifications::backend::{logind::LogindLock, LockSource, UnknownLock};
 
 #[tokio::test]
 #[ignore = "reads the real logind session; run with --ignored"]

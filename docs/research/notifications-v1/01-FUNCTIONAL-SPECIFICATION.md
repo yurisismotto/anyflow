@@ -162,8 +162,8 @@ actually withdrawn anything.
 
 `META_DATA_DEFAULT_AUTOBIND = false` ([00 §1.6](00-RESEARCH-FINDINGS.md)).
 
-The system therefore does **not** bind AnyFlow's listener merely because the app
-is installed and access is granted. AnyFlow binds it with `requestRebind` only
+The system therefore does **not** bind OmniBridge's listener merely because the app
+is installed and access is granted. OmniBridge binds it with `requestRebind` only
 while:
 
 * at least one paired peer holds a `notifications.v1` grant, **and**
@@ -176,7 +176,7 @@ This is the same discipline the clipboard watcher already follows — *"it start
 only when needed: with no `auto_send` peer there is no watcher, no child process
 and no X connection"* — and it buys the same three things: no notification data
 is read when nobody is listening, the battery cost is zero when idle, and the
-claim "AnyFlow reads your notifications only while your computer is connected"
+claim "OmniBridge reads your notifications only while your computer is connected"
 is structurally true rather than a promise.
 
 ---
@@ -213,7 +213,7 @@ what to share, and naming everything takes one tap for the people who want that.
 
 ### 5.2 Newly installed apps: default deny
 
-An app installed after the grant is **not** shared. AnyFlow does not
+An app installed after the grant is **not** shared. OmniBridge does not
 retroactively widen a decision the user made about a different set of apps.
 
 The discoverability cost is paid with a passive affordance, not a prompt:
@@ -225,7 +225,7 @@ dialog. If the user never looks, the safe thing keeps happening.
 
 | Rule | Why |
 | --- | --- |
-| **AnyFlow's own package is never mirrored** | Loop prevention ([02 §9.4](02-PROTOCOL-AND-EVENT-MODEL.md)). Not a default — there is no setting |
+| **OmniBridge's own package is never mirrored** | Loop prevention ([02 §9.4](02-PROTOCOL-AND-EVENT-MODEL.md)). Not a default — there is no setting |
 | **`VISIBILITY_SECRET` is never mirrored** | The app said "not even on a lock screen". [02 §6.2](02-PROTOCOL-AND-EVENT-MODEL.md) |
 | **Work-profile notifications need `include_work_profile`** | Separate, default-off, and independent of the app list. §5.4 |
 | **Ongoing notifications need `include_ongoing`** | Default off. §5.5 |
@@ -237,7 +237,7 @@ the profile's administrator blocks it ([00 §1.8](00-RESEARCH-FINDINGS.md)), and
 `sbn.getUserId()` distinguishes them.
 
 Mirroring an employer's data onto a personal machine is a decision with
-consequences that are not AnyFlow's to make on someone's behalf, so
+consequences that are not OmniBridge's to make on someone's behalf, so
 `include_work_profile` is **off by default** and is a separate switch from the
 app list — a user who shares "Slack" from their personal profile has not thereby
 asked to share work Slack.
@@ -245,9 +245,9 @@ asked to share work Slack.
 Two honest notes for the UI copy: work-profile notifications are shown as such
 on the desktop (a badge, from the `secondary_profile` flag), and if the
 administrator has blocked notification listeners the switch explains that
-AnyFlow cannot see them at all rather than silently showing nothing.
+OmniBridge cannot see them at all rather than silently showing nothing.
 
-If AnyFlow is installed *in* the work profile it receives nothing whatsoever —
+If OmniBridge is installed *in* the work profile it receives nothing whatsoever —
 the system ignores listeners running in a work profile — and the settings screen
 must say that, since it is otherwise indistinguishable from a bug.
 
@@ -358,7 +358,7 @@ that decides what crosses the wire. Source `AppOnly` plus sink `AppOnly` is
 
 It does not stop a person reading the *phone's* lock screen, and it does not
 change how the desktop renders notifications from other applications. It governs
-what AnyFlow transmits and what AnyFlow posts. Stating the boundary is part of
+what OmniBridge transmits and what OmniBridge posts. Stating the boundary is part of
 the feature.
 
 ---
@@ -371,15 +371,15 @@ get wrong.
 ```text
 ┌────────────────────────────────────────────────────────────┐
 │ 1. Android OS notification access                          │
-│    Granted in Settings, to AnyFlow, for the whole device.  │
-│    Lets AnyFlow read notifications AT ALL.                 │
+│    Granted in Settings, to OmniBridge, for the whole device.  │
+│    Lets OmniBridge read notifications AT ALL.                 │
 │    Revocable in Settings at any time.                      │
 └────────────────────────────────────────────────────────────┘
                             │  necessary, NOT sufficient
                             ▼
 ┌────────────────────────────────────────────────────────────┐
-│ 2. AnyFlow peer grant: notifications.v1 for THIS computer  │
-│    Granted per paired device, in AnyFlow.                  │
+│ 2. OmniBridge peer grant: notifications.v1 for THIS computer  │
+│    Granted per paired device, in OmniBridge.                  │
 │    Lets that ONE computer receive them.                    │
 └────────────────────────────────────────────────────────────┘
                             │  and then
@@ -393,15 +393,15 @@ Rules for the flow:
 
 * Completing step 1 grants **nothing** to any peer. The UI must never present OS
   notification access as "turning on notification sharing".
-* Step 2 is per device and is what `anyflow grant <device> notifications.v1`
+* Step 2 is per device and is what `omnibridge grant <device> notifications.v1`
   and the Android device-card switch write.
 * Revoking step 1 revokes everything downstream at once
   ([02 §13](02-PROTOCOL-AND-EVENT-MODEL.md)): the role announcement drops
   `SOURCE` and every mirror closes.
 * Revoking step 2 for one device affects only that device.
-* AnyFlow links to step 1 with `ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS`
+* OmniBridge links to step 1 with `ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS`
   plus `EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME`
-  ([00 §1.10](00-RESEARCH-FINDINGS.md)), which lands on AnyFlow's own switch
+  ([00 §1.10](00-RESEARCH-FINDINGS.md)), which lands on OmniBridge's own switch
   rather than a list of every app on the device.
 
 ---
@@ -414,7 +414,7 @@ Rules for the flow:
 ┌─ Notifications ──────────────────────────────────────────┐
 │                                                          │
 │  Notification access                        [ Granted ]  │
-│  Android needs to allow AnyFlow to read notifications    │
+│  Android needs to allow OmniBridge to read notifications    │
 │  before any of this works.                → Open Settings│
 │                                                          │
 │  ────────────────────────────────────────────────────    │
@@ -455,7 +455,7 @@ and, per device:
 │   Music, navigation and "app is running" notices.        │
 │                                                          │
 │  ────────────────────────────────────────────────────    │
-│  AnyFlow never shares its own notifications, and never   │
+│  OmniBridge never shares its own notifications, and never   │
 │  shares notifications an app marks as private to the     │
 │  lock screen.                                            │
 │                                                          │
@@ -484,8 +484,8 @@ It should be reviewed as one, not as marketing. Two rules bind it:
   delivering six OTP-shaped notifications, across three vectors, to an untrusted
   listener **entirely unredacted**, with the platform flag enabled and Google's
   classifier bound. Copy of the form "Android hides verification codes
-  automatically" would be false on the one device AnyFlow certifies against.
-* **It must not imply that AnyFlow detects sensitive content.** It does not, by
+  automatically" would be false on the one device OmniBridge certifies against.
+* **It must not imply that OmniBridge detects sensitive content.** It does not, by
   design ([ADR-0015 §5](../../adr/ADR-0015-notification-access.md)). The honest
   statement is the one the product can keep: *what you choose to share is
   shared, in full, with the computer you named* — which is exactly why the app
@@ -493,11 +493,11 @@ It should be reviewed as one, not as marketing. Two rules bind it:
 
 ### 8.2 Linux — CLI
 
-Following the existing `anyflow clipboard status` pattern, which exists so a
+Following the existing `omnibridge clipboard status` pattern, which exists so a
 person can find out what will and will not work *before* turning something on:
 
 ```console
-$ anyflow notifications status
+$ omnibridge notifications status
 notifications.v1
   role                sink, dismiss-reporter
   server              gnome-shell 50.4 (GNOME), spec 1.2
@@ -509,12 +509,12 @@ notifications.v1
   galaxy-tab-s10       granted    mirroring    dismiss-sync on
   work-phone           not granted
 
-$ anyflow notifications policy galaxy-tab-s10 --when-locked app-only
-$ anyflow grant galaxy-tab-s10 notifications.v1
-$ anyflow notifications clear galaxy-tab-s10      # close every mirror from this peer
+$ omnibridge notifications policy galaxy-tab-s10 --when-locked app-only
+$ omnibridge grant galaxy-tab-s10 notifications.v1
+$ omnibridge notifications clear galaxy-tab-s10      # close every mirror from this peer
 ```
 
-`anyflow notifications status` **never lists notification content, titles, or
+`omnibridge notifications status` **never lists notification content, titles, or
 app names of active mirrors.** It reports counts. A status command that printed
 the last four notifications would put them in a terminal scrollback and in every
 bug report that pastes it.
@@ -524,7 +524,7 @@ bug report that pastes it.
 The device card gains a `notifications.v1` row beside `clipboard.v1`'s, with the
 grant switch, the lock policy, and a "clear all mirrors from this device"
 action. No list of received notifications, ever: the desktop's own notification
-list is where they live, and duplicating it inside AnyFlow would create the
+list is where they live, and duplicating it inside OmniBridge would create the
 history this design forbids.
 
 ---
@@ -539,7 +539,7 @@ applications' notifications ([00 §2.7](00-RESEARCH-FINDINGS.md)). Only one
 process may own `org.freedesktop.Notifications`, and taking it means *becoming*
 the desktop's notification server. The alternative — monitoring the session bus
 for other applications' method calls — needs bus policy that amounts to "let
-AnyFlow read every notification on this machine before the shell does", which is
+OmniBridge read every notification on this machine before the shell does", which is
 not a thing this project should ask a user to configure.
 
 So: Linux is a sink. The protocol does not encode that assumption anywhere
@@ -558,7 +558,7 @@ is a later decision rather than a later migration.
 ## 10. Internationalization
 
 **Notification content is opaque user text and is never translated,
-transliterated, normalised, spell-corrected or re-encoded by AnyFlow.** It is
+transliterated, normalised, spell-corrected or re-encoded by OmniBridge.** It is
 carried byte-for-byte within the encoding rules of
 [02 §11.3](02-PROTOCOL-AND-EVENT-MODEL.md) — the same guarantee `clipboard.v1`
 makes about clipboard text, and for the same reason: a "helpful" rewrite would
@@ -570,7 +570,7 @@ device's locale*. A phone in Portuguese sends "Definições"; the desktop shows
 impossible anyway — the desktop has no package database — and guessing would be
 worse than being consistent with the phone.
 
-AnyFlow's **own** UI strings follow the existing localization strategy and must
+OmniBridge's **own** UI strings follow the existing localization strategy and must
 be externalised, not inlined:
 
 | Surface | Where |
@@ -583,7 +583,7 @@ be externalised, not inlined:
 
 Two specific rules:
 
-* Numbers in AnyFlow's own strings ("6 of 74 apps") use the platform's locale
+* Numbers in OmniBridge's own strings ("6 of 74 apps") use the platform's locale
   formatting; they are never concatenated into a sentence by hand.
 * An `app_label` is rendered **as data**, never interpolated into a translatable
   format string in a way that would let it change a sentence's grammar or, worse,

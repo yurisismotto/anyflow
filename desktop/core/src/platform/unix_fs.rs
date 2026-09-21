@@ -1,9 +1,9 @@
 //! The Unix filesystem implementation of [`SecretStore`].
 //!
-//! Everything AnyFlow has always done, moved behind the trait and with the
+//! Everything OmniBridge has always done, moved behind the trait and with the
 //! absent/unreadable confusion removed:
 //!
-//! * `$XDG_DATA_HOME/anyflow`, else `~/.local/share/anyflow`;
+//! * `$XDG_DATA_HOME/omnibridge`, else `~/.local/share/omnibridge`;
 //! * `identity.key` at mode 0600 inside a directory at mode 0700;
 //! * write-then-rename, with the temp file created **already** at the final
 //!   mode so there is no window in which the key is world-readable;
@@ -210,15 +210,15 @@ impl SecretStore for FileSecretStore {
     }
 }
 
-/// Default location: `$XDG_DATA_HOME/anyflow`, else `~/.local/share/…`.
+/// Default location: `$XDG_DATA_HOME/omnibridge`, else `~/.local/share/…`.
 pub fn default_data_dir() -> PathBuf {
     if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
-        PathBuf::from(xdg).join("anyflow")
+        PathBuf::from(xdg).join("omnibridge")
     } else {
         let home = std::env::var_os("HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
-        home.join(".local/share/anyflow")
+        home.join(".local/share/omnibridge")
     }
 }
 
@@ -242,7 +242,7 @@ pub fn default_device_name() -> String {
             return name;
         }
     }
-    "AnyFlow Desktop".to_string()
+    "OmniBridge Desktop".to_string()
 }
 
 #[cfg(test)]

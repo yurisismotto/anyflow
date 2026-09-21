@@ -12,7 +12,7 @@
 
 ## 1. What we are protecting, and why this is the worst of it
 
-`notifications.v1` handles the most sensitive data AnyFlow has ever carried.
+`notifications.v1` handles the most sensitive data OmniBridge has ever carried.
 Not "sensitive" as a category label — sensitive in the specific sense that the
 notification shade of an ordinary phone routinely contains, without the person
 ever choosing to put it there:
@@ -68,7 +68,7 @@ Numbering continues the main threat model, which ends at T26.
 ### T-N01 — A malicious paired peer harvests notifications
 
 *A6.* A granted peer receives every allowed notification for as long as the
-grant lasts, and can store, forward or index them. AnyFlow cannot see what a
+grant lasts, and can store, forward or index them. OmniBridge cannot see what a
 peer does with data it was granted.
 
 **Mitigation.** Layered, and all of it consent rather than cleverness:
@@ -92,8 +92,8 @@ one-time code on a second screen, in a second room, on a second attack surface.
 
 **Mitigation.**
 
-* Android 15+ *may* redact OTP-classified notifications before AnyFlow ever sees
-  them, because AnyFlow is an *untrusted* listener with no CDM association
+* Android 15+ *may* redact OTP-classified notifications before OmniBridge ever sees
+  them, because OmniBridge is an *untrusted* listener with no CDM association
   ([00 §1.7](00-RESEARCH-FINDINGS.md)). Where this fires, the content never
   reaches us. **It does not fire on the certification target.**
   [POC-NOTIF-01](poc/POC-NOTIF-01.md) posted six OTP-shaped notifications across
@@ -111,7 +111,7 @@ one-time code on a second screen, in a second room, on a second attack surface.
 * The lock policy means a code arriving while the phone is locked is not
   transmitted in full by default.
 
-**AnyFlow does not attempt to detect OTPs itself.** No regex, no keyword list,
+**OmniBridge does not attempt to detect OTPs itself.** No regex, no keyword list,
 no "looks like a code" heuristic. The reasoning is
 [THREAT_MODEL.md T10](../../security/THREAT_MODEL.md)'s, unchanged: a guess
 dressed up as a security control is worse than an honest boundary, because the
@@ -132,7 +132,7 @@ this changes:
   ([01 §8.1](01-FUNCTIONAL-SPECIFICATION.md)).
 
 A person who puts their authenticator app in the allow-list has chosen to mirror
-their codes. AnyFlow's obligation is to make that a choice rather than a
+their codes. OmniBridge's obligation is to make that a choice rather than a
 surprise, and to be honest that it is not undone by the platform.
 
 ### T-N03 — Adopting CompanionDeviceManager would silently remove a protection
@@ -147,7 +147,7 @@ CDM association as **trust**, which switches off sensitive-content redaction
 
 So a change made for background-execution reasons, in a different sprint, by
 someone who never read this document, would quietly start delivering unredacted
-OTPs to AnyFlow.
+OTPs to OmniBridge.
 
 **Mitigation — now a decision, not a note.**
 [ADR-0015 §10](../../adr/ADR-0015-notification-access.md) records that
@@ -245,11 +245,11 @@ certainly not something to do by accident.
 **Mitigation.** `include_work_profile` is a separate switch, **off by default**,
 independent of the app allow-list. Work-profile mirrors are badged as such on
 the desktop via the `secondary_profile` flag. Where the administrator has
-disabled cross-profile listeners, the platform enforces it and AnyFlow reports
+disabled cross-profile listeners, the platform enforces it and OmniBridge reports
 that it cannot see them rather than showing an empty list.
 
 **Residual risk.** A user can turn it on. That is their decision and their
-employer's policy; AnyFlow's job is to make it a decision rather than a default.
+employer's policy; OmniBridge's job is to make it a decision rather than a default.
 
 ### T-N08 — Notification flooding and desktop spam
 
@@ -274,7 +274,7 @@ same bound `clipboard.v1` relies on.
 
 *A6, design-time.* The natural next features — reply, action buttons, "open on
 phone" — all require executing a `PendingIntent` on the source, which is
-arbitrary code execution scoped by the notifying app rather than by AnyFlow.
+arbitrary code execution scoped by the notifying app rather than by OmniBridge.
 
 **Mitigation.** v1 carries no `PendingIntent`, no action list, no `RemoteInput`
 and no `RemoteViews`, and the schema has no field that could hold one
@@ -326,7 +326,7 @@ Nothing built by this capability reaches a shell, an `argv` or
 not through a command line.
 
 **Residual risk.** Unaudited third-party crash reporters would defeat this.
-AnyFlow ships none.
+OmniBridge ships none.
 
 ### T-N12 — Persistence: a history nobody asked for
 
@@ -347,7 +347,7 @@ back with storage later.
 to it — GNOME advertises `persistence` ([00 §2.1](00-RESEARCH-FINDINGS.md)), so
 mirrors sit in the GNOME notification list until cleared. That is the platform's
 notification list behaving normally, it is visible to the user, and
-`anyflow notifications clear <device>` closes them. It is worth stating plainly
+`omnibridge notifications clear <device>` closes them. It is worth stating plainly
 in the UI rather than leaving as a surprise.
 
 ### T-N13 — Revoked peer keeps receiving
@@ -356,7 +356,7 @@ in the UI rather than leaving as a surprise.
 hostile peer reading notifications for as long as it keeps the socket open.
 
 **Mitigation.** Inherited and unchanged: the grant is re-checked from the trust
-store on **every message**, never from a set captured at handshake time; `anyflow
+store on **every message**, never from a set captured at handshake time; `omnibridge
 unpair` clears grants and tears down the live session
 ([THREAT_MODEL.md T5](../../security/THREAT_MODEL.md)). `notifications.v1` adds
 one requirement of its own — revocation must also **close every mirror already
@@ -368,15 +368,15 @@ granted. There is no automatic detection of a compromised peer.
 
 ### T-N14 — Loops and amplification
 
-*Design-time, and a real risk given AnyFlow posts its own notifications.*
+*Design-time, and a real risk given OmniBridge posts its own notifications.*
 
 **Mitigation.** Four independent rules, in
-[02 §9.4](02-PROTOCOL-AND-EVENT-MODEL.md): AnyFlow's own package is dropped
+[02 §9.4](02-PROTOCOL-AND-EVENT-MODEL.md): OmniBridge's own package is dropped
 before any other check and there is no setting to re-enable it; there is no code
 path from an inbound upsert to an outbound one (no relay, enforced by absence,
 exactly as in [CLIPBOARD.md](../../architecture/CLIPBOARD.md)); every message
 carries `origin_device_id` so a future bidirectional platform can recognise its
-own output; and sink-created mirrors are marked with AnyFlow's `desktop-entry`
+own output; and sink-created mirrors are marked with OmniBridge's `desktop-entry`
 hint. Dismissal echoes are suppressed single-use and short-lived
 ([02 §9.3](02-PROTOCOL-AND-EVENT-MODEL.md)).
 
@@ -413,13 +413,13 @@ until 2026-09-08 advertised its **absence** as a feature
 > must stay that way"*. This section describes the residual responsibility, not
 > the decision.
 
-**Mitigation.** The permission is held **by the system, not by AnyFlow** — it is
+**Mitigation.** The permission is held **by the system, not by OmniBridge** — it is
 what stops other apps binding our service, exactly as
 `BIND_QUICK_SETTINGS_TILE` does for the existing tile. Access is granted by the
 user in Settings, revocable there at any time, and grants **nothing** to any
 peer on its own ([01 §7](01-FUNCTIONAL-SPECIFICATION.md)). The listener is not
 even bound unless a granted peer is connected
-([01 §4](01-FUNCTIONAL-SPECIFICATION.md)), so an installed-but-unused AnyFlow
+([01 §4](01-FUNCTIONAL-SPECIFICATION.md)), so an installed-but-unused OmniBridge
 reads no notifications at all.
 
 What does **not** change: no accessibility service, no default-IME request, no
@@ -427,7 +427,7 @@ What does **not** change: no accessibility service, no default-IME request, no
 hidden APIs, no reflection. The README's *"No root, no accessibility service, no
 ADB, no hidden permissions"* survives intact.
 
-**Residual risk.** The user must trust AnyFlow with notification access. That
+**Residual risk.** The user must trust OmniBridge with notification access. That
 trust is the feature. It is repaid by the code being open, by nothing leaving
 the LAN, and by the app being unable to read anything while no peer is
 connected — and it must be earned in the permission copy, not assumed.
@@ -443,7 +443,7 @@ one against a section rather than a paragraph:
 | --- | --- |
 | Explicit capability grant per peer | [01 §3](01-FUNCTIONAL-SPECIFICATION.md); never in `auto_grant` |
 | Notification access granted explicitly at the Android OS level | [01 §7](01-FUNCTIONAL-SPECIFICATION.md) step 1 |
-| AnyFlow permission separately required | [01 §7](01-FUNCTIONAL-SPECIFICATION.md) step 2 — and step 1 grants nothing downstream |
+| OmniBridge permission separately required | [01 §7](01-FUNCTIONAL-SPECIFICATION.md) step 2 — and step 1 grants nothing downstream |
 | No notification content in logs | [01 §11](01-FUNCTIONAL-SPECIFICATION.md), T-N11, proved by `logging.rs` |
 | No notification history | [02 §7.3](02-PROTOCOL-AND-EVENT-MODEL.md), T-N12 |
 | No notification content in `state.json` | [01 §11](01-FUNCTIONAL-SPECIFICATION.md), T-N12 |
@@ -489,7 +489,7 @@ Security behaviour is proved by tests that fail loudly, not by prose. The suite
 | NOTIF-SEC-08 | A replayed upsert answers `DUPLICATE` and changes nothing |
 | NOTIF-SEC-09 | A cross-peer-replayed `notification_id` cannot touch another peer's mirror |
 | NOTIF-SEC-10 | `VISIBILITY_SECRET` is never transmitted, in any policy |
-| NOTIF-SEC-11 | AnyFlow's own package is never sourced |
+| NOTIF-SEC-11 | OmniBridge's own package is never sourced |
 | NOTIF-SEC-12 | No relay: peer A's notification never reaches peer B |
 | NOTIF-SEC-13 | An app not in the allow-list is never transmitted |
 | NOTIF-SEC-14 | Work-profile notifications are not transmitted with the switch off |

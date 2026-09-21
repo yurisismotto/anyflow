@@ -44,7 +44,7 @@ const CERT_VALIDITY_DAYS: i64 = 3650;
 /// A device's own identity: a keypair, its certificate, and its metadata.
 ///
 /// This is the **software** implementation of [`IdentityProvider`] — the one
-/// AnyFlow has always shipped, and the only one Wave 0 ships. It holds the
+/// OmniBridge has always shipped, and the only one Wave 0 ships. It holds the
 /// PKCS#8 bytes because a software key genuinely is bytes. A TPM, Secure
 /// Enclave or Keystore implementation of the same trait holds a handle
 /// instead and can never produce those bytes; that is the entire point of the
@@ -52,7 +52,7 @@ const CERT_VALIDITY_DAYS: i64 = 3650;
 pub struct LocalIdentity {
     device_id: String,
     device_name: String,
-    platform: anyflow_proto::v1::Platform,
+    platform: omnibridge_proto::v1::Platform,
     cert_der: CertificateDer<'static>,
     key_pkcs8_der: Vec<u8>,
     fingerprint: Fingerprint,
@@ -65,7 +65,7 @@ pub struct LocalIdentity {
 
 impl LocalIdentity {
     /// Generates a brand-new identity. Called once, on first run.
-    pub fn generate(device_name: &str, platform: anyflow_proto::v1::Platform) -> Result<Self> {
+    pub fn generate(device_name: &str, platform: omnibridge_proto::v1::Platform) -> Result<Self> {
         let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
             .map_err(|_| Error::Certificate("failed to generate P-256 keypair"))?;
         let device_id = random_device_id()?;
@@ -83,7 +83,7 @@ impl LocalIdentity {
     pub fn from_parts(
         device_id: String,
         device_name: String,
-        platform: anyflow_proto::v1::Platform,
+        platform: omnibridge_proto::v1::Platform,
         cert_der: Vec<u8>,
         key_pkcs8_der: Vec<u8>,
     ) -> Result<Self> {
@@ -140,7 +140,7 @@ impl LocalIdentity {
             .map_err(|_| Error::Certificate("bad certificate parameters"))?;
 
         let mut dn = rcgen::DistinguishedName::new();
-        dn.push(rcgen::DnType::CommonName, format!("anyflow:{device_id}"));
+        dn.push(rcgen::DnType::CommonName, format!("omnibridge:{device_id}"));
         params.distinguished_name = dn;
 
         params.not_before = rcgen::date_time_ymd(2020, 1, 1);
@@ -178,7 +178,7 @@ impl LocalIdentity {
         self.device_name = name;
     }
 
-    pub fn platform(&self) -> anyflow_proto::v1::Platform {
+    pub fn platform(&self) -> omnibridge_proto::v1::Platform {
         self.platform
     }
 
@@ -204,8 +204,8 @@ impl LocalIdentity {
     }
 
     /// The public `DeviceInfo` this device puts on the wire.
-    pub fn device_info(&self) -> anyflow_proto::v1::DeviceInfo {
-        anyflow_proto::v1::DeviceInfo {
+    pub fn device_info(&self) -> omnibridge_proto::v1::DeviceInfo {
+        omnibridge_proto::v1::DeviceInfo {
             device_id: self.device_id.clone(),
             device_name: self.device_name.clone(),
             platform: self.platform as i32,
@@ -245,7 +245,7 @@ pub fn random_device_id() -> Result<String> {
 
 /// How the private key is protected on this device.
 ///
-/// Reported locally — `anyflow status` shows it — and **never** put on the
+/// Reported locally — `omnibridge status` shows it — and **never** put on the
 /// wire. A peer's claim about its own key storage is unverifiable, and an
 /// unverifiable self-report is not a security property (PLAT-DEC-012).
 ///
@@ -257,7 +257,7 @@ pub fn random_device_id() -> Result<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyBacking {
-    /// A PKCS#8 key in a file this process can read. Everything AnyFlow has
+    /// A PKCS#8 key in a file this process can read. Everything OmniBridge has
     /// ever shipped, and the only backing Wave 0 implements.
     Software,
     /// Windows: a CNG key in the platform TPM.
@@ -275,7 +275,7 @@ impl KeyBacking {
         matches!(self, Self::Software)
     }
 
-    /// One word for `anyflow status`.
+    /// One word for `omnibridge status`.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Software => "software",
@@ -386,7 +386,7 @@ impl From<IdentityState> for Error {
     /// operator can see both what happened and that nothing was destroyed.
     fn from(state: IdentityState) -> Self {
         Error::Store(format!(
-            "{state}. The existing identity has NOT been replaced: AnyFlow \
+            "{state}. The existing identity has NOT been replaced: OmniBridge \
              never generates a new identity over one it cannot read, because \
              that would silently break every pairing on every peer."
         ))
@@ -409,7 +409,7 @@ pub trait IdentityProvider: Send + Sync + std::fmt::Debug {
     /// On the provider rather than on the storage layer: before Wave 0 the
     /// value was hardcoded in `store.rs`, which meant the persistence layer
     /// decided what kind of machine this was (audit finding C2).
-    fn platform(&self) -> anyflow_proto::v1::Platform;
+    fn platform(&self) -> omnibridge_proto::v1::Platform;
 
     fn certificate_der(&self) -> &CertificateDer<'static>;
     fn fingerprint(&self) -> Fingerprint;
@@ -437,8 +437,8 @@ pub trait IdentityProvider: Send + Sync + std::fmt::Debug {
     /// The public `DeviceInfo` this device puts on the wire.
     ///
     /// Note what is absent: [`KeyBacking`]. See PLAT-DEC-012.
-    fn device_info(&self) -> anyflow_proto::v1::DeviceInfo {
-        anyflow_proto::v1::DeviceInfo {
+    fn device_info(&self) -> omnibridge_proto::v1::DeviceInfo {
+        omnibridge_proto::v1::DeviceInfo {
             device_id: self.device_id().to_string(),
             device_name: self.device_name().to_string(),
             platform: self.platform() as i32,
@@ -468,7 +468,7 @@ impl<T: IdentityProvider + ?Sized> IdentityProvider for Arc<T> {
     fn device_name(&self) -> &str {
         (**self).device_name()
     }
-    fn platform(&self) -> anyflow_proto::v1::Platform {
+    fn platform(&self) -> omnibridge_proto::v1::Platform {
         (**self).platform()
     }
     fn certificate_der(&self) -> &CertificateDer<'static> {
@@ -497,7 +497,7 @@ impl IdentityProvider for LocalIdentity {
         self.device_name()
     }
 
-    fn platform(&self) -> anyflow_proto::v1::Platform {
+    fn platform(&self) -> omnibridge_proto::v1::Platform {
         self.platform()
     }
 
@@ -551,7 +551,7 @@ impl Identity {
     pub fn device_name(&self) -> &str {
         self.0.device_name()
     }
-    pub fn platform(&self) -> anyflow_proto::v1::Platform {
+    pub fn platform(&self) -> omnibridge_proto::v1::Platform {
         self.0.platform()
     }
     pub fn certificate_der(&self) -> &CertificateDer<'static> {
@@ -569,7 +569,7 @@ impl Identity {
     pub fn verify_protection(&self) -> Result<()> {
         self.0.verify_protection()
     }
-    pub fn device_info(&self) -> anyflow_proto::v1::DeviceInfo {
+    pub fn device_info(&self) -> omnibridge_proto::v1::DeviceInfo {
         self.0.device_info()
     }
     pub fn certified_key(&self) -> Arc<CertifiedKey> {
@@ -584,7 +584,7 @@ impl IdentityProvider for Identity {
     fn device_name(&self) -> &str {
         self.0.device_name()
     }
-    fn platform(&self) -> anyflow_proto::v1::Platform {
+    fn platform(&self) -> omnibridge_proto::v1::Platform {
         self.0.platform()
     }
     fn certificate_der(&self) -> &CertificateDer<'static> {
@@ -630,7 +630,7 @@ pub trait IdentityBackend: Send + Sync + std::fmt::Debug {
     fn create(
         &self,
         device_name: &str,
-        platform: anyflow_proto::v1::Platform,
+        platform: omnibridge_proto::v1::Platform,
     ) -> Result<(Arc<dyn IdentityProvider>, Vec<u8>)>;
 
     /// Rebuilds an identity from what was persisted.
@@ -638,7 +638,7 @@ pub trait IdentityBackend: Send + Sync + std::fmt::Debug {
         &self,
         device_id: String,
         device_name: String,
-        platform: anyflow_proto::v1::Platform,
+        platform: omnibridge_proto::v1::Platform,
         certificate_der: Vec<u8>,
         secret: Vec<u8>,
     ) -> Result<Arc<dyn IdentityProvider>>;
@@ -646,7 +646,7 @@ pub trait IdentityBackend: Send + Sync + std::fmt::Debug {
 
 /// The software backing: a PKCS#8 P-256 key in a file.
 ///
-/// Wave 0's only implementation, and the one every AnyFlow install in the
+/// Wave 0's only implementation, and the one every OmniBridge install in the
 /// field is already using.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SoftwareBacking;
@@ -663,7 +663,7 @@ impl IdentityBackend for SoftwareBacking {
     fn create(
         &self,
         device_name: &str,
-        platform: anyflow_proto::v1::Platform,
+        platform: omnibridge_proto::v1::Platform,
     ) -> Result<(Arc<dyn IdentityProvider>, Vec<u8>)> {
         let identity = LocalIdentity::generate(device_name, platform)?;
         let secret = identity.private_key_pkcs8_der().to_vec();
@@ -674,7 +674,7 @@ impl IdentityBackend for SoftwareBacking {
         &self,
         device_id: String,
         device_name: String,
-        platform: anyflow_proto::v1::Platform,
+        platform: omnibridge_proto::v1::Platform,
         certificate_der: Vec<u8>,
         secret: Vec<u8>,
     ) -> Result<Arc<dyn IdentityProvider>> {

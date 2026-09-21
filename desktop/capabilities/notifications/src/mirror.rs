@@ -53,7 +53,7 @@
 
 use std::collections::BTreeMap;
 
-use anyflow_core::notifications::NotificationId;
+use omnibridge_core::notifications::NotificationId;
 
 use crate::backend::{ServerId, Urgency};
 use crate::limits::MAX_MIRRORS_PER_PEER;

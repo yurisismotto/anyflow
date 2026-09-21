@@ -22,11 +22,11 @@
 
 mod common;
 
-use anyflow_capability_notifications::roles::LocalRoles;
-use anyflow_capability_notifications::NotificationPolicy;
-use anyflow_core::notifications::Role;
-use anyflow_proto::v1::capabilities as pb;
 use common::{fingerprint, roles, Harness};
+use omnibridge_capability_notifications::roles::LocalRoles;
+use omnibridge_capability_notifications::NotificationPolicy;
+use omnibridge_core::notifications::Role;
+use omnibridge_proto::v1::capabilities as pb;
 
 /// **A — a fresh session is told this device's roles, once, before anything
 /// else.**

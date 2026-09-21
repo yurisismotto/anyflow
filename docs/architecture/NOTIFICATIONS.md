@@ -15,8 +15,8 @@ access contract [ADR-0015](../adr/ADR-0015-notification-access.md), for naming
 
 | Thing | State | Wave |
 | --- | --- | --- |
-| `protocol/proto/anyflow/v1/capabilities/notifications_v1.proto` | **Exists.** Compiled by both toolchains, and **unchanged since N0** | N0 |
-| `anyflow_core::notifications` — limits, validation, roles, snapshot framing | **Exists.** Portable, pure functions of decoded messages | N0 |
+| `protocol/proto/omnibridge/v1/capabilities/notifications_v1.proto` | **Exists.** Compiled by both toolchains, and **unchanged since N0** | N0 |
+| `omnibridge_core::notifications` — limits, validation, roles, snapshot framing | **Exists.** Portable, pure functions of decoded messages | N0 |
 | Capability id `notifications.v1` | **Registered unconditionally** on both ends | N1, N2 |
 | Android `NotificationListenerService` | **Exists.** Bound only while a granted peer is connected | N1 |
 | Linux notification sink, D-Bus code, `NotificationSink` trait | **Exists** | N2 |
@@ -51,8 +51,8 @@ access contract [ADR-0015](../adr/ADR-0015-notification-access.md), for naming
             │  one ordered stream per peer
             ▼
    ┌─────────────────────────────── Linux desktop ───────────────────────────────┐
-   │  anyflow-capability-notifications — decode, validate       (N2)             │
-   │        │      uses anyflow_core::notifications             (N0)             │
+   │  omnibridge-capability-notifications — decode, validate       (N2)             │
+   │        │      uses omnibridge_core::notifications             (N0)             │
    │        ▼                                                                    │
    │  grant check · policy · dedup · MirrorTable                (N2, N3)         │
    │        │                                                                    │
@@ -94,7 +94,7 @@ NotificationControl {
 }
 ```
 
-**Posted and Updated are one message.** No platform AnyFlow targets has a
+**Posted and Updated are one message.** No platform OmniBridge targets has a
 separate update operation — `onNotificationPosted` fires for both with the same
 key; freedesktop `Notify` with `replaces_id` is the same method; re-adding a
 macOS request with the same identifier replaces it. A protocol that invented the
@@ -234,7 +234,7 @@ is not delivered later.
 
 Three rules that are not negotiable:
 
-1. **AnyFlow does not detect sensitive content itself.** No OTP regex, no
+1. **OmniBridge does not detect sensitive content itself.** No OTP regex, no
    keyword list, no "looks like a bank" heuristic. A guess dressed as a security
    control is worse than an honest boundary — the reasoning
    [THREAT_MODEL.md](../security/THREAT_MODEL.md) T10 already applies to
@@ -254,7 +254,7 @@ Not a file, not a table, not a ring buffer, not a "recent" screen. Not in
 notification state that exists is what is currently active on the source and
 currently displayed on the sink, both in memory.
 
-That is structural rather than promised: `anyflow_core::notifications::Snapshot`
+That is structural rather than promised: `omnibridge_core::notifications::Snapshot`
 holds identities and has no field that could hold text, and its `Debug` is
 asserted content-free by test.
 
@@ -365,7 +365,7 @@ carries no action index, no intent, no payload, no free text and no reply.
 There is nothing in it that could be widened into remote action execution
 *because there is no field to widen* — the guarantee is the shape of the
 message, not a check that a later change could invert. A descriptor-level
-regression test (`anyflow-proto`, `notifications_schema`) fails if a field is
+regression test (`omnibridge-proto`, `notifications_schema`) fails if a field is
 added to it, if any field name hints at an action or a reply, or if any `bytes`
 field appears in the schema that is not one of the four fixed-width identifiers.
 
@@ -379,7 +379,7 @@ per peer, default off ([ADR-0015 §6](../adr/ADR-0015-notification-access.md)).
 ### `NotificationSink` — created by N2, as N0 planned
 
 Wave 0 declined to create a `NotificationSink` before a real capability required
-one, on the grounds that AnyFlow implemented no notifications anywhere and there
+one, on the grounds that OmniBridge implemented no notifications anywhere and there
 was nothing to abstract — **an abstraction with no implementation on either side
 of it is a guess about a shape**, and the shape is exactly what writing the
 first D-Bus sink taught.
@@ -412,12 +412,12 @@ the Windows MSVC gate; `real_dbus.rs` and `real_lock.rs` are whole-file
 
 ### The portable half that N0 *did* create
 
-`anyflow_core::notifications` holds the wire contract: field limits, identifier
+`omnibridge_core::notifications` holds the wire contract: field limits, identifier
 widths, the role/epoch reduction, the snapshot bracketing machine, and
 conservative enum resolution. It is a pure function of decoded protobuf
 messages — no I/O, no timers, no policy, no platform.
 
-It lives in `anyflow-core` beside `clipboard_policy.rs`, which is the existing
+It lives in `omnibridge-core` beside `clipboard_policy.rs`, which is the existing
 precedent for a portable capability-adjacent type in that crate, and which the
 plan follows again for `notification_policy.rs`. N2's capability crate
 re-exports it rather than reimplementing it, so the two ends of the protocol

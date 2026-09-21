@@ -1,8 +1,8 @@
 //! Talking to the daemon.
 //!
 //! The GUI speaks the *same* newline-delimited JSON control protocol the CLI
-//! does, over the same Unix socket in `$XDG_RUNTIME_DIR/anyflow/`, using the
-//! very same [`Request`]/[`Response`] types from `anyflow-daemon`. Nothing
+//! does, over the same Unix socket in `$XDG_RUNTIME_DIR/omnibridge/`, using the
+//! very same [`Request`]/[`Response`] types from `omnibridge-daemon`. Nothing
 //! here is a second, parallel interface: if the socket contract changes, this
 //! file stops compiling, which is the point.
 //!
@@ -22,8 +22,8 @@
 //! through an `async_channel`. No GTK object is ever touched off the main
 //! thread.
 
-use anyflow_control::{Event, FileOfferRequest, Request, Response};
-use anyflow_linux::control_socket_path;
+use omnibridge_control::{Event, FileOfferRequest, Request, Response};
+use omnibridge_linux::control_socket_path;
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -44,7 +44,7 @@ async fn exchange(request: Request) -> anyhow::Result<Response> {
     let path = control_socket_path();
     let stream = UnixStream::connect(&path).await.map_err(|e| {
         anyhow::anyhow!(
-            "could not reach the AnyFlow daemon at {}: {e}",
+            "could not reach the OmniBridge daemon at {}: {e}",
             path.display()
         )
     })?;
@@ -101,7 +101,7 @@ where
             Err(e) => {
                 let _ = event_tx
                     .send(Err(anyhow::anyhow!(
-                        "could not reach the AnyFlow daemon at {}: {e}",
+                        "could not reach the OmniBridge daemon at {}: {e}",
                         path.display()
                     )))
                     .await;

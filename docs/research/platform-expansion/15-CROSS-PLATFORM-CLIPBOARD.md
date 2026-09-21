@@ -86,7 +86,7 @@ mechanism and AppKit publishes no change notification.
 
 > No implementation may satisfy this by polling **where the platform offers an event-driven
 > source.** Where none exists, a backend may poll, and must then:
-> * report the interval in `describe()`, so `anyflow clipboard status` tells the truth;
+> * report the interval in `describe()`, so `omnibridge clipboard status` tells the truth;
 > * poll only the platform's cheap change *counter*, never the clipboard content;
 > * poll only while at least one peer has `auto_send` enabled;
 > * stop polling when the last such watch is dropped.
@@ -95,7 +95,7 @@ The manager already drops the `ClipboardWatch` when no peer wants auto-send — 
 no auto-send peer runs no watcher at all"* — so the last two conditions are satisfied by the
 existing lifecycle. The change is genuinely a doc-comment plus a macOS implementation.
 
-**Cost of the alternative** — refusing macOS auto-send entirely — is losing the feature AnyFlow
+**Cost of the alternative** — refusing macOS auto-send entirely — is losing the feature OmniBridge
 is most identified with on a platform where it works fine. **PLAT-DEC-009, recommended
 direction: amend.**
 
@@ -114,7 +114,7 @@ survives.
 `clipboard.v1` writes to the local clipboard. That write fires the local watch. If the watch
 sent it back, two devices would ping-pong forever.
 
-AnyFlow suppresses this **by content**, not by sequence, in
+OmniBridge suppresses this **by content**, not by sequence, in
 `capabilities/clipboard/src/dedup.rs` and the manager: an inbound update carries a random
 16-byte `event_id` and a `content_hash` (SHA-256 over the UTF-8 bytes), and a locally-observed
 clipboard whose hash matches a recently-applied one is not re-sent.

@@ -1,4 +1,4 @@
-//! AnyFlow design tokens for the desktop.
+//! OmniBridge design tokens for the desktop.
 //!
 //! The canonical values live in `docs/design/tokens.json`; `tests/tokens.rs`
 //! reads that file and fails if this module drifts from it. The Android side

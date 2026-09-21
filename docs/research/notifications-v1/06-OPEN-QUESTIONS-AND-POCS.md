@@ -25,7 +25,7 @@
 
 ## 2. Open questions
 
-### OQ-01 — Is AnyFlow willing to hold `BIND_NOTIFICATION_LISTENER_SERVICE`? · **RESOLVED / APPROVED**
+### OQ-01 — Is OmniBridge willing to hold `BIND_NOTIFICATION_LISTENER_SERVICE`? · **RESOLVED / APPROVED**
 
 **Decision: yes**, under the explicit security contract in
 [ADR-0015 §1](../../adr/ADR-0015-notification-access.md). Optional, disabled by
@@ -33,7 +33,7 @@ default, two separate permissions, independently revocable, fails closed, and
 carrying none of history, cloud, telemetry, actions, `PendingIntent` or reply.
 
 The published position is **amended, not erased**. Before `notifications.v1`
-AnyFlow held no notification-listener privilege, and said so in the manifest,
+OmniBridge held no notification-listener privilege, and said so in the manifest,
 in `THREAT_MODEL.md` T26 and in `README.md`. That was correct: there was no
 feature that needed one. What is withdrawn is the phrase *"and it must stay
 that way"* — a permanent conclusion where the project only ever had a permanent
@@ -52,7 +52,7 @@ remain refused.
 
 Nothing third-party is mirrored until the user names it; the enabling flow ends
 in a picker with *Select all* one tap away, and *Select all* is always a
-deliberate action. AnyFlow's own package never mirrors; newly installed apps,
+deliberate action. OmniBridge's own package never mirrors; newly installed apps,
 work-profile notifications and system notifications all default to disabled; no
 banking / password-manager / 2FA heuristic is treated as a security boundary.
 
@@ -78,13 +78,13 @@ non-clearable and ongoing notifications are never force-cancelled; duplicate
 dismiss is idempotent; a dismiss for an offline peer is dropped, not queued; no
 action execution, no `PendingIntent`, no reply.
 
-### OQ-04 — Will AnyFlow ever adopt `CompanionDeviceManager`? · **RESOLVED FOR V1 — CDM DEFERRED**
+### OQ-04 — Will OmniBridge ever adopt `CompanionDeviceManager`? · **RESOLVED FOR V1 — CDM DEFERRED**
 
 **Decision: `notifications.v1` does not use CDM.**
 [ADR-0015 §10](../../adr/ADR-0015-notification-access.md).
 
-A live CDM association makes AnyFlow a *trusted* listener, which switches off
-Android 15+ sensitive-content redaction. AnyFlow already has explicit pairing,
+A live CDM association makes OmniBridge a *trusted* listener, which switches off
+Android 15+ sensitive-content redaction. OmniBridge already has explicit pairing,
 SPKI-pinned TLS, peer identity, per-capability grants and revocation, so CDM
 would buy platform convenience on top of a complete trust model at the cost of
 a privacy property.
@@ -136,7 +136,7 @@ before N1 ships and expensive after.
 
 ### OQ-09 — Google Play policy for notification access · **P2**
 
-Notification access is a restricted area of Play policy. AnyFlow's posture is
+Notification access is a restricted area of Play policy. OmniBridge's posture is
 about as defensible as the feature gets, and the app is distributed from GitHub
 today. Marked **LIKELY**, not verified — the current policy text was not read
 from the Play Console ([00 §1.11](00-RESEARCH-FINDINGS.md)). Answer before any
@@ -160,7 +160,7 @@ text — which reached the listener. A filter that mirrors everything would
 mirror an empty notification. This reinforces the provisional answer rather
 than changing it.
 
-### OQ-11 — Should `anyflow notifications status` show mirror counts per app? · **P2**
+### OQ-11 — Should `omnibridge notifications status` show mirror counts per app? · **P2**
 
 Counts are not content, but a per-app count is a description of what the user is
 receiving right now and it lands in terminal scrollback and pasted bug reports.
@@ -342,7 +342,7 @@ restricts background components. Does it unbind or starve a
 
 **Fail.** The binding is lost or events are dropped — in which case
 `requestRebind` recovery is required, and the Android UI must tell the user to
-exempt AnyFlow from battery optimisation, the way `ADR-0009` already handles the
+exempt OmniBridge from battery optimisation, the way `ADR-0009` already handles the
 connection service.
 
 **Output.** `poc/POC-NOTIF-04.md` with `dumpsys` before and after.

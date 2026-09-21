@@ -4,11 +4,11 @@
 //!
 //! ```text
 //! TrayAction  ->  ApplicationActivator  ->  org.freedesktop.Application
-//!                                            io.github.yurisismotto.anyflow
+//!                                            io.github.yurisismotto.omnibridge
 //!                                              -> the GAction the GUI already exports
 //! ```
 //!
-//! The daemon does not link against `anyflow-gui`, does not depend on GTK,
+//! The daemon does not link against `omnibridge-gui`, does not depend on GTK,
 //! and does not know how a Quick Panel is built. It knows three action names.
 //! Everything else is the session bus's problem, which is the point: the GUI
 //! exported `app.quick-panel`, `app.settings` and `app.transfers` for exactly
@@ -20,7 +20,7 @@
 //!
 //! # What this must never become
 //!
-//! Not `Command::new("anyflow-gui")`, and not `sh -c` around it. `anyflowd`
+//! Not `Command::new("omnibridge-gui")`, and not `sh -c` around it. `omnibridged`
 //! runs under a hardened `systemd --user` unit — `NoNewPrivileges`,
 //! `ProtectSystem=strict`, `ProtectHome=read-only`, `MemoryDenyWriteExecute`,
 //! `SystemCallFilter=@system-service` minus `@privileged`, and
@@ -33,8 +33,8 @@
 //! Activation over the bus has none of that problem, and it was measured
 //! rather than assumed. A cold activation on this machine produced a GUI whose
 //! parent is the systemd user manager and whose cgroup is
-//! `app.slice/dbus-:1.2-io.github.yurisismotto.anyflow@0.service` — a
-//! transient unit of its own, with no relationship to `anyflowd.service` at
+//! `app.slice/dbus-:1.2-io.github.yurisismotto.omnibridge@0.service` — a
+//! transient unit of its own, with no relationship to `omnibridged.service` at
 //! all.
 
 use std::collections::HashMap;
@@ -67,7 +67,7 @@ impl std::fmt::Display for ActivationError {
 
 impl std::error::Error for ActivationError {}
 
-/// Presents one of AnyFlow's desktop surfaces.
+/// Presents one of OmniBridge's desktop surfaces.
 #[async_trait::async_trait]
 pub trait ApplicationActivator: Send + Sync + 'static {
     /// Presents the surface `action` names.
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn an_obviously_wrong_activation_token_is_not_forwarded() {
-        assert!(usable_token("gnome-shell-1234-anyflow-TOKEN_abc"));
+        assert!(usable_token("gnome-shell-1234-omnibridge-TOKEN_abc"));
         assert!(!usable_token(""));
         assert!(!usable_token(&"x".repeat(513)));
         assert!(!usable_token("has\nnewline"));

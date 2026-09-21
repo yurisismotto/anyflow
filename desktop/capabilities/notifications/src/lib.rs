@@ -12,14 +12,14 @@
 //!
 //! The wire contract — field limits, identifier widths, the role/epoch
 //! reduction, the snapshot bracketing machine, the conservative enum
-//! resolution — lives in [`anyflow_core::notifications`] and is **re-exported
+//! resolution — lives in [`omnibridge_core::notifications`] and is **re-exported
 //! rather than reimplemented**, so the two ends of the protocol cannot drift.
 //!
 //! # What this capability is careful about, and where that lives
 //!
 //! | Property | Enforced by |
 //! | --- | --- |
-//! | only a paired device can speak at all | TLS 1.3 + SPKI pinning (`anyflow_core::tls`) |
+//! | only a paired device can speak at all | TLS 1.3 + SPKI pinning (`omnibridge_core::tls`) |
 //! | only an explicitly *granted* device may display anything | [`NotificationAuthorizer`], re-asked per message |
 //! | a peer can only ever touch its own mirrors | the mirror key is the pinned fingerprint ([`mirror`]) |
 //! | a peer cannot widen its own policy | there is no protocol message that sets one |
@@ -104,14 +104,14 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, Notify, RwLock};
 use tokio::time::Instant;
 
-use anyflow_core::capability::{Capability, CapabilityContext, OutboundMessage};
-use anyflow_core::error::{Error, Result};
-use anyflow_core::notifications::{
+use omnibridge_core::capability::{Capability, CapabilityContext, OutboundMessage};
+use omnibridge_core::error::{Error, Result};
+use omnibridge_core::notifications::{
     self as contract, NotificationId, PeerRoles, Rejection, Role, Snapshot, SnapshotStep,
 };
-use anyflow_core::Fingerprint;
-use anyflow_proto::v1::capabilities as pb;
-use anyflow_proto::Message;
+use omnibridge_core::Fingerprint;
+use omnibridge_proto::v1::capabilities as pb;
+use omnibridge_proto::Message;
 
 use backend::{
     Closed, LockSource, Mirror, NotificationSink, ServerId, SinkCapabilities, SinkError, Urgency,
@@ -123,7 +123,7 @@ use roles::LocalRoles;
 
 /// The canonical capability id, re-exported from the portable contract so
 /// there is one spelling of it in the workspace.
-pub use anyflow_core::notifications::CAPABILITY_ID;
+pub use omnibridge_core::notifications::CAPABILITY_ID;
 
 /// A validated upsert, waiting for its turn on the worker.
 ///
@@ -438,7 +438,7 @@ pub struct NotificationManager {
 impl NotificationManager {
     /// Builds the manager and probes the backend once.
     ///
-    /// Probing here rather than lazily is what lets `anyflow notifications
+    /// Probing here rather than lazily is what lets `omnibridge notifications
     /// status` report what this session can actually do, and it is what
     /// decides the first role announcement. A desktop with no notification
     /// server is a normal, reportable state — not an error, and not a reason
@@ -661,7 +661,7 @@ impl NotificationManager {
             // Replacing it on attach alone was almost enough, and the gap is
             // the one N5 exists to close: a session that is rebuilt *without*
             // this capability negotiated never calls `attach_session` at all,
-            // so the previous session's roles survived it — and `anyflow
+            // so the previous session's roles survived it — and `omnibridge
             // notifications status` went on reporting "the device can source
             // notifications (epoch 2)" for a peer whose current session has
             // no channel to say so on. Nothing could flow, because the grant

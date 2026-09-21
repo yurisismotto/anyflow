@@ -22,7 +22,7 @@ commit `f7a0015`.
 | Area | Files | Used in |
 | --- | --- | --- |
 | Workspace and toolchain | `desktop/Cargo.toml`, `desktop/rust-toolchain.toml`, all eight crate manifests | 01, 04, 05 |
-| Protocol schemas | `protocol/proto/anyflow/v1/{core,envelope}.proto`, `capabilities/{battery,clipboard,files}_v1.proto` | 01, 03, 15, 16, 23 |
+| Protocol schemas | `protocol/proto/omnibridge/v1/{core,envelope}.proto`, `capabilities/{battery,clipboard,files}_v1.proto` | 01, 03, 15, 16, 23 |
 | Security core | `desktop/core/src/{tls,identity,fingerprint,pairing,store}.rs` | 01, 02, 09, 12, 14, 20 |
 | Session and capability model | `desktop/core/src/{session,capability,discovery,clipboard_policy,framing,qr,error}.rs` | 01, 02, 03, 13, 15 |
 | Capabilities | `desktop/capabilities/{battery,clipboard,files}/src/**` | 01, 15, 16 |
@@ -30,8 +30,8 @@ commit `f7a0015`.
 | Daemon | `desktop/daemon/src/{main,listener,mdns,server,control,state}.rs` | 01, 08, 13, 17 |
 | CLI and GUI | `desktop/cli/src/main.rs`, `desktop/gui/src/**`, `desktop/gui/Cargo.toml`, `desktop/gui/build.rs` | 01, 04, 05, 18 |
 | Tests (used as specification) | `desktop/core/tests/`, `desktop/daemon/tests/`, `desktop/capabilities/*/tests/` | 21, 22 |
-| Android | `android/app/src/main/java/io/github/yurisismotto/anyflow/**`, `AndroidManifest.xml`, `gradle/libs.versions.toml` | 01, 03, 13, 14, 17 |
-| Packaging | `packaging/fedora/{anyflow.spec,anyflowd.service}` | 04, 07, 09, 17 |
+| Android | `android/app/src/main/java/io/github/yurisismotto/omnibridge/**`, `AndroidManifest.xml`, `gradle/libs.versions.toml` | 01, 03, 13, 14, 17 |
+| Packaging | `packaging/fedora/{omnibridge.spec,omnibridged.service}` | 04, 07, 09, 17 |
 | Design system | `docs/design/{tokens.json,BRAND.md,UI-GUIDELINES.md}`, `docs/design/assets/**` | 18 |
 | Architecture docs | `docs/architecture/{OVERVIEW,PROTOCOL,CLIPBOARD,FILES}.md` | 01, 15, 16 |
 | Threat model | `docs/security/THREAT_MODEL.md` | 20 |

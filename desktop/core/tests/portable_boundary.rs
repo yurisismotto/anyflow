@@ -1,7 +1,7 @@
 //! The boundary regression test.
 //!
 //! Wave 0's completion test is a negative one: *adding a platform means
-//! writing an adapter crate; it never means editing `anyflow-core`,
+//! writing an adapter crate; it never means editing `omnibridge-core`,
 //! `tls.rs`, `session.rs` or a capability crate's protocol half.* This file
 //! is what makes that checkable rather than aspirational.
 //!
@@ -9,7 +9,7 @@
 //!
 //! It proves that no portable crate reaches for a platform API outside the
 //! one feature-gated module that is allowed to. It says **nothing** about
-//! whether AnyFlow works on Windows or macOS — that needs a real machine and
+//! whether OmniBridge works on Windows or macOS — that needs a real machine and
 //! belongs to Wave 5 and later. Conflating the two is how a project talks
 //! itself into believing it supports a platform it has never run on.
 //!
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 /// Crates that must contain no platform-specific code.
 ///
-/// `anyflow-runtime` is deliberately absent: it depends on `mdns-sd`, whose
+/// `omnibridge-runtime` is deliberately absent: it depends on `mdns-sd`, whose
 /// Windows behaviour is an open question (V-12 / POC-WIN-02) and outside
 /// Wave 0. It contains no `std::os` today, and the last test below checks
 /// that, but it is not in the portable *contract*.
@@ -49,13 +49,13 @@ const PORTABLE_CRATES: &[&str] = &[
 /// review, not added to make a test pass.
 const FEATURE_GATED_PLATFORM_MODULES: &[&str] = &[
     // `SecretStore` on a Unix filesystem, `Store::open(dir)`, XDG paths.
-    // Behind `anyflow-core/unix-fs`.
+    // Behind `omnibridge-core/unix-fs`.
     "core/src/platform/unix_fs.rs",
     // The Unix download destination. Behind
-    // `anyflow-capability-files/unix-fs`.
+    // `omnibridge-capability-files/unix-fs`.
     "capabilities/files/src/destination.rs",
     // The wl-clipboard and XFIXES backends. Behind
-    // `anyflow-capability-clipboard/linux-backends`.
+    // `omnibridge-capability-clipboard/linux-backends`.
     "capabilities/clipboard/src/backend/wayland.rs",
     "capabilities/clipboard/src/backend/x11.rs",
 ];
@@ -87,7 +87,7 @@ const DESKTOP_MARKERS: &[&str] = &[
 
 /// The two files allowed to name a desktop, and why.
 ///
-/// Each is behind `anyflow-capability-notifications/linux-dbus`; turning the
+/// Each is behind `omnibridge-capability-notifications/linux-dbus`; turning the
 /// feature off removes both from the build entirely, which is what the portable
 /// compile gate checks.
 const DESKTOP_PLATFORM_MODULES: &[&str] = &[

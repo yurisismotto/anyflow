@@ -2,12 +2,12 @@
 
 | Field | Value |
 | --- | --- |
-| **Title** | AnyFlow on Windows 10 and 11 |
+| **Title** | OmniBridge on Windows 10 and 11 |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
 | **Scope** | Rust target, TLS, discovery, identity, clipboard, filesystem, agent-vs-service, UI, firewall, packaging. |
 | **Decision status** | PROPOSED. **PLAT-DEC-002** (agent vs. service) has a strong recommended direction; **PLAT-DEC-007** (UI↔agent IPC) likewise. |
-| **Evidence** | OFFICIAL DOC VERIFIED throughout from `learn.microsoft.com` unless marked otherwise. REPO VERIFIED for AnyFlow's own behaviour. |
+| **Evidence** | OFFICIAL DOC VERIFIED throughout from `learn.microsoft.com` unless marked otherwise. REPO VERIFIED for OmniBridge's own behaviour. |
 | **Related documents** | [02](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md), [09](09-WINDOWS-SECURITY-AND-INTEGRATION.md), [13](13-CROSS-PLATFORM-DISCOVERY.md), [14](14-CROSS-PLATFORM-IDENTITY-AND-KEY-STORAGE.md), [17](17-BACKGROUND-EXECUTION-MODEL.md), [18](18-UI-PLATFORM-STRATEGY.md) |
 
 ---
@@ -22,7 +22,7 @@ Windows than on Linux.
 The work is real but it is engineering, not research: no blocker was found that requires
 a design compromise.
 
-The single decision that shapes everything is §5: **AnyFlow on Windows is a user-session
+The single decision that shapes everything is §5: **OmniBridge on Windows is a user-session
 agent, not a Windows Service.** Everything else follows from it.
 
 ---
@@ -55,7 +55,7 @@ The only Windows-specific TLS work is feeding rustls a key it cannot see — §6
 
 ## 4. Discovery
 
-AnyFlow's requirement is narrow: **keep advertising `_anyflow._tcp.local.` with the existing
+OmniBridge's requirement is narrow: **keep advertising `_omnibridge._tcp.local.` with the existing
 TXT schema** (`v`, `pv`, `id`, `dn`) so today's Android client finds a Windows desktop with
 no client change.
 
@@ -66,7 +66,7 @@ Two routes:
 The crate's own README states it "supports macOS, Linux and Windows". `daemon/src/mdns.rs`
 would then work unchanged, including `IfKind` family filtering and `enable_addr_auto()`.
 
-Consequence: **AnyFlow runs its own mDNS responder on Windows**, alongside whatever the OS
+Consequence: **OmniBridge runs its own mDNS responder on Windows**, alongside whatever the OS
 does. Windows has a built-in mDNS responder (used by the DNS-SD APIs below). Two responders on
 one host is legal mDNS but the interaction needs measuring: port 5353 binding with
 `SO_REUSEADDR`, duplicate-name probing, and whether Windows' responder answers for a name
@@ -83,7 +83,7 @@ Windows has first-party DNS-SD, in two flavours:
 
 `DnsServiceRegister` is asynchronous and, notably, **"the registration is tied to the lifetime
 of the calling process. If the process goes away, the service will be automatically
-deregistered."** (OFFICIAL DOC VERIFIED.) That is exactly the semantics AnyFlow's
+deregistered."** (OFFICIAL DOC VERIFIED.) That is exactly the semantics OmniBridge's
 `Advertisement`/`Drop` pair implements by hand today, so the models match.
 
 One caveat is **PARTIALLY VERIFIED (V-03)**. `DNS_SERVICE_INSTANCE` carries `pszHostName`,
@@ -113,9 +113,9 @@ Interoperability with Avahi (Linux), `NsdManager` (Android) and Bonjour (macOS/i
 
 Windows isolates services in **Session 0**, which is non-interactive and has no desktop
 (OFFICIAL DOC VERIFIED). Interactive Services were deprecated and the Interactive Services
-Detection service was removed in Windows 10 1803. The consequences for AnyFlow are decisive:
+Detection service was removed in Windows 10 1803. The consequences for OmniBridge are decisive:
 
-| AnyFlow needs | In Session 0 |
+| OmniBridge needs | In Session 0 |
 | --- | --- |
 | Read/write the user's clipboard | **Impossible.** The clipboard is per-window-station; Session 0's is not the user's. |
 | `AddClipboardFormatListener` on a message-pump window | **Impossible.** No interactive desktop. |
@@ -123,7 +123,7 @@ Detection service was removed in Windows 10 1803. The consequences for AnyFlow a
 | A pairing confirmation prompt | **Impossible.** No UI. |
 | One identity per human on a shared PC | A service is one process for the machine → [09](09-WINDOWS-SECURITY-AND-INTEGRATION.md) |
 
-Every one of those is a *core* AnyFlow function. `clipboard.v1` alone settles it.
+Every one of those is a *core* OmniBridge function. `clipboard.v1` alone settles it.
 
 ### 5.2 Why not both
 
@@ -131,10 +131,10 @@ A hybrid — service for the network, agent for the clipboard — is worse than 
 privileged process, a cross-session IPC channel that must be authenticated (a real attack
 surface, [20](20-SECURITY-THREAT-ANALYSIS.md)), and an ambiguity about which process owns the
 identity key and the trust store. The only thing it buys is running while nobody is logged in
-— and AnyFlow is a *device-continuity* product: with nobody logged in there is no clipboard to
+— and OmniBridge is a *device-continuity* product: with nobody logged in there is no clipboard to
 sync, no Downloads folder to write to, and no human to confirm anything.
 
-This also matches AnyFlow's Linux design exactly: `anyflowd` is a `systemd --user` unit
+This also matches OmniBridge's Linux design exactly: `omnibridged` is a `systemd --user` unit
 running unprivileged as the user, explicitly *"needs no root, no capabilities, and no
 system-wide state"* (`daemon/src/main.rs`, REPO VERIFIED). The Windows agent is the same
 architecture spelled in a different OS's vocabulary. That is a strong signal it is right.
@@ -142,20 +142,20 @@ architecture spelled in a different OS's vocabulary. That is a strong signal it 
 ### 5.3 Shape of the agent
 
 ```
-AnyFlowAgent.exe   — one per interactive user session
+OmniBridgeAgent.exe   — one per interactive user session
   ├── tokio runtime: TLS listener, mdns responder, capability handlers  (portable Rust)
   ├── a hidden message-only window (HWND_MESSAGE) for WM_CLIPBOARDUPDATE
-  ├── Named Pipe server: \\.\pipe\AnyFlow\<user SID>\control
-  ├── tray icon: status, quick actions, "Open AnyFlow"
+  ├── Named Pipe server: \\.\pipe\OmniBridge\<user SID>\control
+  ├── tray icon: status, quick actions, "Open OmniBridge"
   └── identity key: CNG, Microsoft Platform Crypto Provider (TPM) when available
 ```
 
 Started at login. Not elevated. Not `LocalSystem`. The install is per-machine (binaries in
-`Program Files`), the *run* is per-user, and state lives in `%LOCALAPPDATA%\AnyFlow`.
+`Program Files`), the *run* is per-user, and state lives in `%LOCALAPPDATA%\OmniBridge`.
 
 The message-only window is worth calling out: it is why the agent must be in the interactive
 session and why it must pump messages, but it is *not* a visible window and does not make
-AnyFlow a GUI app. The tray icon does that, and the tray icon is optional.
+OmniBridge a GUI app. The tray icon does that, and the tray icon is optional.
 
 ### 5.4 Start at login
 
@@ -174,7 +174,7 @@ about it in the installer.
 
 ## 6. Identity: CNG and the TPM
 
-AnyFlow's identity is **ECDSA P-256** (`core/src/identity.rs`, REPO VERIFIED), chosen for
+OmniBridge's identity is **ECDSA P-256** (`core/src/identity.rs`, REPO VERIFIED), chosen for
 Android Keystore compatibility. Windows CNG lists ECDSA P-256 among the supported algorithms
 for its key storage providers (OFFICIAL DOC VERIFIED).
 
@@ -214,7 +214,7 @@ user presence, so this is fine on Windows — unlike the Apple case
 
 ### 6.2 Certificate
 
-AnyFlow's certificate is a self-signed envelope for a raw public key; trust is the SPKI pin
+OmniBridge's certificate is a self-signed envelope for a raw public key; trust is the SPKI pin
 (`core/src/fingerprint.rs`). With a TPM key, `rcgen` cannot generate the key — it must build
 the certificate *around* a public key the TPM gives us and have the TPM sign the TBS. `rcgen`
 supports a remote-key-pair path for this. **POC-WIN-03 must prove key-gen → certificate →
@@ -228,7 +228,7 @@ fallback is `MS_KEY_STORAGE_PROVIDER` with `NCRYPT_ALLOW_EXPORT_FLAG` **not** se
 user-scoped key.
 
 The rule from the sprint's security principle, restated: **the fallback must be explicit and
-visible, never silent.** `anyflow status` must report the key backing, the first-run flow
+visible, never silent.** `omnibridge status` must report the key backing, the first-run flow
 should state it, and [14](14-CROSS-PLATFORM-IDENTITY-AND-KEY-STORAGE.md) covers whether a peer
 should be told (recommendation: not in v1, and not without a deliberate protocol decision).
 
@@ -236,7 +236,7 @@ should be told (recommendation: not in v1, and not without a deliberate protocol
 
 ## 7. Clipboard
 
-Windows has the best clipboard API of the three desktops for AnyFlow's purposes.
+Windows has the best clipboard API of the three desktops for OmniBridge's purposes.
 
 | Operation | API | Notes |
 | --- | --- | --- |
@@ -253,15 +253,15 @@ turns out to fit Windows better than it fits Linux.**
 
 Two Windows-specific hazards:
 
-- **Loop suppression.** AnyFlow's dedup (`capabilities/clipboard/src/dedup.rs`) already
+- **Loop suppression.** OmniBridge's dedup (`capabilities/clipboard/src/dedup.rs`) already
   suppresses echoes by content hash and `event_id`, and that is content-based, so it carries
   over. But `SetClipboardData` *will* fire our own `WM_CLIPBOARDUPDATE`, so the backend must
   also expect and tolerate a self-triggered event. Because suppression is content-hash based
   rather than sequence based, this should be handled already — **and must be tested, not
   assumed** (POC-WIN-05).
 - **Cloud Clipboard.** If the user has clipboard sync across their Microsoft account enabled,
-  a clip AnyFlow writes can be uploaded to Microsoft. That is the user's setting, not
-  AnyFlow's behaviour, but it is worth documenting for a local-first product, and it is
+  a clip OmniBridge writes can be uploaded to Microsoft. That is the user's setting, not
+  OmniBridge's behaviour, but it is worth documenting for a local-first product, and it is
   precisely why the sensitive-hint format matters. → [09](09-WINDOWS-SECURITY-AND-INTEGRATION.md),
   [20](20-SECURITY-THREAT-ANALYSIS.md).
 
@@ -272,7 +272,7 @@ Two Windows-specific hazards:
 | Concern | Windows answer |
 | --- | --- |
 | Downloads folder | `SHGetKnownFolderPath(FOLDERID_Downloads)`. Replaces the XDG chain in `destination.rs`. |
-| Data directory | `%LOCALAPPDATA%\AnyFlow` (`FOLDERID_LocalAppData`). Replaces `$XDG_DATA_HOME/anyflow`. |
+| Data directory | `%LOCALAPPDATA%\OmniBridge` (`FOLDERID_LocalAppData`). Replaces `$XDG_DATA_HOME/omnibridge`. |
 | Key file protection | No `0600`. Use a DACL granting only the owning user SID, or DPAPI (`CryptProtectData`, `CRYPTPROTECT_UI_FORBIDDEN`) — and preferably neither, because with a TPM key there is no key file. Note the `require_private_mode` check must gain a Windows equivalent, not be skipped. → [09](09-WINDOWS-SECURITY-AND-INTEGRATION.md) |
 | Atomic write | `MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)`. `std::fs::rename` on Windows already replaces. |
 | `O_EXCL` equivalent | `CreateFile` with `CREATE_NEW`. Windows has no symlink-following problem of the same shape, but reparse points exist — use `FILE_FLAG_OPEN_REPARSE_POINT` semantics deliberately. |
@@ -296,7 +296,7 @@ Two Windows-specific hazards:
 Windows 10 1809 as WinUI's floor is comfortable: Windows 10 mainstream support has ended for
 most consumer SKUs, so the practical target is Windows 11 with Windows 10 22H2 as a courtesy.
 
-The UI is a **client of the agent**, exactly as `anyflow-gui` is a client of `anyflowd` over a
+The UI is a **client of the agent**, exactly as `omnibridge-gui` is a client of `omnibridged` over a
 Unix socket today (`gui/src/client.rs`, 203 lines of newline-delimited JSON). Keeping that
 shape means:
 - no Rust↔C# FFI at all;
@@ -322,19 +322,19 @@ modify the remote address restriction to specify 'Local Subnet' only"* (OFFICIAL
 Proposed rules:
 
 ```powershell
-New-NetFirewallRule -DisplayName "AnyFlow (TCP 55432)" `
-  -Direction Inbound -Program "C:\Program Files\AnyFlow\AnyFlowAgent.exe" `
+New-NetFirewallRule -DisplayName "OmniBridge (TCP 55432)" `
+  -Direction Inbound -Program "C:\Program Files\OmniBridge\OmniBridgeAgent.exe" `
   -Protocol TCP -LocalPort 55432 `
   -Profile Private -RemoteAddress LocalSubnet -Action Allow
 
-New-NetFirewallRule -DisplayName "AnyFlow mDNS (UDP 5353)" `
-  -Direction Inbound -Program "C:\Program Files\AnyFlow\AnyFlowAgent.exe" `
+New-NetFirewallRule -DisplayName "OmniBridge mDNS (UDP 5353)" `
+  -Direction Inbound -Program "C:\Program Files\OmniBridge\OmniBridgeAgent.exe" `
   -Protocol UDP -LocalPort 5353 `
   -Profile Private -RemoteAddress LocalSubnet -Action Allow
 ```
 
 Rules:
-- **Private profile only.** Never Public — a café network is exactly where AnyFlow must not
+- **Private profile only.** Never Public — a café network is exactly where OmniBridge must not
   accept connections.
 - **`RemoteAddress LocalSubnet`.** Never `0.0.0.0/0`.
 - **Program-scoped**, full path (wildcards are not supported in application rules —
@@ -372,9 +372,9 @@ with the macOS notarization requirement → [19](19-PACKAGING-AND-DISTRIBUTION.m
 | ID | Question |
 | --- | --- |
 | **POC-WIN-01** | Does the workspace compile for `x86_64-pc-windows-msvc`, and do the portable tests pass? Does `listener.rs`'s `IPV6_V6ONLY` probe behave sanely on Windows? |
-| **POC-WIN-02** | Does `mdns-sd` advertise `_anyflow._tcp.local.` on Windows such that the existing Android app finds it and connects? Coexistence with the built-in responder on 5353. |
+| **POC-WIN-02** | Does `mdns-sd` advertise `_omnibridge._tcp.local.` on Windows such that the existing Android app finds it and connects? Coexistence with the built-in responder on 5353. |
 | **POC-WIN-03** | CNG + Microsoft Platform Crypto Provider: create a non-exportable ECDSA P-256 key, build a certificate around it, compute the SPKI fingerprint. |
-| **POC-WIN-04** | `rustls-cng` `CngSigningKey` + `ResolvesClientCert`: complete a mutually-authenticated TLS 1.3 handshake against the existing Linux `anyflowd`, with SPKI pinning on both sides. |
+| **POC-WIN-04** | `rustls-cng` `CngSigningKey` + `ResolvesClientCert`: complete a mutually-authenticated TLS 1.3 handshake against the existing Linux `omnibridged`, with SPKI pinning on both sides. |
 | **POC-WIN-05** | `AddClipboardFormatListener` read/write/watch with loop suppression against the existing dedup logic. |
 | **POC-WIN-06** | A user-session agent that survives lock, unlock, sleep, resume and fast user switching. |
 | **POC-WIN-07** | WinUI 3 ↔ agent over a named pipe with a per-SID DACL. |

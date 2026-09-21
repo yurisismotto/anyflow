@@ -34,9 +34,9 @@ platforms is the whole product experience.
 | **Android** | Jetpack Compose | Shipping |
 | **iOS/iPadOS** | SwiftUI, UIKit where needed | `UIPasteControl` is UIKit; shares patterns and much code with the macOS app |
 
-Every one of these is a **client of the AnyFlow Agent**, not a host of it. The Linux GUI already
+Every one of these is a **client of the OmniBridge Agent**, not a host of it. The Linux GUI already
 works this way: `gui/src/client.rs` is 203 lines over a newline-delimited JSON Unix socket, and
-the GUI depends on `anyflow-daemon` *only* to reuse the request/response types so it "cannot
+the GUI depends on `omnibridge-daemon` *only* to reuse the request/response types so it "cannot
 drift from the socket contract". That property should be preserved everywhere:
 
 - the UI can be closed, crash, or never be installed, and the session continues;
@@ -44,17 +44,17 @@ drift from the socket contract". That property should be preserved everywhere:
 - a platform's CLI comes free from the same protocol.
 
 (One caveat noted in [01 §4](01-CURRENT-ARCHITECTURE-AUDIT.md): the GUI currently inherits the
-whole daemon crate to get those types. Extracting a small `anyflow-control` types crate is
+whole daemon crate to get those types. Extracting a small `omnibridge-control` types crate is
 Wave 0 work — **ARCH-003**.)
 
 ---
 
 ## 3. The identity travels; the widgets do not
 
-AnyFlow already has a cross-platform design system, and it is unusually rigorous. From
+OmniBridge already has a cross-platform design system, and it is unusually rigorous. From
 `docs/design/tokens.json`:
 
-> *"Canonical AnyFlow design tokens. This file is the single source of truth for both platforms
+> *"Canonical OmniBridge design tokens. This file is the single source of truth for both platforms
 > and is READ BY TESTS on each side, the same way `protocol/testdata` keeps the Rust and Kotlin
 > protocol implementations from drifting."*
 
@@ -95,7 +95,7 @@ not recommended:
    [02](02-CROSS-PLATFORM-TARGET-ARCHITECTURE.md) enumerates what is expensive to duplicate —
    pairing proofs, pinning, framing, replay, dedup, transfer state. None of it is UI. Electron
    would share the cheap half and leave the expensive half untouched.
-2. **AnyFlow's value is OS integration**, and every integration point needs native code
+2. **OmniBridge's value is OS integration**, and every integration point needs native code
    regardless: clipboard ownership and watching, tray/menu-bar presence, login registration,
    share targets, native file pickers, notifications with actions, and keystore access. With
    Electron, all of that still gets written per platform — plus a Node/Chromium layer, plus the

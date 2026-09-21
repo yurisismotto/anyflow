@@ -16,9 +16,9 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyflow_core::error::Error;
-use anyflow_core::session::{self, SessionHost};
-use anyflow_core::tls::{self, NegotiatedProtocol};
+use omnibridge_core::error::Error;
+use omnibridge_core::session::{self, SessionHost};
+use omnibridge_core::tls::{self, NegotiatedProtocol};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
@@ -275,7 +275,7 @@ async fn handle_connection(
 /// could drift apart.
 async fn handle_data_stream(
     tls: tokio_rustls::server::TlsStream<TcpStream>,
-    fingerprint: anyflow_core::Fingerprint,
+    fingerprint: omnibridge_core::Fingerprint,
     state: Arc<DaemonState>,
 ) -> Result<(), Error> {
     let Some(transfers) = state.transfers.clone() else {
@@ -285,7 +285,7 @@ async fn handle_data_stream(
         .accept_data_stream(
             fingerprint,
             Box::new(tls),
-            anyflow_core::session::PROTOCOL_VERSION_MAX,
+            omnibridge_core::session::PROTOCOL_VERSION_MAX,
         )
         .await
 }

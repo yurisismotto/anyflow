@@ -58,12 +58,12 @@ pub use pairing::present_pairing_dialog;
 /// public for no reason but the harness.
 ///
 /// ```console
-/// cargo test -p anyflow-gui -- --ignored --test-threads=1
+/// cargo test -p omnibridge-gui -- --ignored --test-threads=1
 /// ```
 #[cfg(test)]
 mod display_gate {
     #[test]
-    #[ignore = "needs a display: cargo test -p anyflow-gui -- --ignored"]
+    #[ignore = "needs a display: cargo test -p omnibridge-gui -- --ignored"]
     fn every_page_widget_tree() {
         super::notifications::tests::the_notifications_page_widget_tree();
         super::clipboard::tests::the_clipboard_page_widget_tree();
@@ -73,7 +73,7 @@ mod display_gate {
 }
 
 use adw::prelude::*;
-use anyflow_control::{
+use omnibridge_control::{
     ClipboardStatusReport, NotificationsStatusReport, StatusReport, TransferReport,
 };
 use std::cell::RefCell;
@@ -160,7 +160,7 @@ impl Changed {
 #[cfg(test)]
 pub(crate) fn test_selection() -> Rc<Selection> {
     Rc::new(Selection::at(std::env::temp_dir().join(format!(
-        "anyflow-gui-test-{}/gui.json",
+        "omnibridge-gui-test-{}/gui.json",
         std::process::id()
     ))))
 }
@@ -413,7 +413,7 @@ impl Pages {
                 "security-high-symbolic",
                 "af-status-connected",
                 "Secure connection",
-                "TLS 1.3 with ALPN anyflow/1, mutually authenticated and pinned to the \
+                "TLS 1.3 with ALPN omnibridge/1, mutually authenticated and pinned to the \
                  key you approved when pairing. Direct on your network — no relay, no cloud.",
             )
         } else {
@@ -421,7 +421,7 @@ impl Pages {
                 "security-low-symbolic",
                 "af-status-disconnected",
                 "Daemon not reachable",
-                "Start the AnyFlow daemon to connect to your devices.",
+                "Start the OmniBridge daemon to connect to your devices.",
             )
         };
         let icon = gtk::Image::from_icon_name(icon_name);

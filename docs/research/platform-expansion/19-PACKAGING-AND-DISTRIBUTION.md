@@ -98,15 +98,15 @@ it must be **opt-in and off by default**. **UX-009.**
 
 ## 5. Uninstall and data retention
 
-An area where products routinely behave badly, and AnyFlow holds cryptographic identity and a
+An area where products routinely behave badly, and OmniBridge holds cryptographic identity and a
 trust store — so it matters more than usual.
 
 | Platform | Binaries | Config/state | Recommendation |
 | --- | --- | --- | --- |
-| Linux RPM/DEB | Removed by the package manager | `$XDG_DATA_HOME/anyflow` **survives** | Correct default. `apt purge` / an explicit `anyflow reset` removes it |
-| Windows MSIX | Removed; per-user virtualised state removed with the package | `%LOCALAPPDATA%\AnyFlow` | **Prompt: "also remove your device identity and paired devices?"** |
+| Linux RPM/DEB | Removed by the package manager | `$XDG_DATA_HOME/omnibridge` **survives** | Correct default. `apt purge` / an explicit `omnibridge reset` removes it |
+| Windows MSIX | Removed; per-user virtualised state removed with the package | `%LOCALAPPDATA%\OmniBridge` | **Prompt: "also remove your device identity and paired devices?"** |
 | Windows MSI | Removed | Same | Same prompt |
-| macOS DMG | Drag to Trash | `~/Library/Application Support/AnyFlow` **survives** | Ship an "AnyFlow → Reset identity" menu item; document the path |
+| macOS DMG | Drag to Trash | `~/Library/Application Support/OmniBridge` **survives** | Ship an "OmniBridge → Reset identity" menu item; document the path |
 | Android | Uninstall removes app data | Keystore key **is destroyed** | Correct: the identity cannot survive, so pairings are dead. Say so in the UI |
 | iOS | Same | Same | Same |
 

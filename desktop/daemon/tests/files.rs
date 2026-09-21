@@ -11,10 +11,10 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyflow_capability_files::auth::{compute_stream_mac, StreamChallenge};
-use anyflow_capability_files::transfer::{FailureReason, TransferId, TransferState};
-use anyflow_capability_files::{limits, stream};
 use common::*;
+use omnibridge_capability_files::auth::{compute_stream_mac, StreamChallenge};
+use omnibridge_capability_files::transfer::{FailureReason, TransferId, TransferState};
+use omnibridge_capability_files::{limits, stream};
 
 const GRACE: Duration = Duration::from_secs(20);
 
@@ -22,7 +22,7 @@ const GRACE: Duration = Duration::from_secs(20);
 ///
 /// Note the reconnection. A session's effective capability set is fixed at
 /// handshake time, so *widening* a grant takes effect on the next connection —
-/// which is the real flow too: `anyflow pair`, then `anyflow grant`, then the
+/// which is the real flow too: `omnibridge pair`, then `omnibridge grant`, then the
 /// phone reconnects. *Narrowing* is immediate, and that asymmetry is the safe
 /// direction: see `f15_*` and `f1_a_withdrawn_grant_*`.
 async fn paired(server: &TestServer, phone: &TestClient) -> ConnectedSession {
@@ -927,7 +927,7 @@ async fn f7_f8_a_hostile_filename_cannot_escape_the_download_directory() {
         ("..\\..\\victim.txt", "victim.txt"),
         ("subdir/../../../victim.txt", "victim.txt"),
         // F8: absolute paths.
-        ("/etc/cron.d/anyflow", "anyflow"),
+        ("/etc/cron.d/omnibridge", "omnibridge"),
         ("/home/yuri/.bashrc", ".bashrc"),
         ("C:\\Windows\\System32\\drivers\\etc\\hosts", "hosts"),
     ];
@@ -1566,7 +1566,7 @@ async fn start_stalled_transfer(
 
 /// Waits until a transfer has taken at least `want` bytes.
 async fn wait_for_bytes(
-    manager: &Arc<anyflow_capability_files::TransferManager>,
+    manager: &Arc<omnibridge_capability_files::TransferManager>,
     id: TransferId,
     want: u64,
     timeout: Duration,
@@ -1791,7 +1791,7 @@ async fn f15_revoking_a_peer_mid_transfer_stops_it_immediately() {
         .transfers
         .cancel_peer(
             &phone.fingerprint,
-            anyflow_capability_files::transfer::FailureReason::Revoked,
+            omnibridge_capability_files::transfer::FailureReason::Revoked,
         )
         .await;
 
@@ -2043,13 +2043,17 @@ async fn a_peer_that_floods_and_never_reads_cannot_wedge_the_daemon() {
         .tls_connect(server.addr, server.fingerprint)
         .await
         .expect("TLS");
-    let handshake =
-        anyflow_core::session::connect_handshake(&mut tls, &phone.host, server.fingerprint, None)
-            .await
-            .expect("handshake");
+    let handshake = omnibridge_core::session::connect_handshake(
+        &mut tls,
+        &phone.host,
+        server.fingerprint,
+        None,
+    )
+    .await
+    .expect("handshake");
     assert!(matches!(
         handshake,
-        anyflow_core::session::ClientHandshake::Established(_, _)
+        omnibridge_core::session::ClientHandshake::Established(_, _)
     ));
 
     // Envelopes built by hand, continuing the sequence the handshake used.
@@ -2073,14 +2077,14 @@ async fn a_peer_that_floods_and_never_reads_cannot_wedge_the_daemon() {
         message_id[..4].copy_from_slice(&index.to_be_bytes());
         message_id[15] = 0xaa;
 
-        let envelope = anyflow_proto::v1::Envelope {
+        let envelope = omnibridge_proto::v1::Envelope {
             protocol_version: 1,
             message_id,
             sequence,
             timestamp_unix_ms: 0,
             correlation_id: Vec::new(),
-            body: Some(anyflow_proto::v1::envelope::Body::CapabilityMessage(
-                anyflow_proto::v1::CapabilityMessage {
+            body: Some(omnibridge_proto::v1::envelope::Body::CapabilityMessage(
+                omnibridge_proto::v1::CapabilityMessage {
                     capability_id: "files.v1".to_string(),
                     payload,
                 },
@@ -2091,7 +2095,7 @@ async fn a_peer_that_floods_and_never_reads_cannot_wedge_the_daemon() {
         // given up rather than be stuck waiting for us.
         if tokio::time::timeout(
             Duration::from_secs(5),
-            anyflow_core::framing::write_envelope(&mut tls, &envelope),
+            omnibridge_core::framing::write_envelope(&mut tls, &envelope),
         )
         .await
         .is_err()

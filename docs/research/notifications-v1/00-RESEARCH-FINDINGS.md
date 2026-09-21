@@ -36,7 +36,7 @@ have produced a wrong specification if they had been assumed instead of checked.
 3. **Android 15+ redacts OTP notifications from untrusted listeners — and
    "trusted" includes a CompanionDeviceManager association.** The exact rule is
    in `NotificationManagerService.isAppTrustedNotificationListenerService`
-   (AOSP VERIFIED). AnyFlow holds no CDM association today. This is
+   (AOSP VERIFIED). OmniBridge holds no CDM association today. This is
    simultaneously a privacy *gift* (the platform may hide OTPs for us) and a
    trap (we must not depend on it, and adopting CDM to become "trusted" would
    deliberately turn the protection off). §1.7.
@@ -123,7 +123,7 @@ Two more constraints from the class javadoc, both AOSP VERIFIED and both
 load-bearing:
 
 * *"The system also **ignores notification listeners running in a work
-  profile**."* → AnyFlow installed in a work profile receives nothing. Must be
+  profile**."* → OmniBridge installed in a work profile receives nothing. Must be
   detected and said out loud, not left as a mystery.
 * *"From `N` onward all callbacks are called on the **main thread**."* → every
   callback must hand off immediately; no protobuf encoding, no I/O, no hashing
@@ -233,14 +233,14 @@ the types *"will appear as 'off' and 'disabled' in the user interface, so users
 don't enable a type that the listener will never bridge to their paired
 devices."*
 
-This is a real, free, OS-enforced narrowing that sits *underneath* AnyFlow's own
+This is a real, free, OS-enforced narrowing that sits *underneath* OmniBridge's own
 per-app filter, and it is enforced in `NotificationManagerService.isVisibleToListener`
 via `NotificationListenerFilter`. [01 §5](01-FUNCTIONAL-SPECIFICATION.md) uses it.
 
 There is also `META_DATA_DEFAULT_AUTOBIND`: setting it to `false` means the
 system does **not** bind the listener by default and we bind on demand with
-`requestRebind`. That is the difference between "AnyFlow is reading your
-notifications whenever it is installed" and "AnyFlow reads your notifications
+`requestRebind`. That is the difference between "OmniBridge is reading your
+notifications whenever it is installed" and "OmniBridge reads your notifications
 only while a peer that you granted is connected". [01 §4](01-FUNCTIONAL-SPECIFICATION.md)
 takes the second.
 
@@ -268,7 +268,7 @@ is, by an on-device classifier, not by the posting app.
 
 Three consequences:
 
-* AnyFlow, as an ordinary app with no CDM association, is **untrusted** and
+* OmniBridge, as an ordinary app with no CDM association, is **untrusted** and
   would receive redacted OTP notifications. Good.
 * Whether the mechanism is actually live on a given device depends on an
   aconfig flag (`redactSensitiveNotificationsFromUntrustedListeners`) *and* on an
@@ -279,7 +279,7 @@ Three consequences:
 * **Adopting `CompanionDeviceManager` would switch this protection off.** It is
   tempting for other reasons (a CDM association is the platform-sanctioned way
   to justify a companion background service). It must not be adopted casually:
-  the day AnyFlow gains a CDM association is the day it starts receiving
+  the day OmniBridge gains a CDM association is the day it starts receiving
   unredacted OTPs. → **[OQ-04, P0](06-OPEN-QUESTIONS-AND-POCS.md)**.
 
 **We therefore design as if no platform redaction exists.** Anything else would
@@ -355,14 +355,14 @@ AOSP VERIFIED (`android.provider.Settings`):
 | `ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS` + `EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME` | 30 | **Our** entry directly |
 | `NotificationManager.isNotificationListenerAccessGranted(ComponentName)` | 27 | Read the current state |
 
-`minSdk` for AnyFlow should be checked during N1, but the API-30 detail intent is
+`minSdk` for OmniBridge should be checked during N1, but the API-30 detail intent is
 what makes the permission flow in [01 §7](01-FUNCTIONAL-SPECIFICATION.md) land the
 user on one switch instead of a list of forty apps.
 
 ### 1.11 Distribution
 
 Notification access is a "restricted" area of Google Play policy: it must be a
-genuine core feature and the content must not be harvested. AnyFlow's posture —
+genuine core feature and the content must not be harvested. OmniBridge's posture —
 local-first, no cloud, no history, no telemetry, explicit per-peer grant — is
 about as defensible as this feature gets, and the app is distributed from GitHub
 today rather than Play. Marked **LIKELY**, not verified: the current policy text
@@ -547,7 +547,7 @@ Not in v1, and not for lack of ambition: there is no supported way for an
 ordinary client to observe other applications' notifications through
 `org.freedesktop.Notifications`. Doing it means becoming the notification server
 (only one may own the name) or monitoring the bus for method calls, which
-requires bus policy AnyFlow should not ask for. This is structurally the same
+requires bus policy OmniBridge should not ask for. This is structurally the same
 finding as ADR-0014's on clipboard watching, and it lands the same way: **Linux
 is a sink in v1**, and the protocol is built so that it does not have to stay
 one.
@@ -597,7 +597,7 @@ advertised per peer rather than inferred from platform.
 | Dismissal reporting | **LIMITED** | The macOS `customDismissAction` mechanism is UserNotifications, so it is available — but it needs the app to be alive to hear it |
 
 The honest sentence, which must survive into the product copy: **iOS can be told
-about a notification while AnyFlow is open, and cannot watch its own
+about a notification while OmniBridge is open, and cannot watch its own
 notifications at all.** Anything better requires APNs and a relay server, which
 is the exact trap [platform-expansion 11 §1](../platform-expansion/11-IOS-IPADOS-FEASIBILITY.md)
 exists to prevent, and which would break "no cloud dependency".
@@ -615,7 +615,7 @@ Read before designing, per the brief:
 | [ADR-0014](../../adr/ADR-0014-clipboard-change-notification.md) | **No polling, ever.** Event sources are detected once at startup and reported honestly when absent |
 | [CLIPBOARD.md](../../architecture/CLIPBOARD.md) | Grant ≠ policy. `EventCache` + `SuppressionCache`. No relay, enforced by absence. Content never logged, never persisted. Monotonic clocks |
 | [THREAT_MODEL.md](../../security/THREAT_MODEL.md) | T5 revocation is immediate; T11 logging rules; T26 the notification-listener stance that must be amended |
-| [platform-expansion 28 §159](../platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md) | Wave 0 explicitly **declined** to create a `NotificationBackend` seam: *"AnyFlow implements no notifications on any platform. Nothing to abstract."* That is no longer true, and N2 creates the seam |
+| [platform-expansion 28 §159](../platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md) | Wave 0 explicitly **declined** to create a `NotificationBackend` seam: *"OmniBridge implements no notifications on any platform. Nothing to abstract."* That is no longer true, and N2 creates the seam |
 | `desktop/core/src/store.rs` | `TrustedPeer.granted_capabilities`, `clipboard_policy` — the exact pattern `notification_policy` follows |
 | `desktop/core/src/clipboard_policy.rs` | Policy lives in core because it is *persisted*; the capability re-exports it |
 

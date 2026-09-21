@@ -4,7 +4,7 @@
 //!
 //! Any list of notifications, past or present. The desktop's own notification
 //! list is where mirrored notifications live, and duplicating it inside
-//! AnyFlow would create exactly the history the design forbids. There is
+//! OmniBridge would create exactly the history the design forbids. There is
 //! nothing to build one out of either: `NotificationsStatusReport` carries
 //! counts, states and platform identifiers, and has no field that could hold a
 //! title, a body or an application's name.
@@ -20,10 +20,10 @@
 //! was a role count of zero. [`Readiness`] is what lets this page say that
 //! rather than draw a switch that is either on or off.
 
-use anyflow_control::{
+use gtk::prelude::*;
+use omnibridge_control::{
     NotificationPeerReport, NotificationSetting, NotificationsStatusReport, Request, Response,
 };
-use gtk::prelude::*;
 
 use super::Pages;
 use crate::widgets::{self, Status, SPACING_SM, SPACING_XS};
@@ -116,7 +116,7 @@ impl Readiness {
             }
             Readiness::PeerNotSourcing => {
                 "Connected, and the device has not said it can send notifications. Check \
-                 that AnyFlow on the device shares notifications with this computer, and \
+                 that OmniBridge on the device shares notifications with this computer, and \
                  that Android has given it notification access. A change to either takes \
                  effect on its own — reconnecting by hand is not needed."
             }
@@ -206,13 +206,13 @@ impl DismissReadiness {
         match self {
             DismissReadiness::Off => {
                 "Off. When this is on, dismissing a mirrored notification here also \
-                 dismisses the original on the device. Nothing else is sent: AnyFlow \
+                 dismisses the original on the device. Nothing else is sent: OmniBridge \
                  cannot press a notification's buttons, reply to it, open an app, or \
                  clear everything at once."
             }
             DismissReadiness::NoReporting => {
                 "On, and this desktop cannot act on it. The notification server here \
-                 does not report why a notification closed, so AnyFlow cannot tell a \
+                 does not report why a notification closed, so OmniBridge cannot tell a \
                  dismissal from a banner timing out — and it will never guess."
             }
             DismissReadiness::NotConnected => {
@@ -301,7 +301,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
 
     container.append(&widgets::security_notice(
         "Nothing is kept",
-        "AnyFlow keeps no notification history. A mirrored notification exists on this \
+        "OmniBridge keeps no notification history. A mirrored notification exists on this \
          desktop's own notification list and nowhere else — nothing about it reaches a \
          log, a database or a file, and closing it here leaves nothing behind.",
         false,
@@ -351,7 +351,7 @@ fn this_computer(report: &NotificationsStatusReport) -> gtk::Box {
         "This computer is unlocked."
     }));
     card.append(&widgets::caption(
-        "Lock state is read from this desktop session. If it cannot be read, AnyFlow \
+        "Lock state is read from this desktop session. If it cannot be read, OmniBridge \
          treats the session as locked.",
     ));
     card.append(&widgets::caption(&format!(
@@ -411,7 +411,7 @@ fn peer_card(peer: &NotificationPeerReport, available: bool, pages: &Pages) -> g
     card.append(&widgets::section_label("When this computer is locked"));
     card.append(&lock_choices(peer, pages));
     card.append(&widgets::caption(
-        "Unlocking does not bring back text that was withheld: AnyFlow never kept it. \
+        "Unlocking does not bring back text that was withheld: OmniBridge never kept it. \
          The next update from the app arrives in full.",
     ));
 
@@ -469,7 +469,7 @@ fn receive_switch(peer: &NotificationPeerReport, pages: &Pages) -> gtk::Box {
             },
             move |reply| {
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: the daemon refused the grant change: {message}");
+                    eprintln!("omnibridge-gui: the daemon refused the grant change: {message}");
                 }
                 // Re-read rather than assume: the daemon is the authority, and
                 // a refused change must not leave a switch claiming otherwise.
@@ -517,7 +517,7 @@ fn policy_switch(
             },
             move |reply| {
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: the daemon refused the policy change: {message}");
+                    eprintln!("omnibridge-gui: the daemon refused the policy change: {message}");
                 }
                 pages.refresh_now();
             },
@@ -592,7 +592,7 @@ fn lock_choices(peer: &NotificationPeerReport, pages: &Pages) -> gtk::ListBox {
             },
             move |reply| {
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: the daemon refused the lock policy: {message}");
+                    eprintln!("omnibridge-gui: the daemon refused the lock policy: {message}");
                 }
                 pages.refresh_now();
             },
@@ -660,7 +660,7 @@ fn dismiss_sync_row(peer: &NotificationPeerReport, pages: &Pages) -> gtk::Box {
             },
             move |reply| {
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: the daemon refused the policy change: {message}");
+                    eprintln!("omnibridge-gui: the daemon refused the policy change: {message}");
                 }
                 // Re-read rather than assume: the daemon is the authority.
                 pages.refresh_now();
@@ -682,8 +682,8 @@ fn dismiss_sync_row(peer: &NotificationPeerReport, pages: &Pages) -> gtk::Box {
 pub(in crate::views) mod tests {
     use super::{render, DismissReadiness, Readiness, LOCK_POLICIES};
     use crate::{DaemonState, Page};
-    use anyflow_control::{NotificationPeerReport, NotificationsStatusReport};
     use gtk::prelude::*;
+    use omnibridge_control::{NotificationPeerReport, NotificationsStatusReport};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -924,7 +924,7 @@ pub(in crate::views) mod tests {
     // reaches for exists, carries a label an assistive technology can read,
     // and shows the state the daemon actually holds.
     //
-    //   cargo test -p anyflow-gui -- --ignored --test-threads=1
+    //   cargo test -p omnibridge-gui -- --ignored --test-threads=1
 
     fn report(peers: Vec<NotificationPeerReport>, available: bool) -> NotificationsStatusReport {
         NotificationsStatusReport {
@@ -1452,13 +1452,13 @@ pub(in crate::views) mod tests {
         }
     }
 
-    fn transfer() -> anyflow_control::TransferReport {
-        anyflow_control::TransferReport {
+    fn transfer() -> omnibridge_control::TransferReport {
+        omnibridge_control::TransferReport {
             transfer_id: "t".into(),
             seq: 1,
             device_name: "Tablet".into(),
             fingerprint_short: "7E63 7B4E 937B 7732".into(),
-            direction: anyflow_control::transfer_direction::RECEIVING.into(),
+            direction: omnibridge_control::transfer_direction::RECEIVING.into(),
             filename: "a.txt".into(),
             mime_type: "text/plain".into(),
             size_bytes: 4,

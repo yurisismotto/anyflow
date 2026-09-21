@@ -23,7 +23,7 @@ nothing to validate against, and we have to supply our own notion of identity.
   which requires either a trust-store hit or a valid pairing proof.
 * Only TLS 1.3 is compiled in. Both `verify_tls12_signature` implementations
   return an error unconditionally.
-* ALPN `anyflow/1` on both ends.
+* ALPN `omnibridge/1` on both ends.
 * TLS 1.3 session tickets are disabled (`send_tls13_tickets = 0`): resumption
   would let a peer skip a full handshake, and the full handshake is where the
   pinning check lives.

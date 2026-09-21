@@ -15,7 +15,7 @@ wrong rather than merely optimistic. Android 10 and later refuse
 Android app cannot watch its own clipboard. Every technique that defeats that
 restriction — an `AccessibilityService`, becoming the default IME, an
 invisible focus-stealing activity, `READ_LOGS`, root — is either forbidden by
-Play policy, hostile to the user, or both. AnyFlow uses none of them and
+Play policy, hostile to the user, or both. OmniBridge uses none of them and
 therefore does not have background clipboard reading on Android. See
 [Android's limitation](#the-android-limitation) below.
 
@@ -31,7 +31,7 @@ clipboard, cross-internet relay, and remote commands.
 ## One channel
 
 Everything travels as the opaque `payload` of a `CapabilityMessage` on the
-**existing control session** (ALPN `anyflow/1`). No second socket, no second
+**existing control session** (ALPN `omnibridge/1`). No second socket, no second
 listener, no data stream.
 
 ```text
@@ -211,7 +211,7 @@ two-way sync, or four capability ids. Neither is right.
 | `auto_send` | **off** | Everything you copy would leave the machine |
 | `auto_receive` | **off** | A peer could replace what you are about to paste |
 
-Reaching these defaults already required `anyflow grant <device>
+Reaching these defaults already required `omnibridge grant <device>
 clipboard.v1`, which is never automatic — so the two `allow_*` flags are what
 the person just asked for, not a silent widening. The two `auto_*` flags are
 the ones that must never turn themselves on, and they do not.
@@ -221,7 +221,7 @@ Concretely, with a fresh grant and nothing else:
 * copying locally sends nothing anywhere;
 * a peer's update is accepted, held in memory and reported `PENDING_USER` — it
   does not touch the system clipboard;
-* `anyflow clipboard send <device>` works, because a human asked.
+* `omnibridge clipboard send <device>` works, because a human asked.
 
 `auto_send` and `auto_receive` are each *contained* by their direction:
 `may_auto_send() == allow_send && auto_send`. Turning a direction off cannot be
@@ -405,9 +405,9 @@ never appears in an `argv`, so there is no quoting to get wrong, nothing for a
 
 **Dependency:** the `wl-clipboard` package, which is what it is called on
 Fedora, Ubuntu and Debian alike. Its absence is detected once at startup and
-reported by `anyflow clipboard status`, rather than failing at the first use.
+reported by `omnibridge clipboard status`, rather than failing at the first use.
 The runtime message names the missing binaries and the package and stops
-there: AnyFlow does not know which package manager the machine has, and a
+there: OmniBridge does not know which package manager the machine has, and a
 wrong guess is worse than none. Per-distribution install commands live in
 [the README](../../README.md#running-on-linux), where they can be correct.
 
@@ -425,7 +425,7 @@ the difference is not hypothetical:
 | Debian 13 trixie | `2.2.1-2` | yes | **no** |
 
 Note the second column: all four print the identical string `wl-clipboard
-2.2.1`, and they do not behave identically. **That is why AnyFlow probes
+2.2.1`, and they do not behave identically. **That is why OmniBridge probes
 `wl-copy --help` for the option rather than parsing `--version`** — a `>= 2.3`
 version test would reject Fedora's working build and accept the three that
 cannot do it. The version number is offered to users as guidance for choosing
@@ -438,7 +438,7 @@ than a visible failure. Ordinary clipboard sharing is untouched. Because the
 refusal only happens at the moment somebody copies a password — the worst
 possible moment to learn about it — the state is reported up front and
 separately from the backend's own availability, by both
-`anyflow clipboard status` and the GUI's clipboard page:
+`omnibridge clipboard status` and the GUI's clipboard page:
 
 ```text
   ordinary clipboard   available
@@ -503,7 +503,7 @@ exactly that, rather than failing at the first call with a worse message.
 tests and this document all read.
 
 Since Android 10 (API 29), `getPrimaryClip` returns null unless the calling app
-has input focus or is the default IME. AnyFlow is a normal app. It does **not**:
+has input focus or is the default IME. OmniBridge is a normal app. It does **not**:
 
 * declare an `AccessibilityService`;
 * ask to become the default IME;
@@ -565,7 +565,7 @@ it lands on their clipboard.
 ## Sensitive clipboards
 
 Android → desktop already requires a deliberate tap. When the platform marks a
-clip `EXTRA_IS_SENSITIVE`, AnyFlow asks **again**, naming the destination:
+clip `EXTRA_IS_SENSITIVE`, OmniBridge asks **again**, naming the destination:
 
 ```text
 This clipboard is marked sensitive
@@ -585,7 +585,7 @@ be a guess dressed up as a security control. So:
 
 * desktop → Android auto-sync is opt-in per device, with the consequence
   stated in the CLI help: *everything you copy* goes to that device;
-* `anyflow clipboard send <device> --sensitive` lets a person mark one clip by
+* `omnibridge clipboard send <device> --sensitive` lets a person mark one clip by
   hand, which sets `EXTRA_IS_SENSITIVE` on Android;
 * applying a sensitive clip on the desktop uses `wl-copy --sensitive`, so
   desktop clipboard managers skip it.
@@ -599,12 +599,12 @@ future `clear after N minutes` is possible; it is not v1.
 ## CLI
 
 ```console
-anyflow clipboard status
-anyflow clipboard send <device> [--sensitive]
-anyflow clipboard apply <device>
-anyflow clipboard allow <device> send|receive on|off
-anyflow clipboard auto-send <device> on|off
-anyflow clipboard auto-receive <device> on|off
+omnibridge clipboard status
+omnibridge clipboard send <device> [--sensitive]
+omnibridge clipboard apply <device>
+omnibridge clipboard allow <device> send|receive on|off
+omnibridge clipboard auto-send <device> on|off
+omnibridge clipboard auto-receive <device> on|off
 ```
 
 A device is named by its device id or by an unambiguous fingerprint prefix of
@@ -612,7 +612,7 @@ at least 8 characters. **An ambiguous prefix is an error, never a guess** —
 sending a password to the wrong device because a prefix matched two of them is
 not a failure mode worth having.
 
-`anyflow clipboard status` keeps three facts visibly separate, because
+`omnibridge clipboard status` keeps three facts visibly separate, because
 collapsing them is how a person comes to believe sync is running when it is
 not:
 
@@ -648,7 +648,7 @@ every mutator now republishes.
 
 A `TileService` has no input focus — the panel belongs to System UI — so
 `getPrimaryClip` returns null inside `onClick`. The tile therefore does the one
-supported thing: it brings AnyFlow to the foreground with an explicit
+supported thing: it brings OmniBridge to the foreground with an explicit
 `ACTION_SEND_CLIPBOARD`, and the Activity, which does have focus, reads the
 clipboard and shows the destination.
 

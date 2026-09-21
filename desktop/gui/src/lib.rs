@@ -1,7 +1,7 @@
-//! AnyFlow for the desktop.
+//! OmniBridge for the desktop.
 //!
 //! A GTK4 / libadwaita front end for the daemon. It is a *client* of the same
-//! local control socket the `anyflow` CLI uses and adds no protocol, no
+//! local control socket the `omnibridge` CLI uses and adds no protocol, no
 //! capability and no privilege of its own: everything on screen is something
 //! the daemon already reports, and every action is a request the CLI can make
 //! too. See `desktop/runtime/src/server.rs`.
@@ -14,7 +14,7 @@
 //! # Two surfaces, one application
 //!
 //! ```text
-//! anyflow-gui                     the GtkApplication
+//! omnibridge-gui                     the GtkApplication
 //! ├── Quick Panel                 everyday glance and actions   (panel/)
 //! └── Settings                    devices, policies, diagnostics (views/)
 //! ```
@@ -22,8 +22,8 @@
 //! One process, one application id, one poll of the daemon, one stored choice
 //! of device. The two windows are two views of that; neither owns it, and
 //! closing either leaves the other — and the daemon — entirely alone. There is
-//! no `anyflow-quickpanel` anything: the agent is `anyflowd` and stays the
-//! only long-lived process AnyFlow runs.
+//! no `omnibridge-quickpanel` anything: the agent is `omnibridged` and stays the
+//! only long-lived process OmniBridge runs.
 //!
 //! # Activation
 //!
@@ -38,9 +38,9 @@
 //! and from a command line, which is forwarded to the running instance:
 //!
 //! ```console
-//! $ anyflow-gui                  # Settings — the existing behaviour
-//! $ anyflow-gui --quick-panel    # the Quick Panel
-//! $ anyflow-gui --page files     # Settings, on one page
+//! $ omnibridge-gui                  # Settings — the existing behaviour
+//! $ omnibridge-gui --quick-panel    # the Quick Panel
+//! $ omnibridge-gui --page files     # Settings, on one page
 //! ```
 //!
 //! That pair is the seam a later desktop-shell integration — a KDE
@@ -64,11 +64,11 @@ use gtk::glib;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use anyflow_control::{Request, Response};
+use omnibridge_control::{Request, Response};
 use panel::QuickPanel;
 use selection::Selection;
 
-const APP_ID: &str = "io.github.yurisismotto.anyflow";
+const APP_ID: &str = "io.github.yurisismotto.omnibridge";
 
 /// The application action that raises the Quick Panel.
 pub const ACTION_QUICK_PANEL: &str = "quick-panel";
@@ -98,7 +98,7 @@ pub enum Launch {
     /// Anything else, including no arguments at all.
     ///
     /// Opening Settings on a bare launch is the behaviour this application
-    /// has always had, and it stays: a person who runs `anyflow-gui` today
+    /// has always had, and it stays: a person who runs `omnibridge-gui` today
     /// gets the window they got yesterday. The Quick Panel is additive and
     /// asks for itself by name.
     Settings(Option<Page>),
@@ -130,12 +130,12 @@ impl Launch {
 
 /// Starts the application.
 pub fn run() -> glib::ExitCode {
-    gio::resources_register_include!("anyflow.gresource")
+    gio::resources_register_include!("omnibridge.gresource")
         .expect("the compiled-in resources should load");
 
     let app = adw::Application::builder()
         .application_id(APP_ID)
-        // Without this, a second `anyflow-gui --quick-panel` would activate
+        // Without this, a second `omnibridge-gui --quick-panel` would activate
         // the running instance and the running instance would never see the
         // flag — it would re-present whatever window it opened with. The
         // remote argv has to reach the primary instance for the activation
@@ -213,7 +213,7 @@ fn install_styles() {
 ///
 /// # What this does, and what it cannot do
 ///
-/// The icon is compiled into the binary, so anything AnyFlow draws itself can
+/// The icon is compiled into the binary, so anything OmniBridge draws itself can
 /// ask for it by name — and on **X11** that is also enough for the window
 /// list, because GTK resolves the default icon name through this same theme
 /// and attaches the result to the window as `_NET_WM_ICON`. Measured under
@@ -225,7 +225,7 @@ fn install_styles() {
 /// an icon from the application at all. It derives one:
 ///
 /// ```text
-/// xdg_toplevel.set_app_id("io.github.yurisismotto.anyflow")   <- this process
+/// xdg_toplevel.set_app_id("io.github.yurisismotto.omnibridge")   <- this process
 ///     -> the .desktop file with that id, from XDG_DATA_DIRS    <- the session
 ///         -> its Icon= name
 ///             -> that name in the *shell's* icon theme
@@ -246,7 +246,7 @@ fn install_styles() {
 fn install_icons() {
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::IconTheme::for_display(&display)
-            .add_resource_path("/io/github/yurisismotto/anyflow/icons");
+            .add_resource_path("/io/github/yurisismotto/omnibridge/icons");
     }
     gtk::Window::set_default_icon_name(APP_ID);
 }
@@ -325,19 +325,19 @@ impl Page {
 /// `PartialEq` is what lets [`views::Pages::render`] and
 /// [`panel::QuickPanel::render`] tell an unchanged poll from a real change,
 /// and it is a property of the control types rather than of this struct: every
-/// field is a report `anyflow-control` defines, so two states are equal
+/// field is a report `omnibridge-control` defines, so two states are equal
 /// exactly when the daemon said the same thing twice.
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct DaemonState {
-    pub status: Option<anyflow_control::StatusReport>,
-    pub devices: Option<Vec<anyflow_control::DeviceReport>>,
-    pub transfers: Option<Vec<anyflow_control::TransferReport>>,
-    pub clipboard: Option<anyflow_control::ClipboardStatusReport>,
+    pub status: Option<omnibridge_control::StatusReport>,
+    pub devices: Option<Vec<omnibridge_control::DeviceReport>>,
+    pub transfers: Option<Vec<omnibridge_control::TransferReport>>,
+    pub clipboard: Option<omnibridge_control::ClipboardStatusReport>,
     /// Counts, states and platform identifiers. **No field on this report can
     /// hold a notification's title, body or application name**, which is what
     /// makes the notifications page — and the Quick Panel's notifications row
     /// — structurally incapable of becoming the history the design forbids.
-    pub notifications: Option<anyflow_control::NotificationsStatusReport>,
+    pub notifications: Option<omnibridge_control::NotificationsStatusReport>,
     /// Set when the daemon could not be reached at all.
     pub error: Option<String>,
 }
@@ -768,13 +768,13 @@ impl App {
         let split = adw::NavigationSplitView::builder()
             .sidebar(
                 &adw::NavigationPage::builder()
-                    .title("AnyFlow")
+                    .title("OmniBridge")
                     .child(&sidebar)
                     .build(),
             )
             .content(
                 &adw::NavigationPage::builder()
-                    .title("AnyFlow")
+                    .title("OmniBridge")
                     .child(&content)
                     .build(),
             )
@@ -785,16 +785,16 @@ impl App {
         let header = adw::HeaderBar::new();
         let title_box = widgets::row(widgets::SPACING_XS);
         title_box.append(&widgets::brand_mark(22));
-        title_box.append(&gtk::Label::new(Some("AnyFlow")));
+        title_box.append(&gtk::Label::new(Some("OmniBridge")));
         header.set_title_widget(Some(&title_box));
 
         // The way back to the everyday surface, so the two are not two
         // separate programs that happen to share a name.
         let panel_button = gtk::Button::from_icon_name("view-grid-symbolic");
         panel_button.add_css_class("flat");
-        panel_button.set_tooltip_text(Some("Open the AnyFlow Quick Panel"));
+        panel_button.set_tooltip_text(Some("Open the OmniBridge Quick Panel"));
         panel_button.update_property(&[gtk::accessible::Property::Label(
-            "Open the AnyFlow Quick Panel",
+            "Open the OmniBridge Quick Panel",
         )]);
         panel_button.set_action_name(Some("app.quick-panel"));
         header.pack_end(&panel_button);
@@ -805,7 +805,7 @@ impl App {
 
         let window = adw::ApplicationWindow::builder()
             .application(&self.app)
-            .title("AnyFlow Settings")
+            .title("OmniBridge Settings")
             .default_width(1000)
             .default_height(680)
             .width_request(360)
@@ -884,11 +884,11 @@ mod tests {
     #[test]
     fn the_quick_panel_is_reachable_from_the_command_line() {
         assert_eq!(
-            Launch::parse(&["anyflow-gui", "--quick-panel"]),
+            Launch::parse(&["omnibridge-gui", "--quick-panel"]),
             Launch::QuickPanel
         );
         assert_eq!(
-            Launch::parse(&["anyflow-gui", "--panel"]),
+            Launch::parse(&["omnibridge-gui", "--panel"]),
             Launch::QuickPanel
         );
     }
@@ -897,9 +897,9 @@ mod tests {
     /// existing users would be a surprise with nothing to gain by it.
     #[test]
     fn a_bare_launch_still_opens_settings() {
-        assert_eq!(Launch::parse(&["anyflow-gui"]), Launch::Settings(None));
+        assert_eq!(Launch::parse(&["omnibridge-gui"]), Launch::Settings(None));
         assert_eq!(
-            Launch::parse(&["anyflow-gui", "--unknown-to-this-build"]),
+            Launch::parse(&["omnibridge-gui", "--unknown-to-this-build"]),
             Launch::Settings(None)
         );
     }
@@ -907,16 +907,16 @@ mod tests {
     #[test]
     fn a_page_can_still_be_named() {
         assert_eq!(
-            Launch::parse(&["anyflow-gui", "--page", "clipboard"]),
+            Launch::parse(&["omnibridge-gui", "--page", "clipboard"]),
             Launch::Settings(Some(Page::Clipboard))
         );
         assert_eq!(
-            Launch::parse(&["anyflow-gui", "--page=peers"]),
+            Launch::parse(&["omnibridge-gui", "--page=peers"]),
             Launch::Settings(Some(Page::TrustedPeers))
         );
         // An unknown page is not worth refusing to open a window over.
         assert_eq!(
-            Launch::parse(&["anyflow-gui", "--page", "nonsense"]),
+            Launch::parse(&["omnibridge-gui", "--page", "nonsense"]),
             Launch::Settings(None)
         );
     }
@@ -926,7 +926,7 @@ mod tests {
     #[test]
     fn the_panel_flag_is_not_order_dependent() {
         assert_eq!(
-            Launch::parse(&["anyflow-gui", "--page", "files", "--quick-panel"]),
+            Launch::parse(&["omnibridge-gui", "--page", "files", "--quick-panel"]),
             Launch::QuickPanel
         );
     }
@@ -938,7 +938,7 @@ mod tests {
     fn the_activation_seam_has_stable_names() {
         assert_eq!(ACTION_QUICK_PANEL, "quick-panel");
         assert_eq!(ACTION_SETTINGS, "settings");
-        assert_eq!(APP_ID, "io.github.yurisismotto.anyflow");
+        assert_eq!(APP_ID, "io.github.yurisismotto.omnibridge");
     }
 }
 
@@ -961,7 +961,7 @@ pub(crate) mod application_gate {
     ///
     /// Registered because GTK refuses to attach a window to an application
     /// that has not emitted `::startup`. `NON_UNIQUE` because a unique one
-    /// would single-instance the test against whatever AnyFlow the developer
+    /// would single-instance the test against whatever OmniBridge the developer
     /// is running. And `suffix` because even a non-unique GApplication
     /// exports `org.gtk.Application` at an object path derived from its id, so
     /// two of them sharing an id in one process collide on the bus.
@@ -1202,7 +1202,7 @@ pub(crate) mod application_gate {
 
     /// Opening a surface starts nothing in the background.
     ///
-    /// The Quick Panel is a view over `anyflowd`; it is not a daemon, it does
+    /// The Quick Panel is a view over `omnibridged`; it is not a daemon, it does
     /// not launch one, and there is no second long-lived process anywhere in
     /// this application. Asserted structurally — nothing here spawns, and the
     /// approval attachment is the application's and predates any window.

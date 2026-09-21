@@ -1,4 +1,4 @@
-//! This computer's own identity, and what AnyFlow is.
+//! This computer's own identity, and what OmniBridge is.
 
 use gtk::prelude::*;
 
@@ -11,7 +11,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState) {
 
     let Some(status) = &state.status else {
         container.append(&widgets::body_muted(
-            "The AnyFlow daemon is not reachable. Start it to see this computer's identity.",
+            "The OmniBridge daemon is not reachable. Start it to see this computer's identity.",
         ));
         return;
     };
@@ -50,7 +50,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState) {
 
     container.append(&widgets::security_notice(
         "Private by design",
-        "AnyFlow has no account, no cloud service and no analytics. Devices talk \
+        "OmniBridge has no account, no cloud service and no analytics. Devices talk \
          directly over your local network on a mutually authenticated TLS 1.3 session \
          pinned to the key you approved when pairing.",
         false,
@@ -62,10 +62,10 @@ pub fn render(container: &gtk::Box, state: &DaemonState) {
     about.set_halign(gtk::Align::Center);
     about.set_margin_top(SPACING_SM);
     about.append(&widgets::brand_mark(48));
-    let name = widgets::subtitle("AnyFlow");
+    let name = widgets::subtitle("OmniBridge");
     name.set_halign(gtk::Align::Center);
     about.append(&name);
-    let tag = widgets::caption("One flow. Any device.");
+    let tag = widgets::caption("One bridge. Any device.");
     tag.set_halign(gtk::Align::Center);
     about.append(&tag);
     container.append(&about);

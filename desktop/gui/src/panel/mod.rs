@@ -2,8 +2,8 @@
 //!
 //! ```text
 //! ┌────────────────────────────────────┐
-//! │ (A) AnyFlow                     ⚙  │
-//! │     One flow. Any device.          │
+//! │ (A) OmniBridge                     ⚙  │
+//! │     One bridge. Any device.          │
 //! │                                    │
 //! │  ● SM-X620                      ✓  │
 //! │    Connected · 78%                 │
@@ -15,7 +15,7 @@
 //! │  Clipboard                      On │
 //! │  Files                          On │
 //! │                                    │
-//! │  Open AnyFlow Settings             │
+//! │  Open OmniBridge Settings             │
 //! └────────────────────────────────────┘
 //! ```
 //!
@@ -25,7 +25,7 @@
 //! authorised. It opens no socket of its own beyond the control client the
 //! rest of the application uses, starts no process, holds no state the
 //! Settings window cannot see, and adds no authority: every button here ends
-//! in a control request the `anyflow` CLI could make by hand.
+//! in a control request the `omnibridge` CLI could make by hand.
 //!
 //! # What it deliberately is not
 //!
@@ -49,7 +49,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use anyflow_control::Response;
+use omnibridge_control::Response;
 
 use crate::selection::Selection;
 use crate::widgets::{self, Status, SPACING_MD, SPACING_SM, SPACING_XS};
@@ -107,7 +107,7 @@ impl QuickPanel {
 
         let header = adw::HeaderBar::new();
         header.add_css_class("flat");
-        let title = adw::WindowTitle::new("AnyFlow", "One flow. Any device.");
+        let title = adw::WindowTitle::new("OmniBridge", "One bridge. Any device.");
         header.set_title_widget(Some(&title));
 
         let mark = widgets::brand_mark(20);
@@ -118,8 +118,8 @@ impl QuickPanel {
         // a screen reader reads out as "button".
         let settings = gtk::Button::from_icon_name("preferences-system-symbolic");
         settings.add_css_class("flat");
-        settings.set_tooltip_text(Some("Open AnyFlow Settings"));
-        settings.update_property(&[gtk::accessible::Property::Label("Open AnyFlow Settings")]);
+        settings.set_tooltip_text(Some("Open OmniBridge Settings"));
+        settings.update_property(&[gtk::accessible::Property::Label("Open OmniBridge Settings")]);
         settings.set_action_name(Some("app.settings"));
         header.pack_end(&settings);
 
@@ -129,7 +129,7 @@ impl QuickPanel {
 
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("AnyFlow")
+            .title("OmniBridge")
             .default_width(WIDTH)
             .width_request(WIDTH)
             .resizable(false)
@@ -201,13 +201,14 @@ impl QuickPanel {
         match &model.health {
             Health::Available => {}
             Health::Reaching => {
-                self.content
-                    .append(&widgets::body_muted("Connecting to the AnyFlow service…"));
+                self.content.append(&widgets::body_muted(
+                    "Connecting to the OmniBridge service…",
+                ));
             }
             Health::Unavailable { headline } => {
                 self.content.append(&widgets::security_notice(
                     headline,
-                    "AnyFlow keeps trying. Your devices stay paired, and nothing is lost.",
+                    "OmniBridge keeps trying. Your devices stay paired, and nothing is lost.",
                     true,
                 ));
             }
@@ -215,8 +216,9 @@ impl QuickPanel {
 
         if model.health.is_available() {
             if model.peers.is_empty() {
-                let empty =
-                    widgets::body_muted("No device is paired yet. Pair one from AnyFlow Settings.");
+                let empty = widgets::body_muted(
+                    "No device is paired yet. Pair one from OmniBridge Settings.",
+                );
                 self.content.append(&empty);
             } else {
                 self.content.append(&self.peer_list(model, selection));
@@ -266,8 +268,10 @@ impl QuickPanel {
         }
 
         self.content.append(&widgets::separator());
-        let settings =
-            widgets::secondary_button("Open AnyFlow Settings", Some("preferences-system-symbolic"));
+        let settings = widgets::secondary_button(
+            "Open OmniBridge Settings",
+            Some("preferences-system-symbolic"),
+        );
         settings.set_action_name(Some("app.settings"));
         self.content.append(&settings);
     }
@@ -314,7 +318,7 @@ impl QuickPanel {
         list.set_selection_mode(gtk::SelectionMode::None);
         list.set_accessible_role(gtk::AccessibleRole::ListBox);
         list.update_property(&[gtk::accessible::Property::Label(if choosing {
-            "Devices. Choose which one AnyFlow sends to."
+            "Devices. Choose which one OmniBridge sends to."
         } else {
             "Devices"
         })]);
@@ -435,7 +439,7 @@ impl QuickPanel {
                         // delivery here was optimistic by exactly one round
                         // trip, and on hardware the two came apart.
                         Ok(_) => panel.toast(&model::clipboard_submitted_message(&peer)),
-                        Err(_) => panel.toast("The AnyFlow service is not available"),
+                        Err(_) => panel.toast("The OmniBridge service is not available"),
                     }
                 });
             });
@@ -489,7 +493,7 @@ impl QuickPanel {
                         // and the next poll picks the transfer up, so the only
                         // thing worth saying here is that it started.
                         Ok(_) => panel.toast(&format!("Offering {name} to {peer}")),
-                        Err(_) => panel.toast("The AnyFlow service is not available"),
+                        Err(_) => panel.toast("The OmniBridge service is not available"),
                     }
                 });
             },
@@ -670,10 +674,10 @@ fn recent_section(recent: &[model::RecentTransfer]) -> gtk::Box {
     let all = widgets::secondary_button("View all transfers", Some("folder-symbolic"));
     all.set_action_name(Some("app.transfers"));
     all.set_tooltip_text(Some(
-        "Opens the Transfers page in AnyFlow Settings. It does not change which device you send to.",
+        "Opens the Transfers page in OmniBridge Settings. It does not change which device you send to.",
     ));
     all.update_property(&[gtk::accessible::Property::Description(
-        "Opens the Transfers page in AnyFlow Settings. It does not change which device you send to.",
+        "Opens the Transfers page in OmniBridge Settings. It does not change which device you send to.",
     )]);
     section.append(&all);
     section
@@ -769,7 +773,7 @@ fn status_row(label: &str, icon_name: &str, line: &model::StatusLine) -> gtk::Bo
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use anyflow_control::{
+    use omnibridge_control::{
         BatteryReport, ClipboardPeerReport, ClipboardStatusReport, ConnectionReport, DeviceReport,
         DeviceState, StatusReport, TransferReport,
     };
@@ -895,7 +899,7 @@ pub(crate) mod tests {
 
         let panel = QuickPanel::new(&app);
         let selection = Rc::new(Selection::at(std::env::temp_dir().join(format!(
-            "anyflow-panel-test-{}-{nth}/gui.json",
+            "omnibridge-panel-test-{}-{nth}/gui.json",
             std::process::id()
         ))));
         if let Some(chosen) = chosen {
@@ -990,7 +994,7 @@ pub(crate) mod tests {
             size_bytes: 1024,
             bytes_transferred: 1024,
             percentage: Some(100),
-            state: anyflow_control::transfer_state::COMPLETED.into(),
+            state: omnibridge_control::transfer_state::COMPLETED.into(),
             failure: None,
             failure_code: None,
             stored_at: None,
@@ -1031,13 +1035,13 @@ pub(crate) mod tests {
                     2,
                     "document.pdf",
                     "SM-X620",
-                    anyflow_control::transfer_direction::SENDING,
+                    omnibridge_control::transfer_direction::SENDING,
                 ),
                 finished(
                     1,
                     "photo.jpg",
                     "SM-X620",
-                    anyflow_control::transfer_direction::RECEIVING,
+                    omnibridge_control::transfer_direction::RECEIVING,
                 ),
             ],
         );
@@ -1068,7 +1072,7 @@ pub(crate) mod tests {
                         [3, 1, 5, 2, 6, 4][(n - 1) as usize],
                         &format!("file-{}.txt", [3, 1, 5, 2, 6, 4][(n - 1) as usize]),
                         "SM-X620",
-                        anyflow_control::transfer_direction::SENDING,
+                        omnibridge_control::transfer_direction::SENDING,
                     )
                 })
                 .collect(),
@@ -1097,7 +1101,7 @@ pub(crate) mod tests {
                 1,
                 "document.pdf",
                 "SM-X620",
-                anyflow_control::transfer_direction::SENDING,
+                omnibridge_control::transfer_direction::SENDING,
             )],
         );
         let (_p, content, _s) = panel(&st, Some("aa11"));
@@ -1130,7 +1134,7 @@ pub(crate) mod tests {
                 1,
                 "document.pdf",
                 "SM-X620",
-                anyflow_control::transfer_direction::SENDING,
+                omnibridge_control::transfer_direction::SENDING,
             )],
         );
         let (_p, content, _s) = panel(&st, Some("aa11"));
@@ -1296,12 +1300,15 @@ pub(crate) mod tests {
 
     fn an_unreachable_daemon_draws_no_live_actions() {
         let state = DaemonState {
-            error: Some("could not reach the AnyFlow daemon at /run/…: ENOENT".into()),
+            error: Some("could not reach the OmniBridge daemon at /run/…: ENOENT".into()),
             ..DaemonState::default()
         };
         let (_panel, content, _selection) = panel(&state, None);
         let text = labels(&content).join(" | ");
-        assert!(text.contains("AnyFlow service is not available"), "{text}");
+        assert!(
+            text.contains("OmniBridge service is not available"),
+            "{text}"
+        );
         // The raw error stays out of the panel.
         assert!(!text.contains("ENOENT"), "{text}");
         // No device rows, and no action that could be pressed.
@@ -1320,7 +1327,7 @@ pub(crate) mod tests {
             DaemonState::default(),
         ] {
             let (_panel, content, _selection) = panel(&state, None);
-            let settings = button(&content, "Open AnyFlow Settings");
+            let settings = button(&content, "Open OmniBridge Settings");
             // Through the application action, not through a reference to a
             // window: this is the same seam a tray would use.
             assert_eq!(

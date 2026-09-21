@@ -1,6 +1,6 @@
 //! Session-lifecycle regressions.
 //!
-//! These cover the "zombie session" defect: `anyflow status` reporting a
+//! These cover the "zombie session" defect: `omnibridge status` reporting a
 //! device as connected when its session was already gone, and the mirror
 //! image of it — a live session being evicted by an older one's late close.
 //!
@@ -11,8 +11,8 @@ mod common;
 
 use std::time::Duration;
 
-use anyflow_core::session::SessionHost;
 use common::{wait_until, TestClient, TestServer};
+use omnibridge_core::session::SessionHost;
 
 /// Pairs a client with the server and returns a live session.
 async fn paired_session(server: &TestServer, client: &TestClient) -> common::ConnectedSession {
@@ -53,8 +53,8 @@ async fn a_session_that_ends_is_removed_from_the_registry() {
 /// the daemon's.
 async fn daemon_session_id(
     server: &TestServer,
-    peer: &anyflow_core::Fingerprint,
-) -> Option<anyflow_core::session::SessionId> {
+    peer: &omnibridge_core::Fingerprint,
+) -> Option<omnibridge_core::session::SessionId> {
     server.state.session_for(peer).await.map(|h| h.id())
 }
 
@@ -166,7 +166,7 @@ async fn revoking_a_device_leaves_no_session_behind() {
 
     // Trust is revoked, not merely absent: the device is still listed.
     let status = server.state.lookup_peer(&peer).await;
-    assert_eq!(status, anyflow_core::session::PeerStatus::Revoked);
+    assert_eq!(status, omnibridge_core::session::PeerStatus::Revoked);
 
     let _ = session.task.await;
 }
@@ -181,10 +181,10 @@ async fn battery_telemetry_is_dropped_when_the_session_ends() {
 
     session
         .handle
-        .send_capability(anyflow_capability_battery::BatteryCapability::encode(
-            &anyflow_capability_battery::BatteryReading {
+        .send_capability(omnibridge_capability_battery::BatteryCapability::encode(
+            &omnibridge_capability_battery::BatteryReading {
                 percentage: 57,
-                charging_state: anyflow_proto::v1::capabilities::ChargingState::Charging,
+                charging_state: omnibridge_proto::v1::capabilities::ChargingState::Charging,
                 peer_timestamp_unix_ms: 1,
             },
         ))
@@ -221,7 +221,7 @@ async fn battery_telemetry_is_dropped_when_the_session_ends() {
 /// timeout before the peers had finished talking.
 #[tokio::test]
 async fn a_silent_peer_is_eventually_dropped_rather_than_left_connected() {
-    use anyflow_core::session::ClientHandshake;
+    use omnibridge_core::session::ClientHandshake;
 
     let server = TestServer::start().await;
     let client = TestClient::new("Phone");
@@ -235,7 +235,7 @@ async fn a_silent_peer_is_eventually_dropped_rather_than_left_connected() {
         .tls_connect(server.addr, server.fingerprint)
         .await
         .expect("tls");
-    let handshake = anyflow_core::session::connect_handshake(
+    let handshake = omnibridge_core::session::connect_handshake(
         &mut tls,
         &client.host,
         server.fingerprint,
@@ -271,7 +271,7 @@ async fn a_silent_peer_is_eventually_dropped_rather_than_left_connected() {
     // Trust survives: the link died, the pairing did not.
     assert_eq!(
         server.state.lookup_peer(&peer).await,
-        anyflow_core::session::PeerStatus::Trusted {
+        omnibridge_core::session::PeerStatus::Trusted {
             device_id: client.identity.device_id().to_string(),
             device_name: "Phone".to_string(),
             granted_capabilities: vec!["battery.v1".to_string()],

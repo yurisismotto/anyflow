@@ -19,7 +19,7 @@ the permission are the same decision.
 
 ### What the project has said until now
 
-AnyFlow has advertised the *absence* of that privilege as a feature, in three
+OmniBridge has advertised the *absence* of that privilege as a feature, in three
 places:
 
 * `android/app/src/main/AndroidManifest.xml`, under the heading **"Deliberately
@@ -36,15 +36,15 @@ places:
 precise. Read in context, T26 is an argument about `clipboard.v1`: every
 technique that defeats Android's clipboard restriction — an accessibility
 service, a default IME, a focus-stealing activity, `READ_LOGS`, root — is
-user-hostile, and AnyFlow declines all of them. A notification listener appears
-in that list because at the time AnyFlow had no honest reason to hold one, and
+user-hostile, and OmniBridge declines all of them. A notification listener appears
+in that list because at the time OmniBridge had no honest reason to hold one, and
 holding a powerful permission with no feature behind it is exactly the posture
 the list condemns.
 
 `notifications.v1` supplies the honest reason. What the list was really
-asserting is not *"AnyFlow will never hold a powerful permission"* — AnyFlow
+asserting is not *"OmniBridge will never hold a powerful permission"* — OmniBridge
 already holds `CHANGE_WIFI_MULTICAST_STATE` and `FOREGROUND_SERVICE_CONNECTED_DEVICE`
-and argues in the manifest that it genuinely uses them — but *"AnyFlow will not
+and argues in the manifest that it genuinely uses them — but *"OmniBridge will not
 hold a privilege it does not need, will not acquire one by a side door, and
 will not use one the user did not knowingly enable."* That rule survives this
 ADR intact. The word that does not survive is **"must stay that way"**, which
@@ -55,8 +55,8 @@ stated a permanent conclusion where the project only ever had a permanent
 
 | Period | Position |
 | --- | --- |
-| **Foundation … `clipboard.v1` (through 2026-09-08)** | AnyFlow holds no notification-listener privilege. There is no feature that needs one, and every clipboard workaround that would use one is refused |
-| **`notifications.v1`, as approved here** | The privilege exists in the manifest, is held by the *system* rather than by AnyFlow, and is inert until the user enables notification access in Android Settings **and** separately grants `notifications.v1` to a specific paired peer |
+| **Foundation … `clipboard.v1` (through 2026-09-08)** | OmniBridge holds no notification-listener privilege. There is no feature that needs one, and every clipboard workaround that would use one is refused |
+| **`notifications.v1`, as approved here** | The privilege exists in the manifest, is held by the *system* rather than by OmniBridge, and is inert until the user enables notification access in Android Settings **and** separately grants `notifications.v1` to a specific paired peer |
 | **Every release shipped so far** | Still contains no `NotificationListenerService`. Nothing in this ADR is implemented |
 
 ### Evidence gathered before deciding
@@ -77,7 +77,7 @@ The first is why this ADR does not lean on platform OTP protection anywhere.
 
 ## Decision
 
-**AnyFlow may declare a `NotificationListenerService` for `notifications.v1`,
+**OmniBridge may declare a `NotificationListenerService` for `notifications.v1`,
 under the explicit security contract below.** The contract is normative: a
 change that violates any clause of it is a change to this ADR, not an
 implementation detail.
@@ -90,7 +90,7 @@ Notification access:
 2. **is disabled by default** — a fresh install reads nothing;
 3. **requires the Android OS notification-access grant**, given by the user in
    Settings, revocable there at any time;
-4. **separately requires an explicit AnyFlow peer grant** of `notifications.v1`.
+4. **separately requires an explicit OmniBridge peer grant** of `notifications.v1`.
    Neither permission implies the other, and the OS grant alone sends nothing
    to anyone;
 5. **is independently revocable** — either permission can be withdrawn without
@@ -114,7 +114,7 @@ And notification access does **not**:
 
 ### 2. The permanent rule that replaces "must stay that way"
 
-> **AnyFlow acquires a privileged Android capability only when a named,
+> **OmniBridge acquires a privileged Android capability only when a named,
 > user-visible feature requires it; only through the platform-sanctioned API
 > for that feature; only with the user's explicit, separately revocable
 > consent; and never as a means of defeating a platform restriction that exists
@@ -124,19 +124,19 @@ And notification access does **not**:
 > `READ_LOGS`, `MANAGE_EXTERNAL_STORAGE`, location, root, default-IME status,
 > hidden APIs and reflection remain **refused**, and no feature is a reason to
 > revisit them, because each of them is either a workaround for a protection or
-> a grant far wider than any AnyFlow feature needs.
+> a grant far wider than any OmniBridge feature needs.
 
 `BIND_NOTIFICATION_LISTENER_SERVICE` moves out of the refused list and into the
-list of permissions AnyFlow holds *and justifies*, beside multicast and the
+list of permissions OmniBridge holds *and justifies*, beside multicast and the
 connected-device foreground service. It is the only entry that has ever moved,
 and moving it took an ADR.
 
 Note the asymmetry that makes this consistent rather than convenient:
 `clipboard.v1` **declined** an equivalent trade. Android restricts background
-clipboard reads, so AnyFlow ships a manual Android → Fedora send and says why
+clipboard reads, so OmniBridge ships a manual Android → Fedora send and says why
 (T26). Notifications carry no such restriction — the platform offers a
 first-class API whose own javadoc names *"bridging to paired devices"* as the
-use case. AnyFlow is taking the sanctioned path, not routing around a closed
+use case. OmniBridge is taking the sanctioned path, not routing around a closed
 one.
 
 ### 3. Permission lifecycle
@@ -144,13 +144,13 @@ one.
 | Stage | State |
 | --- | --- |
 | Installed | No OS grant, no peer grant. The service is declared and never bound |
-| OS access granted | The system *may* bind. AnyFlow keeps `META_DATA_DEFAULT_AUTOBIND=false` and does not request a bind. **Nothing is sent to any peer** |
+| OS access granted | The system *may* bind. OmniBridge keeps `META_DATA_DEFAULT_AUTOBIND=false` and does not request a bind. **Nothing is sent to any peer** |
 | Peer granted `notifications.v1`, `allow_mirror` on, session established | `requestRebind` — the listener binds and mirroring begins |
 | Last such peer disconnects or is revoked | `requestUnbind` — the listener unbinds |
 | OS access revoked | Roles narrow immediately; a `NotificationRoles` message with no `SOURCE` role is sent, and every mirror on every peer is closed |
 
 The binding is therefore a function of *live peer state*, which makes the claim
-"AnyFlow reads your notifications only while a granted computer is connected"
+"OmniBridge reads your notifications only while a granted computer is connected"
 structurally true rather than a promise.
 
 ### 4. Peer grants and revocation
@@ -175,7 +175,7 @@ product arrives in.
 
 Rules no setting can override:
 
-* AnyFlow's own package is **never** mirrored — a hard rule, not a default;
+* OmniBridge's own package is **never** mirrored — a hard rule, not a default;
 * an app installed after the grant defaults to **disabled**, surfaced passively
   ("3 new apps are not being shared"), never by a prompt;
 * **work-profile** notifications default to disabled, behind their own switch;
@@ -184,7 +184,7 @@ Rules no setting can override:
 * `VISIBILITY_SECRET` is never mirrored under any setting.
 
 **No banking, password-manager or 2FA heuristic is a security boundary.**
-AnyFlow does not detect OTPs — no regex, no keyword list, no app-category
+OmniBridge does not detect OTPs — no regex, no keyword list, no app-category
 guess. A guess dressed as a control is worse than an honest boundary, because
 the user trusts it and it is wrong in cases neither party can predict. This is
 `THREAT_MODEL.md` T10's reasoning, unchanged. The picker may *order* or
@@ -252,7 +252,7 @@ not cross to a personal computer because a person enabled a consumer feature.
 ### 9. OTP and sensitive-content implications
 
 Android 15+ can redact OTP-classified notifications from untrusted listeners.
-**AnyFlow treats that as a bonus and never as a control**, and
+**OmniBridge treats that as a bonus and never as a control**, and
 [POC-NOTIF-01](../research/notifications-v1/poc/POC-NOTIF-01.md) shows why: on
 the certification target it does not fire at all. Six OTP-shaped notifications
 across three vectors arrived verbatim.
@@ -264,7 +264,7 @@ Consequences, binding on the implementation:
   argument for deny-by-default rather than against it;
 * the default `AppOnly` lock policy remains the second line, because a code
   arriving on a locked phone is not transmitted in full;
-* AnyFlow still does not attempt OTP detection itself (§5).
+* OmniBridge still does not attempt OTP detection itself (§5).
 
 ### 10. CompanionDeviceManager — not adopted in v1
 
@@ -277,7 +277,7 @@ justification for companion background behaviour — would change notification
 privacy semantics as a side effect, in a sprint whose author may never have
 read this file.
 
-AnyFlow does not need it. It already has explicit pairing, SPKI-pinned TLS,
+OmniBridge does not need it. It already has explicit pairing, SPKI-pinned TLS,
 per-peer identity, per-capability grants and revocation
 (ADR-0006, ADR-0007, ADR-0008). CDM would add platform convenience on top of a
 trust model that is already complete, at the cost of a privacy property.
@@ -343,7 +343,7 @@ disproved by it — §9.
 ## Consequences
 
 **The manifest gains one `<service>` element and one system-held permission.**
-`BIND_NOTIFICATION_LISTENER_SERVICE` is held by the *system*, not by AnyFlow:
+`BIND_NOTIFICATION_LISTENER_SERVICE` is held by the *system*, not by OmniBridge:
 declaring it on the service is what stops any other app from binding it,
 exactly as `BIND_QUICK_SETTINGS_TILE` already does for the clipboard tile. The
 manifest comment must move `BIND_NOTIFICATION_LISTENER_SERVICE` out of the
@@ -362,14 +362,14 @@ listener among permanently-absent permissions acquires an exception with a
 pointer here.
 
 **The trust surface grows, and this is the real cost.** A person who enables
-this is trusting AnyFlow with the most sensitive stream on their phone. That
+this is trusting OmniBridge with the most sensitive stream on their phone. That
 trust is repaid by the code being open, by nothing leaving the LAN, by the
 listener being unbound whenever no granted peer is connected, and by every
 default starting closed — and it must be *earned in the permission copy*, which
 should be reviewed as a security control rather than as marketing.
 
 **Play policy is not yet cleared.** Notification access is a restricted area of
-Google Play policy. AnyFlow is distributed from GitHub today, so this blocks no
+Google Play policy. OmniBridge is distributed from GitHub today, so this blocks no
 release; it must be answered before any Play submission
 ([OQ-09](../research/notifications-v1/06-OPEN-QUESTIONS-AND-POCS.md)).
 
@@ -390,7 +390,7 @@ This ADR is revisited if any of the following becomes true:
 * **platform OTP redaction changes** — if a later Android or One UI build
   starts classifying, POC-NOTIF-01 is re-run and §9's copy is revised. The
   design must still not depend on it;
-* **an OS-level API narrower than a full listener appears** — AnyFlow should
+* **an OS-level API narrower than a full listener appears** — OmniBridge should
   prefer it, by §2;
 * **Play submission is contemplated** — OQ-09 first;
 * **a second sink platform is added** — Windows can fill every role, which

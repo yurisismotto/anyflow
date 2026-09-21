@@ -16,7 +16,7 @@ between two devices for the first time.
 * **Key: ECDSA P-256.** One key per device, generated on first run.
 * **On Android:** generated inside the Android Keystore, StrongBox when the
   device has a secure element, otherwise the TEE. Non-exportable.
-* **On Fedora:** PKCS#8 DER at `$XDG_DATA_HOME/anyflow/identity.key`,
+* **On Fedora:** PKCS#8 DER at `$XDG_DATA_HOME/omnibridge/identity.key`,
   mode 0600 in a 0700 directory. The daemon **refuses to start** if those
   modes are loose.
 * **Fingerprint: `SHA-256(DER SubjectPublicKeyInfo)`,** lowercase hex. The
@@ -27,7 +27,7 @@ between two devices for the first time.
 ### Pairing
 
 1. Desktop opens a window and generates a 160-bit single-use token.
-2. QR shows `anyflow1:<desktop-fingerprint>:<token>:<device-id>:<addresses>`.
+2. QR shows `omnibridge1:<desktop-fingerprint>:<token>:<device-id>:<addresses>`.
 3. Phone scans, **pins the fingerprint**, then connects.
 4. Desktop replies `PAIRING_REQUIRED` with a fresh 32-byte nonce.
 5. Phone sends `proof = HMAC-SHA256(token, domain ‖ len(desktop_fp) ‖
