@@ -19,7 +19,7 @@ already uses, so the two matrices can be read together:
 | Value | Meaning | Here |
 | --- | --- | --- |
 | **VERIFIED** | Executed here, or read from platform source / a normative spec | Transcript or file cited in [00](00-RESEARCH-FINDINGS.md) |
-| **LIKELY** | A documented vendor API exists and fits; no known obstacle; not proven for AnyFlow | Vendor doc cited |
+| **LIKELY** | A documented vendor API exists and fits; no known obstacle; not proven for OmniBridge | Vendor doc cited |
 | **UNKNOWN** | Cannot be settled from documentation. Needs a PoC | PoC id cited |
 | **UNSUPPORTED** | The platform does not expose it. No amount of engineering changes this | Reason cited |
 
@@ -195,7 +195,7 @@ the whole expansion and it is not this sprint's to solve.
 
 **²⁵ Linux permission model — none, and that is worth saying.** Any process in a
 session may post to `org.freedesktop.Notifications`. There is no prompt and no
-capability. AnyFlow neither worsens this nor can fix it — the same honest caveat
+capability. OmniBridge neither worsens this nor can fix it — the same honest caveat
 [CLIPBOARD.md](../../architecture/CLIPBOARD.md) makes about a Linux session
 clipboard.
 

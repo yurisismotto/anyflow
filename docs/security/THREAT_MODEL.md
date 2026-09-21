@@ -1,4 +1,4 @@
-# AnyFlow — Threat Model
+# OmniBridge — Threat Model
 
 Scope: the foundation Sprint (identity, discovery, pairing, authenticated
 transport, `battery.v1`). Clipboard, file transfer, notifications and browser
@@ -117,7 +117,7 @@ and nothing more:
   advertises — a device announcing `clipboard.v1` gets it only if the store
   says so;
 * authorization is re-checked per message, not once at connect;
-* `anyflow unpair <device>` sets `revoked`, clears the grants, **and tears
+* `omnibridge unpair <device>` sets `revoked`, clears the grants, **and tears
   down the live session immediately** rather than waiting for the next
   reconnect;
 * this Sprint has no remote command execution, no filesystem access and no
@@ -152,8 +152,8 @@ user then accepts at the prompt will pair. The prompt is the last line.
 **Applicable since `files.v1`.** The commitments recorded here before the
 feature existed are all met; see [FILES.md](../architecture/FILES.md).
 
-* **Write only inside a dedicated directory.** `<XDG downloads>/AnyFlow` on
-  Fedora (mode 0700), `Download/AnyFlow` via MediaStore on Android. The
+* **Write only inside a dedicated directory.** `<XDG downloads>/OmniBridge` on
+  Fedora (mode 0700), `Download/OmniBridge` via MediaStore on Android. The
   directory is chosen by the receiver and cannot be influenced by a peer.
 * **Never trust a peer-supplied filename.** `sanitize` reduces it to a bare
   name: everything up to the last `/` **or** `\` is dropped, control
@@ -175,11 +175,11 @@ feature existed are all met; see [FILES.md](../architecture/FILES.md).
   are promoted only if SHA-256 matches the offer. A failed hash deletes the
   partial file.
 
-Residual risk: AnyFlow does not inspect file *content*. A paired, granted,
+Residual risk: OmniBridge does not inspect file *content*. A paired, granted,
 human-approved peer can send a file that is malicious when opened. That is out
 of scope for a transfer tool, and the mitigations are the grant (off by
 default), the per-transfer human approval, and the fact that a received file
-is never executed, opened or dispatched on by AnyFlow itself — `mime_type` is
+is never executed, opened or dispatched on by OmniBridge itself — `mime_type` is
 a label and is never an input to a decision.
 
 ### T9 — URL scheme attacks
@@ -192,12 +192,12 @@ confirmation for anything else.
 ### T10 — Clipboard contents (passwords, tokens, 2FA codes)
 
 **Implemented by `clipboard.v1`.** The clipboard is the most sensitive surface
-AnyFlow touches. It routinely holds passwords, API keys, one-time codes, card
+OmniBridge touches. It routinely holds passwords, API keys, one-time codes, card
 numbers, recovery phrases and URLs with tokens in them — usually without the
 person consciously deciding to put them there.
 
 * `clipboard.v1` is **never auto-granted**. `auto_grant` still contains only
-  `battery.v1`. Granting it is `anyflow grant <device> clipboard.v1`, or a
+  `battery.v1`. Granting it is `omnibridge grant <device> clipboard.v1`, or a
   switch on the Android device card.
 * The grant is one question; **direction and automation are another**. A
   freshly granted device gets `allow_send`/`allow_receive` on (that is what
@@ -205,7 +205,7 @@ person consciously deciding to put them there.
   fresh grant sends nothing when you copy, and puts nothing on your clipboard
   when a peer pushes.
 * With `auto_receive` off, an accepted clip is held **in memory** and offered
-  through a notification or `anyflow clipboard apply`. It never silently
+  through a notification or `omnibridge clipboard apply`. It never silently
   replaces what you are about to paste.
 * Content is bounded at 32 KiB and **never truncated** — a truncated password
   is a different, plausible-looking, wrong value.
@@ -281,7 +281,7 @@ a claim.
 non-exportable, so it cannot be extracted from a stolen device to impersonate
 it elsewhere. The identity is excluded from cloud backup and device transfer,
 so a restored backup cannot carry it either. Recovery is: revoke from the
-desktop (`anyflow unpair`), which is effective immediately for live sessions
+desktop (`omnibridge unpair`), which is effective immediately for live sessions
 and permanently for future ones.
 
 **Residual:** an unlocked stolen phone can use its granted capabilities until
@@ -490,7 +490,7 @@ misbehaving must not cost the user everything else. `CLIP-SEC-06`,
 Android 10+ refuses `getPrimaryClip` to an app without input focus. Every
 technique that defeats it (`AccessibilityService`, default IME, an invisible
 focus-stealing activity, `READ_LOGS`, root, hidden APIs, reflection) is either
-forbidden or user-hostile, and **AnyFlow uses none of them**. The manifest
+forbidden or user-hostile, and **OmniBridge uses none of them**. The manifest
 declares no accessibility service, no `QUERY_ALL_PACKAGES`, no location and no
 `SYSTEM_ALERT_WINDOW`.
 
@@ -525,11 +525,11 @@ responsibility, and a change to a published position.*
 | **Canonical record** | [ADR-0015](../adr/ADR-0015-notification-access.md) |
 
 **What changes.** `BIND_NOTIFICATION_LISTENER_SERVICE` moves from the manifest's
-"deliberately absent" list to the list of permissions AnyFlow holds *and
+"deliberately absent" list to the list of permissions OmniBridge holds *and
 justifies*, beside `CHANGE_WIFI_MULTICAST_STATE` and
 `FOREGROUND_SERVICE_CONNECTED_DEVICE`. As with `BIND_QUICK_SETTINGS_TILE` on the
 existing clipboard tile, the permission is held **by the system, not by
-AnyFlow**: declaring it is what stops any *other* app from binding our service.
+OmniBridge**: declaring it is what stops any *other* app from binding our service.
 
 **What does not change.** No accessibility service, no default-IME request, no
 `QUERY_ALL_PACKAGES`, no `SYSTEM_ALERT_WINDOW`, no `READ_LOGS`, no
@@ -537,7 +537,7 @@ AnyFlow**: declaring it is what stops any *other* app from binding our service.
 `README.md` principle 8 — *"No root, no accessibility service, no ADB, no hidden
 permissions"* — remains true in full.
 
-**The rule that replaced "and it must stay that way".** AnyFlow acquires a
+**The rule that replaced "and it must stay that way".** OmniBridge acquires a
 privileged Android capability only when a named, user-visible feature requires
 it; only through the platform-sanctioned API for that feature; only with the
 user's explicit, separately revocable consent; and **never as a means of
@@ -553,19 +553,19 @@ is optional and off by default; requires the Android OS grant **and**,
 separately, an explicit per-peer `notifications.v1` grant, neither implying the
 other; is independently revocable from either side; fails closed; and is not
 required by `battery.v1`, `files.v1` or `clipboard.v1`. The listener is not even
-bound unless a granted peer is connected, so an installed-but-unused AnyFlow
+bound unless a granted peer is connected, so an installed-but-unused OmniBridge
 reads nothing. It carries **no** history, no cloud sync, no telemetry, no
 arbitrary actions, no `PendingIntent`, no reply, no persistence of content and
 no logging of content — at any level, including `TRACE`, which is the rule T11
 already enforces for the clipboard.
 
-**AnyFlow does not detect sensitive content**, and this is deliberate: no OTP
+**OmniBridge does not detect sensitive content**, and this is deliberate: no OTP
 regex, no keyword list, no banking or 2FA app heuristic. T10's reasoning applies
 unchanged — a guess dressed as a security control is worse than an honest
 boundary. The control is the deny-by-default per-app allow-list.
 
 **Residual risk. High, and it is the point of the feature.** A person who
-enables this is trusting AnyFlow with the most sensitive stream on their phone,
+enables this is trusting OmniBridge with the most sensitive stream on their phone,
 and the platform will not soften that: `POC-NOTIF-01` measured Android 16 /
 One UI 8.0 delivering OTP-shaped notifications to an untrusted listener
 **entirely unredacted**, so platform OTP redaction is a bonus and never a
@@ -573,7 +573,7 @@ control. The trust is repaid by the code being open, by nothing leaving the LAN,
 by the listener being unbound whenever no granted peer is connected, and by
 every default starting closed.
 
-**Not yet verified:** Google Play policy for notification access. AnyFlow is
+**Not yet verified:** Google Play policy for notification access. OmniBridge is
 distributed from GitHub, so this blocks no release; it must be answered before
 any Play submission.
 

@@ -8,8 +8,8 @@
 
 use std::collections::HashMap;
 
-use anyflow_core::discovery;
 use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
+use omnibridge_core::discovery;
 
 use crate::listener::Families;
 
@@ -56,7 +56,7 @@ impl Advertisement {
         let hostname = format!("{device_id}.local.");
 
         let service = ServiceInfo::new(
-            anyflow_core::SERVICE_TYPE,
+            omnibridge_core::SERVICE_TYPE,
             instance,
             &hostname,
             "",
@@ -74,7 +74,7 @@ impl Advertisement {
             port,
             families = %families,
             "advertising {}",
-            anyflow_core::SERVICE_TYPE
+            omnibridge_core::SERVICE_TYPE
         );
         Ok(Self { daemon, fullname })
     }

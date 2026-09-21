@@ -9,7 +9,7 @@
 //! `#[ignore]`d and must be asked for by name:
 //!
 //! ```console
-//! cargo test -p anyflow-capability-notifications --test real_dbus -- --ignored --test-threads=1
+//! cargo test -p omnibridge-capability-notifications --test real_dbus -- --ignored --test-threads=1
 //! ```
 //!
 //! `--test-threads=1` is required rather than advisory: there is one
@@ -37,12 +37,12 @@
 
 use std::time::Duration;
 
-use anyflow_capability_notifications::backend::{
+use omnibridge_capability_notifications::backend::{
     dbus::DbusSink, CloseReason, Mirror, NotificationSink, Urgency,
 };
 
-const FIXTURE_APP: &str = "AnyFlow N2 fixture";
-const FIXTURE_SUMMARY: &str = "ANYFLOW-N2-DBUS-FIXTURE";
+const FIXTURE_APP: &str = "OmniBridge N2 fixture";
+const FIXTURE_SUMMARY: &str = "OMNIBRIDGE-N2-DBUS-FIXTURE";
 
 fn mirror(body: &str) -> Mirror {
     Mirror {
@@ -224,7 +224,7 @@ async fn closing_an_unknown_id_is_a_success() {
     // GNOME answers nothing at all; a spec-literal server answers an error.
     // Both mean "the notification is gone", which is what was asked for, so
     // the sink reports success either way. This is the assertion that keeps
-    // AnyFlow from logging a failure on every dismissal against dunst or mako.
+    // OmniBridge from logging a failure on every dismissal against dunst or mako.
     sink.close(4_294_967_000)
         .await
         .expect("closing an id that never existed is a success");
@@ -277,8 +277,8 @@ async fn a_body_reaches_the_server_escaped_and_nothing_is_left_behind() {
 
     // What the capability would have handed the backend for a body containing
     // markup: already escaped, because GNOME advertises `body-markup`.
-    let escaped = anyflow_capability_notifications::text::body(
-        "<b>ANYFLOW-N2-MARKUP</b> & <a href='x'>link</a>",
+    let escaped = omnibridge_capability_notifications::text::body(
+        "<b>OMNIBRIDGE-N2-MARKUP</b> & <a href='x'>link</a>",
         sink.capabilities().body_markup,
     );
     assert!(!escaped.contains("<b>"));
@@ -315,7 +315,7 @@ async fn the_real_session_can_report_human_dismissals() {
     eprintln!("capabilities: {:?}", sink.capabilities());
     assert!(
         sink.capabilities().dismiss_reporting,
-        "this session cannot observe NotificationClosed, so AnyFlow will \
+        "this session cannot observe NotificationClosed, so OmniBridge will \
          announce no DISMISS_REPORTER role and dismissal sync will correctly \
          report itself unavailable"
     );
@@ -331,19 +331,19 @@ async fn the_real_session_can_report_human_dismissals() {
 /// exercised end to end.
 ///
 /// ```console
-/// ANYFLOW_HUMAN_DISMISS=1 cargo test -p anyflow-capability-notifications \
+/// OMNIBRIDGE_HUMAN_DISMISS=1 cargo test -p omnibridge-capability-notifications \
 ///     --test real_dbus -- --ignored --test-threads=1 human
 /// ```
 ///
-/// Without `ANYFLOW_HUMAN_DISMISS` it skips loudly rather than failing, so an
+/// Without `OMNIBRIDGE_HUMAN_DISMISS` it skips loudly rather than failing, so an
 /// unattended `--ignored` run of this file does not hang for two minutes
 /// waiting for a person who is not there.
 #[tokio::test]
-#[ignore = "needs a person to dismiss a notification; set ANYFLOW_HUMAN_DISMISS=1"]
+#[ignore = "needs a person to dismiss a notification; set OMNIBRIDGE_HUMAN_DISMISS=1"]
 async fn a_human_dismissal_on_this_desktop_is_reported_as_reason_two() {
-    if std::env::var_os("ANYFLOW_HUMAN_DISMISS").is_none() {
+    if std::env::var_os("OMNIBRIDGE_HUMAN_DISMISS").is_none() {
         eprintln!(
-            "SKIPPED: set ANYFLOW_HUMAN_DISMISS=1 to run the human-dismiss gate. \
+            "SKIPPED: set OMNIBRIDGE_HUMAN_DISMISS=1 to run the human-dismiss gate. \
              It posts one notification and waits for you to close it."
         );
         return;
@@ -397,23 +397,23 @@ async fn a_human_dismissal_on_this_desktop_is_reported_as_reason_two() {
 /// identity and origin the source sent, and that nothing else goes out.
 ///
 /// ```console
-/// ANYFLOW_HUMAN_DISMISS=1 cargo test -p anyflow-capability-notifications \
+/// OMNIBRIDGE_HUMAN_DISMISS=1 cargo test -p omnibridge-capability-notifications \
 ///     --test real_dbus -- --ignored --test-threads=1 end_to_end
 /// ```
 #[tokio::test]
-#[ignore = "needs a person to dismiss a notification; set ANYFLOW_HUMAN_DISMISS=1"]
+#[ignore = "needs a person to dismiss a notification; set OMNIBRIDGE_HUMAN_DISMISS=1"]
 async fn a_human_dismissal_end_to_end_produces_exactly_one_dismiss_request() {
-    use anyflow_capability_notifications::backend::{LockSource, UnknownLock};
-    use anyflow_capability_notifications::{
+    use omnibridge_capability_notifications::backend::{LockSource, UnknownLock};
+    use omnibridge_capability_notifications::{
         NotificationAuthorizer, NotificationManager, NotificationPolicy,
     };
-    use anyflow_core::Fingerprint;
-    use anyflow_proto::v1::capabilities as pb;
-    use anyflow_proto::Message as _;
+    use omnibridge_core::Fingerprint;
+    use omnibridge_proto::v1::capabilities as pb;
+    use omnibridge_proto::Message as _;
     use std::sync::Arc;
 
-    if std::env::var_os("ANYFLOW_HUMAN_DISMISS").is_none() {
-        eprintln!("SKIPPED: set ANYFLOW_HUMAN_DISMISS=1 to run the end-to-end human gate.");
+    if std::env::var_os("OMNIBRIDGE_HUMAN_DISMISS").is_none() {
+        eprintln!("SKIPPED: set OMNIBRIDGE_HUMAN_DISMISS=1 to run the end-to-end human gate.");
         return;
     }
 
@@ -425,7 +425,7 @@ async fn a_human_dismissal_end_to_end_produces_exactly_one_dismiss_request() {
                 allow_dismiss_sync: true,
                 // `Full`, and the lock source below reports locked — so this
                 // gate exercises the display path rather than the reduction.
-                when_sink_locked: anyflow_capability_notifications::LockPolicy::Full,
+                when_sink_locked: omnibridge_capability_notifications::LockPolicy::Full,
                 ..NotificationPolicy::default()
             }
         }
@@ -491,7 +491,7 @@ async fn a_human_dismissal_end_to_end_produces_exactly_one_dismiss_request() {
                     pb::NotificationUpsert {
                         notification_id: notification_id.clone(),
                         origin_device_id: origin.to_string(),
-                        app_id: "example.anyflow.n4fixture".to_string(),
+                        app_id: "example.omnibridge.n4fixture".to_string(),
                         app_label: FIXTURE_APP.to_string(),
                         title: FIXTURE_SUMMARY.to_string(),
                         body: "Close this from the desktop, by hand.".to_string(),
@@ -589,33 +589,35 @@ async fn a_human_dismissal_end_to_end_produces_exactly_one_dismiss_request() {
 /// report rather than simulated and claimed.
 ///
 /// ```console
-/// ANYFLOW_SOAK=1 cargo test -p anyflow-capability-notifications \
+/// OMNIBRIDGE_SOAK=1 cargo test -p omnibridge-capability-notifications \
 ///     --test real_dbus -- --ignored --test-threads=1 soak
 ///
 /// # a shorter or longer run
-/// ANYFLOW_SOAK=1 ANYFLOW_SOAK_SECS=3600 cargo test … soak
+/// OMNIBRIDGE_SOAK=1 OMNIBRIDGE_SOAK_SECS=3600 cargo test … soak
 /// ```
 ///
 /// **It closes everything it posts.** A soak that left an hour of
 /// notifications in somebody's shade would be worse than no soak.
 #[tokio::test]
-#[ignore = "runs for 30 minutes against the real notification server; set ANYFLOW_SOAK=1"]
+#[ignore = "runs for 30 minutes against the real notification server; set OMNIBRIDGE_SOAK=1"]
 async fn a_thirty_minute_soak_stays_bounded_and_converges() {
-    use anyflow_capability_notifications::backend::{logind::LogindLock, LockSource, UnknownLock};
-    use anyflow_capability_notifications::{
+    use omnibridge_capability_notifications::backend::{
+        logind::LogindLock, LockSource, UnknownLock,
+    };
+    use omnibridge_capability_notifications::{
         NotificationAuthorizer, NotificationManager, NotificationPolicy,
     };
-    use anyflow_core::Fingerprint;
-    use anyflow_proto::v1::capabilities as pb;
-    use anyflow_proto::Message as _;
+    use omnibridge_core::Fingerprint;
+    use omnibridge_proto::v1::capabilities as pb;
+    use omnibridge_proto::Message as _;
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
-    if std::env::var_os("ANYFLOW_SOAK").is_none() {
-        eprintln!("SKIPPED: set ANYFLOW_SOAK=1 to run the N5 soak.");
+    if std::env::var_os("OMNIBRIDGE_SOAK").is_none() {
+        eprintln!("SKIPPED: set OMNIBRIDGE_SOAK=1 to run the N5 soak.");
         return;
     }
-    let seconds: u64 = std::env::var("ANYFLOW_SOAK_SECS")
+    let seconds: u64 = std::env::var("OMNIBRIDGE_SOAK_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(30 * 60);
@@ -632,12 +634,12 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
 
     const APP_A: &str = "soak.app.alpha";
     const APP_B: &str = "soak.app.beta";
-    const TITLE: &str = "ANYFLOW-N5-SOAK-TITLE";
-    const BODY: &str = "ANYFLOW-N5-SOAK-BODY";
+    const TITLE: &str = "OMNIBRIDGE-N5-SOAK-TITLE";
+    const BODY: &str = "OMNIBRIDGE-N5-SOAK-BODY";
 
     let switches = Arc::new(Switches(RwLock::new(NotificationPolicy {
         allow_dismiss_sync: true,
-        when_sink_locked: anyflow_capability_notifications::LockPolicy::AppOnly,
+        when_sink_locked: omnibridge_capability_notifications::LockPolicy::AppOnly,
         ..NotificationPolicy::default()
     })));
 
@@ -803,10 +805,10 @@ async fn a_thirty_minute_soak_stays_bounded_and_converges() {
         if cycle.is_multiple_of(11) {
             let mut policy = switches.0.write().await;
             policy.when_sink_locked = match policy.when_sink_locked {
-                anyflow_capability_notifications::LockPolicy::Full => {
-                    anyflow_capability_notifications::LockPolicy::AppOnly
+                omnibridge_capability_notifications::LockPolicy::Full => {
+                    omnibridge_capability_notifications::LockPolicy::AppOnly
                 }
-                _ => anyflow_capability_notifications::LockPolicy::Full,
+                _ => omnibridge_capability_notifications::LockPolicy::Full,
             };
         }
 

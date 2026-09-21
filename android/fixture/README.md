@@ -1,10 +1,10 @@
-# AnyFlow notification fixture — **test only**
+# OmniBridge notification fixture — **test only**
 
 A one-activity Android app that puts a notification of a chosen shape on a
 device's shade, on demand, from `adb`. It exists so that the `notifications.v1`
 hardware gates can be run without depending on `com.android.shell`.
 
-**It is never part of the AnyFlow APK.** It is a separate Gradle module with its
+**It is never part of the OmniBridge APK.** It is a separate Gradle module with its
 own `applicationId`, and nothing depends on it — `:app` does not, and
 `settings.gradle.kts` includes it beside `:app` rather than underneath it. That
 is a structural guarantee, not a convention; `unzip -l app-debug.apk | grep
@@ -14,10 +14,10 @@ fixture` returns nothing.
 
 | Route | What it cannot do |
 | --- | --- |
-| `cmd notification post` (posts as `com.android.shell`) | no launcher entry, so AnyFlow's app picker cannot see it until it is *already* notifying — which needs the listener bound, which needs a granted peer connected (N3 debt 3); no `cancel`; no ongoing; no group; no progress; no tag control (N4 debt 2) |
+| `cmd notification post` (posts as `com.android.shell`) | no launcher entry, so OmniBridge's app picker cannot see it until it is *already* notifying — which needs the listener bound, which needs a granted peer connected (N3 debt 3); no `cancel`; no ongoing; no group; no progress; no tag control (N4 debt 2) |
 | a real third-party app | not deterministic, and not something a certification run may install on somebody's device |
 
-The launcher entry is the part that retires N3 debt 3: AnyFlow's picker offers
+The launcher entry is the part that retires N3 debt 3: OmniBridge's picker offers
 apps a person can open from their home screen, plus apps that happen to be
 notifying right now. A fixture with a launcher icon is visible in the picker
 *before* it has posted anything, so the allow-list can be set up first and the
@@ -50,16 +50,16 @@ JAVA_HOME=$HOME/.local/jdk/jdk-21.0.12.1+1 ANDROID_HOME=$HOME/Android/Sdk \
   ./gradlew :fixture:assembleDebug
 
 adb install -r fixture/build/outputs/apk/debug/fixture-debug.apk
-adb shell pm grant io.github.yurisismotto.anyflow.fixture \
+adb shell pm grant io.github.yurisismotto.omnibridge.fixture \
   android.permission.POST_NOTIFICATIONS
 ```
 
-Uninstall with `adb uninstall io.github.yurisismotto.anyflow.fixture`.
+Uninstall with `adb uninstall io.github.yurisismotto.omnibridge.fixture`.
 
 ## Invoke
 
 ```console
-FX=io.github.yurisismotto.anyflow.fixture/.FixtureActivity
+FX=io.github.yurisismotto.omnibridge.fixture/.FixtureActivity
 
 # a plain, clearable notification
 adb shell "am start -n $FX --es op post \
@@ -95,7 +95,7 @@ the intent still launches, but with the extra silently mangled.
 `op` accepts: `post` · `update` (a synonym for `post`) · `remove` / `cancel` ·
 `ongoing` / `nonclearable` · `group` · `progress` · `timeout` · `clear`.
 
-Every operation writes one line to logcat under the tag `AnyFlowFixture`,
+Every operation writes one line to logcat under the tag `OmniBridgeFixture`,
 carrying the op, the id and the tag — **never** the title or the body. The
 fixture is used in the same runs as the NOTIF-SEC-25 logging canaries, and a
 fixture that logged its own payload would fail them itself.
@@ -104,7 +104,7 @@ fixture that logged its own payload would fail them itself.
 
 `setOngoing(true)` sets `FLAG_ONGOING_EVENT`, and
 `StatusBarNotification.isClearable()` is false whenever that flag or
-`FLAG_NO_CLEAR` is set. `isClearable()` is exactly what AnyFlow's source
+`FLAG_NO_CLEAR` is set. `isClearable()` is exactly what OmniBridge's source
 consults before honouring a `DismissRequest`, so `op=ongoing` drives the real
 gate rather than an approximation of it.
 

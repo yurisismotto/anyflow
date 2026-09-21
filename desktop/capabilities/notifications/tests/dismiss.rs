@@ -21,10 +21,10 @@
 
 mod common;
 
-use anyflow_capability_notifications::backend::{CloseReason, SinkError};
-use anyflow_capability_notifications::{limits, LockPolicy, NotificationPolicy};
-use anyflow_proto::v1::capabilities as pb;
 use common::*;
+use omnibridge_capability_notifications::backend::{CloseReason, SinkError};
+use omnibridge_capability_notifications::{limits, LockPolicy, NotificationPolicy};
+use omnibridge_proto::v1::capabilities as pb;
 
 // ---------------------------------------------------------------------------
 // The one thing that works
@@ -70,7 +70,7 @@ async fn a_dismiss_request_carries_an_identity_and_nothing_else() {
 
     // The encoded form is two fields. No action index, no intent, no reply and
     // no free text — because the schema has nowhere to put them.
-    let encoded = anyflow_proto::Message::encode_to_vec(&message);
+    let encoded = omnibridge_proto::Message::encode_to_vec(&message);
     assert!(
         encoded.len() < 64,
         "a dismiss request is an identity and a device id; {} bytes is not that",
@@ -516,10 +516,10 @@ async fn a_grant_revoked_after_the_upsert_stops_the_dismissal() {
 /// even with both policies on and the peer claiming `DISMISS_TARGET`.
 #[tokio::test]
 async fn a_desktop_that_cannot_report_dismissals_announces_no_reporter_role() {
-    use anyflow_capability_notifications::backend::{
+    use omnibridge_capability_notifications::backend::{
         LockSource, MemoryLock, MemorySink, NotificationSink, SinkCapabilities,
     };
-    use anyflow_capability_notifications::{NotificationAuthorizer, NotificationManager};
+    use omnibridge_capability_notifications::{NotificationAuthorizer, NotificationManager};
     use std::sync::Arc;
 
     let sink = Arc::new(MemorySink::new());
@@ -559,9 +559,10 @@ async fn a_desktop_that_cannot_report_dismissals_announces_no_reporter_role() {
         .await
         .expect("announced within the timeout")
         .expect("a message");
-    let control =
-        <pb::NotificationControl as anyflow_proto::Message>::decode(announced.payload.as_slice())
-            .expect("decodes");
+    let control = <pb::NotificationControl as omnibridge_proto::Message>::decode(
+        announced.payload.as_slice(),
+    )
+    .expect("decodes");
     let roles = match control.body {
         Some(pb::notification_control::Body::Roles(r)) => r,
         other => panic!("expected roles, got {other:?}"),

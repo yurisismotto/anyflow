@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  AnyFlow notification fixture — TEST ONLY.
+  OmniBridge notification fixture — TEST ONLY.
 
   Deliberately absent, and the absence is the point:
 
@@ -14,7 +14,7 @@
 
   POST_NOTIFICATIONS is the one permission it holds and the one thing it is
   for. On API 33+ it is a runtime permission; the certification script grants
-  it with `pm grant`, exactly as it does for AnyFlow itself.
+  it with `pm grant`, exactly as it does for OmniBridge itself.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -44,7 +44,7 @@
           certification hardware the fixture is installed for the run and
           uninstalled after it.
 
-          The launcher entry is not decoration: AnyFlow's app picker can only
+          The launcher entry is not decoration: OmniBridge's app picker can only
           offer apps a person can open from their home screen, plus apps that
           happen to be notifying right now. Without it this fixture would be
           invisible in the picker until it was already notifying — which is

@@ -5,17 +5,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyflow_capability_clipboard::{ClipboardAuthorizer, ClipboardManager, ClipboardPolicy};
-use anyflow_capability_files::{FilesAuthorizer, TransferManager};
-use anyflow_capability_notifications::{NotificationAuthorizer, NotificationManager};
-use anyflow_core::capability::CapabilityRegistry;
-use anyflow_core::error::{PairingError, Result};
-use anyflow_core::notification_policy::NotificationPolicy;
-use anyflow_core::pairing::PairingSession;
-use anyflow_core::session::{PeerStatus, SessionHandle, SessionHost, SessionId};
-use anyflow_core::store::{Store, TrustedPeer};
-use anyflow_core::Fingerprint;
-use anyflow_proto::v1;
+use omnibridge_capability_clipboard::{ClipboardAuthorizer, ClipboardManager, ClipboardPolicy};
+use omnibridge_capability_files::{FilesAuthorizer, TransferManager};
+use omnibridge_capability_notifications::{NotificationAuthorizer, NotificationManager};
+use omnibridge_core::capability::CapabilityRegistry;
+use omnibridge_core::error::{PairingError, Result};
+use omnibridge_core::notification_policy::NotificationPolicy;
+use omnibridge_core::pairing::PairingSession;
+use omnibridge_core::session::{PeerStatus, SessionHandle, SessionHost, SessionId};
+use omnibridge_core::store::{Store, TrustedPeer};
+use omnibridge_core::Fingerprint;
+use omnibridge_proto::v1;
 use tokio::sync::{oneshot, Mutex, RwLock};
 
 use crate::renegotiate::{Decision, LiveSession, Renegotiation};
@@ -30,7 +30,7 @@ pub struct ConfirmRequest {
 pub struct DaemonState {
     pub store: Mutex<Store>,
     pub registry: CapabilityRegistry,
-    pub battery: Arc<anyflow_capability_battery::BatteryState>,
+    pub battery: Arc<omnibridge_capability_battery::BatteryState>,
     /// `files.v1`, when the capability is enabled. `None` leaves the daemon
     /// with no file transfer at all rather than a half-wired one.
     pub transfers: Option<Arc<TransferManager>>,
@@ -52,7 +52,7 @@ pub struct DaemonState {
 
     /// The single open pairing window, if any.
     pairing: Mutex<Option<PairingSession>>,
-    /// Where to send confirmation questions. Present only while a `anyflow
+    /// Where to send confirmation questions. Present only while a `omnibridge
     /// pair` control session is attached: with no operator watching there is
     /// nobody to answer, and auto-accepting would defeat the whole point.
     confirm_tx: Mutex<Option<tokio::sync::mpsc::Sender<ConfirmRequest>>>,
@@ -83,7 +83,7 @@ impl DaemonState {
     pub fn new(
         store: Store,
         registry: CapabilityRegistry,
-        battery: Arc<anyflow_capability_battery::BatteryState>,
+        battery: Arc<omnibridge_capability_battery::BatteryState>,
     ) -> Self {
         let device_info = store.identity().device_info();
         Self {
@@ -146,7 +146,7 @@ impl DaemonState {
     /// attach a provider to an object nothing ever asks — so the daemon
     /// builds one and clones it.
     ///
-    /// [`TransferApproval`]: anyflow_capability_files::TransferApproval
+    /// [`TransferApproval`]: omnibridge_capability_files::TransferApproval
     pub fn with_file_approval(mut self, approval: Arc<crate::approval::FileApproval>) -> Self {
         self.file_approval = Some(approval);
         self
@@ -447,7 +447,7 @@ impl FilesAuthorizer for DaemonState {
         // that and the per-capability grant.
         store
             .trusted_peer(peer)
-            .is_some_and(|p| p.allows(anyflow_capability_files::CAPABILITY_ID))
+            .is_some_and(|p| p.allows(omnibridge_capability_files::CAPABILITY_ID))
     }
 }
 
@@ -466,7 +466,9 @@ impl ClipboardAuthorizer for DaemonState {
         match store.trusted_peer(peer) {
             // `trusted_peer` already excludes revoked devices; `allows`
             // re-checks that and the per-capability grant.
-            Some(p) if p.allows(anyflow_capability_clipboard::CAPABILITY_ID) => p.clipboard_policy,
+            Some(p) if p.allows(omnibridge_capability_clipboard::CAPABILITY_ID) => {
+                p.clipboard_policy
+            }
             _ => ClipboardPolicy::DENIED,
         }
     }
@@ -475,7 +477,7 @@ impl ClipboardAuthorizer for DaemonState {
         let store = self.store.lock().await;
         store
             .peers()
-            .filter(|p| p.allows(anyflow_capability_clipboard::CAPABILITY_ID))
+            .filter(|p| p.allows(omnibridge_capability_clipboard::CAPABILITY_ID))
             .filter(|p| p.clipboard_policy.may_auto_send())
             .map(|p| p.fingerprint)
             .collect()
@@ -502,7 +504,7 @@ impl NotificationAuthorizer for DaemonState {
         match store.trusted_peer(peer) {
             // `trusted_peer` already excludes revoked devices; `allows`
             // re-checks that and the per-capability grant.
-            Some(p) if p.allows(anyflow_capability_notifications::CAPABILITY_ID) => {
+            Some(p) if p.allows(omnibridge_capability_notifications::CAPABILITY_ID) => {
                 p.notification_policy
             }
             _ => NotificationPolicy::DENIED,
@@ -612,7 +614,7 @@ impl SessionHost for DaemonState {
 
         let peer = TrustedPeer {
             device_id: device.device_id.clone(),
-            device_name: anyflow_core::discovery::sanitize_device_name(&device.device_name),
+            device_name: omnibridge_core::discovery::sanitize_device_name(&device.device_name),
             platform: device.platform,
             fingerprint: *fingerprint,
             paired_at_unix: SystemTime::now()

@@ -1,5 +1,5 @@
 [package]
-name = "anyflow-core"
+name = "omnibridge-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,7 +13,7 @@ license.workspace = true
 # environment and no filesystem assumption at all; that is exactly what the
 # Wave 0 portability gate checks:
 #
-#   cargo check -p anyflow-core --no-default-features --target <non-unix>
+#   cargo check -p omnibridge-core --no-default-features --target <non-unix>
 default = ["unix-fs"]
 unix-fs = []
 
@@ -36,7 +36,7 @@ unwrap_used = "warn"
 async-trait = "0.1.92"
 bytes = "1.12.1"
 data-encoding = "2.11.1"
-anyflow-proto = { version = "0.1.0", path = "../proto" }
+omnibridge-proto = { version = "0.1.0", path = "../proto" }
 hmac = "0.12.1"
 prost = "0.14.3"
 rand = "0.9.5"
@@ -55,7 +55,7 @@ x509-parser = "0.18.1"
 zeroize = "1.8.2"
 
 [dev-dependencies]
-anyflow-proto = { version = "0.1.0", path = "../proto" }
+omnibridge-proto = { version = "0.1.0", path = "../proto" }
 data-encoding = "2.11.1"
 serde_json = "1.0.151"
 rustls = { version = "0.23.43", default-features = false, features = ["std", "ring"] }

@@ -2,25 +2,25 @@
 
 | Field | Value |
 | --- | --- |
-| **Title** | AnyFlow on KDE Plasma Wayland |
+| **Title** | OmniBridge on KDE Plasma Wayland |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
 | **Scope** | Clipboard, GUI integration, notifications, autostart, Xwayland interaction on Plasma. Whether GTK stays. |
 | **Decision status** | PROPOSED. **PLAT-DEC-003** (GTK on KDE vs. a future Qt frontend) stays OPEN. |
-| **Evidence** | REPO VERIFIED for AnyFlow's behaviour; OFFICIAL DOC VERIFIED for protocol deprecation and archive versions; **POC REQUIRED** for the central question in §4. |
+| **Evidence** | REPO VERIFIED for OmniBridge's behaviour; OFFICIAL DOC VERIFIED for protocol deprecation and archive versions; **POC REQUIRED** for the central question in §4. |
 | **Related documents** | [04](04-LINUX-PORTABILITY.md), [05](05-DEBIAN-UBUNTU-COMPATIBILITY.md), [15](15-CROSS-PLATFORM-CLIPBOARD.md), [18](18-UI-PLATFORM-STRATEGY.md) |
 
 ---
 
 ## 1. Summary
 
-KDE Plasma is the **cheapest expansion target AnyFlow has** — cheaper than Debian, far
+KDE Plasma is the **cheapest expansion target OmniBridge has** — cheaper than Debian, far
 cheaper than Windows. It is the same binary, the same protocol, the same trust store, on a
 different compositor. There is no port.
 
 There is exactly one substantive technical question (§4) and one product question (§7), and
 the technical one is *good news that needs confirming* rather than a risk to mitigate: on
-Plasma, AnyFlow should be able to use the **proper Wayland clipboard-change protocol** that
+Plasma, OmniBridge should be able to use the **proper Wayland clipboard-change protocol** that
 GNOME denies it, and drop the Xwayland bridge entirely.
 
 ---
@@ -61,8 +61,8 @@ Mutter forces the X11 fallback. On Plasma it should be the branch that runs.
 `probe_data_control()` is itself a nice piece of design worth noting, because it is what
 makes this cheap: rather than opening a Wayland connection to ask the compositor what it
 implements, it runs `wl-paste --watch` briefly and observes whether it dies immediately
-(protocol missing) or stays alive (protocol present). That means **AnyFlow does not need to
-know which protocol KWin speaks — `wl-clipboard` decides, and AnyFlow reads the outcome.**
+(protocol missing) or stays alive (protocol present). That means **OmniBridge does not need to
+know which protocol KWin speaks — `wl-clipboard` decides, and OmniBridge reads the outcome.**
 
 ---
 
@@ -84,7 +84,7 @@ seat). Everything already written about them in
 **`wl-copy --sensitive` becomes materially more useful on Plasma.** On GNOME there is no
 built-in clipboard history to skip. Plasma ships **Klipper**, which does keep history — so a
 password sent from a phone with `sensitive_hint` set genuinely avoids being persisted in a
-history list. This is a case where AnyFlow's existing "hint, not enforcement" design pays off
+history list. This is a case where OmniBridge's existing "hint, not enforcement" design pays off
 on a platform it was not written for.
 
 ---
@@ -127,23 +127,23 @@ So there is a plausible and testable failure mode:
 
 > **On Ubuntu 26.04 LTS + Plasma, KWin offers only `ext-data-control-v1`, the packaged
 > `wl-clipboard` 2.2.1 speaks only `wlr-data-control-unstable-v1`, `probe_data_control()`
-> fails, and AnyFlow silently falls back to the Xwayland XFIXES bridge — or to no watch at
+> fails, and OmniBridge silently falls back to the Xwayland XFIXES bridge — or to no watch at
 > all.**
 
 Three things make this worth taking seriously rather than dismissing:
 
 1. It affects the **current LTS**, the release most users will be on.
-2. AnyFlow's failure mode is graceful but *quiet*: `detect_watch_source()` logs and degrades.
-   The user sees "auto-send unavailable" in `anyflow clipboard status` and has no way to know
+2. OmniBridge's failure mode is graceful but *quiet*: `detect_watch_source()` logs and degrades.
+   The user sees "auto-send unavailable" in `omnibridge clipboard status` and has no way to know
    the cause is a package version.
 3. If KWin kept a `wlr-data-control` binding for compatibility, none of this happens and KDE
-   is simply the best clipboard platform AnyFlow has.
+   is simply the best clipboard platform OmniBridge has.
 
 **This is the entire content of POC-KDE-01.** It is one afternoon on a Plasma VM and it
 decides whether KDE auto-send ships in Wave 3 or waits.
 
 Mitigation if the failure is real, in preference order:
-- **(a)** Nothing in AnyFlow. Depend on `wl-clipboard >= 2.3` in the packaging and let the
+- **(a)** Nothing in OmniBridge. Depend on `wl-clipboard >= 2.3` in the packaging and let the
   distro's version decide; degrade honestly, and make the status message say *which* protocol
   was missing rather than a generic sentence.
 - **(b)** Speak `ext-data-control-v1` in-process with a Wayland client crate, removing the
@@ -159,7 +159,7 @@ Recommendation: **(a) now, (b) only if (a) proves insufficient in practice.**
 
 ## 5. CLIPBOARD vs PRIMARY on Plasma
 
-The brief is explicit and the code already complies: AnyFlow synchronises the ordinary
+The brief is explicit and the code already complies: OmniBridge synchronises the ordinary
 `CLIPBOARD` selection and must never touch `PRIMARY`.
 
 Plasma raises the stakes because it makes PRIMARY more visible: Plasma has a
@@ -176,11 +176,11 @@ Verified in the code:
 
 **One Plasma-specific hazard follows from this that does not exist on GNOME:** if a user turns
 on Klipper's clipboard↔selection synchronisation, then *selecting* text with the mouse writes
-it into CLIPBOARD, AnyFlow's watch fires legitimately, and every mouse selection is sent to
-the phone. AnyFlow is behaving correctly; the desktop changed what CLIPBOARD means.
+it into CLIPBOARD, OmniBridge's watch fires legitimately, and every mouse selection is sent to
+the phone. OmniBridge is behaving correctly; the desktop changed what CLIPBOARD means.
 
-This cannot and should not be "fixed" in AnyFlow — it is the user's Klipper setting. It
-should be **documented**, and `anyflow clipboard status` on Plasma is the natural place to
+This cannot and should not be "fixed" in OmniBridge — it is the user's Klipper setting. It
+should be **documented**, and `omnibridge clipboard status` on Plasma is the natural place to
 mention it. **UX-004** in the backlog. It is also a mild privacy consideration worth a line in
 [20](20-SECURITY-THREAT-ANALYSIS.md).
 
@@ -190,17 +190,17 @@ mention it. **UX-004** in the backlog. It is also a mild privacy consideration w
 
 | Concern | Plasma | Difference from GNOME |
 | --- | --- | --- |
-| Notifications | `org.freedesktop.Notifications` on the session bus, served by `plasma-workspace` | None. Same freedesktop spec. AnyFlow does not implement notifications yet on either. |
+| Notifications | `org.freedesktop.Notifications` on the session bus, served by `plasma-workspace` | None. Same freedesktop spec. OmniBridge does not implement notifications yet on either. |
 | Autostart | XDG autostart: `~/.config/autostart/*.desktop`, honoured by `plasma-session` | None. Same spec. |
 | systemd user units | Plasma 6 supports a systemd-managed startup and `systemd --user` is standard on all target distros | None |
 | Session bus for UPower | `org.freedesktop.UPower` on the **system** bus; `zbus` reaches it identically | None |
 | File chooser | GTK's own dialog, unless `xdg-desktop-portal-kde` is installed and the app is portal-aware | **Difference**; see §7 |
 | Klipper | A real clipboard-history manager | Makes `--sensitive` more useful (§3) |
 
-Nothing here needs new code. The autostart entry AnyFlow does not yet ship
+Nothing here needs new code. The autostart entry OmniBridge does not yet ship
 ([04 §11](04-LINUX-PORTABILITY.md)) works identically on both desktops when it exists.
 
-**There is no KDE-specific D-Bus interface AnyFlow should use.** It is worth stating because
+**There is no KDE-specific D-Bus interface OmniBridge should use.** It is worth stating because
 the instinct is to reach for `org.kde.klipper.klipper`. Don't: it is a Klipper-private
 interface, it does not exist if the user disabled Klipper, and it would create a KDE-only
 clipboard path parallel to the portable `ClipboardBackend`. The `wl-paste --watch` route works
@@ -237,9 +237,9 @@ file dialog and server-side decorations. The case *against* it, for now:
    contributor.
 3. Nothing about the product is broken by a foreign-looking window. The daemon, the clipboard
    and files all work.
-4. AnyFlow's visual identity (Flowing A, Flowing Ribbon, Palette A —
+4. OmniBridge's visual identity (Flowing A, Flowing Ribbon, Palette A —
    [BRAND.md](../../design/BRAND.md)) is deliberately its own; a GTK app on Plasma is
-   "AnyFlow-looking", not "broken-looking".
+   "OmniBridge-looking", not "broken-looking".
 
 **Condition to revisit:** if KDE becomes a primary target with real users, or if a
 contributor offers a Kirigami frontend, or if the portal-dependent bits (dark mode, file
@@ -257,7 +257,7 @@ Two cheap mitigations to do regardless, both in [18](18-UI-PLATFORM-STRATEGY.md)
 Only relevant if the X11 fallback is used on Plasma — i.e. if §4 goes badly.
 
 Plasma runs Xwayland and bridges selections between the Wayland and X11 clipboards, as Mutter
-does, but the two compositors' bridging implementations are independent. AnyFlow's X11 watch
+does, but the two compositors' bridging implementations are independent. OmniBridge's X11 watch
 (`backend/x11.rs`) connects to `$DISPLAY` and subscribes to XFIXES
 `SelectionNotify` on `CLIPBOARD`. On GNOME this is a certified, working path. On Plasma it is
 **unverified** and belongs in **POC-KDE-01** as the fallback measurement.
@@ -280,7 +280,7 @@ Two Plasma-specific risks if the fallback is used:
 
 | Backlog | Item |
 | --- | --- |
-| **KDE-001** | Make `anyflow clipboard status` name the missing data-control protocol explicitly |
+| **KDE-001** | Make `omnibridge clipboard status` name the missing data-control protocol explicitly |
 | **KDE-002** | Document the Klipper clipboard↔selection sync hazard |
 | **KDE-003** | Portal-aware file chooser |
 | **PKG-007** | Recommend `xdg-desktop-portal-kde` |
@@ -289,10 +289,10 @@ Two Plasma-specific risks if the fallback is used:
 
 ## 10. Conclusion
 
-KDE Plasma requires **no new AnyFlow code** and should be treated as a *certification target*,
+KDE Plasma requires **no new OmniBridge code** and should be treated as a *certification target*,
 not a port. The work is: run the existing binary on Plasma, confirm which watch source it
 picks, confirm the GUI behaves, write down what differs, and ship it.
 
-If §4 resolves favourably, Plasma becomes the **best** Linux desktop for AnyFlow's clipboard —
+If §4 resolves favourably, Plasma becomes the **best** Linux desktop for OmniBridge's clipboard —
 a standard Wayland protocol instead of an Xwayland bridge, plus a clipboard manager that
 honours the sensitive hint. That is a more interesting outcome than "KDE also works".

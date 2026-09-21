@@ -3,7 +3,7 @@
 //! # What is deliberately absent
 //!
 //! The design reference shows a **clipboard history** panel with previous
-//! clips and their text. AnyFlow has none, by design and not by omission:
+//! clips and their text. OmniBridge has none, by design and not by omission:
 //! clipboard content is never written to disk, and the control socket carries
 //! no clip text at all — a pending clip is described by its size, a hash
 //! prefix and its age (`PendingClipReport`), which is enough to tell two
@@ -13,10 +13,10 @@
 //! product refuses to store. So the panel is gone, and what replaces it says
 //! plainly that nothing is kept.
 
-use anyflow_control::{
+use gtk::prelude::*;
+use omnibridge_control::{
     ClipboardFlag, ClipboardPeerReport, ClipboardStatusReport, Request, Response,
 };
-use gtk::prelude::*;
 
 use super::Pages;
 use crate::widgets::{self, Status, SPACING_SM, SPACING_XS};
@@ -152,7 +152,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
                     },
                     move |reply| {
                         if let Ok(Response::Error { message }) = reply {
-                            eprintln!("anyflow-gui: could not apply the clip: {message}");
+                            eprintln!("omnibridge-gui: could not apply the clip: {message}");
                         }
                         pages.refresh_now();
                     },
@@ -166,7 +166,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
 
     container.append(&widgets::security_notice(
         "Clipboard text is never stored",
-        "AnyFlow keeps no clipboard history. A received clip waits in memory with a \
+        "OmniBridge keeps no clipboard history. A received clip waits in memory with a \
          five-minute expiry and is gone once applied, dismissed or expired — nothing \
          about it reaches a log or a file.",
         false,
@@ -219,15 +219,15 @@ impl SensitiveState {
                 "A clip your phone marks as a password or other secret is written here \
                  marked sensitive, so clipboard managers leave it out of their history."
             }
-            // No package-manager command: AnyFlow does not know which package
+            // No package-manager command: OmniBridge does not know which package
             // manager this machine has, and the package is named the same on
-            // every distribution AnyFlow supports. The version is offered as
+            // every distribution OmniBridge supports. The version is offered as
             // guidance for choosing a build, not as the test — some
             // distributions backport the flag into an earlier version, which
-            // is why AnyFlow asks the tool instead of reading its version.
+            // is why OmniBridge asks the tool instead of reading its version.
             Self::NotMarkable => {
                 "Ordinary clipboard sharing works normally. What this desktop cannot do is \
-                 mark a clip as sensitive: its wl-copy has no --sensitive option. AnyFlow \
+                 mark a clip as sensitive: its wl-copy has no --sensitive option. OmniBridge \
                  therefore refuses a clip your phone marked as a secret rather than writing \
                  it unmarked, because an unmarked password would be kept in your clipboard \
                  manager's history without you being told. Installing a wl-clipboard build \
@@ -343,7 +343,7 @@ fn peer_card(peer: &ClipboardPeerReport, watch_available: bool, pages: &Pages) -
                 },
                 move |reply| {
                     if let Ok(Response::Error { message }) = reply {
-                        eprintln!("anyflow-gui: could not send the clipboard: {message}");
+                        eprintln!("omnibridge-gui: could not send the clipboard: {message}");
                     }
                     pages.refresh_now();
                 },
@@ -405,7 +405,7 @@ fn policy_switch(
             },
             move |reply| {
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: the daemon refused the policy change: {message}");
+                    eprintln!("omnibridge-gui: the daemon refused the policy change: {message}");
                 }
                 // Re-read rather than assume: the daemon is the authority on
                 // policy, and a refused change must not leave the switch
@@ -423,8 +423,8 @@ fn policy_switch(
 pub(in crate::views) mod tests {
     use super::{render, SensitiveState};
     use crate::{DaemonState, Page};
-    use anyflow_control::ClipboardStatusReport;
     use gtk::prelude::*;
+    use omnibridge_control::ClipboardStatusReport;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -533,7 +533,7 @@ pub(in crate::views) mod tests {
         // Ordinary clipboard sharing still works, and the page must say so
         // before it says anything is wrong.
         assert!(detail.contains("Ordinary clipboard sharing works normally"));
-        // Why AnyFlow refuses rather than downgrading (PLAT-DEC-013).
+        // Why OmniBridge refuses rather than downgrading (PLAT-DEC-013).
         assert!(detail.contains("refuses"));
         assert!(detail.contains("history"));
         // And what to do about it, without choosing the user's package manager.
@@ -569,7 +569,7 @@ pub(in crate::views) mod tests {
     // Needs a display, so it is `#[ignore]`d and asked for by name — the same
     // convention `views::notifications` uses:
     //
-    //   cargo test -p anyflow-gui -- --ignored --test-threads=1
+    //   cargo test -p omnibridge-gui -- --ignored --test-threads=1
 
     fn page(report: ClipboardStatusReport) -> gtk::Box {
         if !gtk::is_initialized() {

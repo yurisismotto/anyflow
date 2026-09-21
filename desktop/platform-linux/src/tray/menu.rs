@@ -59,7 +59,7 @@ type LayoutItem = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
 /// One item as `GetGroupProperties` returns it: `(ia{sv})`.
 type ItemProperties = (i32, HashMap<String, OwnedValue>);
 
-/// AnyFlow's tray menu.
+/// OmniBridge's tray menu.
 pub struct TrayMenu {
     activator: Arc<dyn ApplicationActivator>,
 }
@@ -81,7 +81,7 @@ impl TrayMenu {
                 tracing::info!(
                     action = action.gapplication_action(),
                     reason = %e,
-                    "could not present the AnyFlow window the tray menu asked for"
+                    "could not present the OmniBridge window the tray menu asked for"
                 );
             }
         });
@@ -105,7 +105,7 @@ fn entry_properties(entry: &model::MenuEntry) -> HashMap<String, OwnedValue> {
     insert(&mut props, "label", Value::from(entry.label));
     // Both stated rather than left to the host's default. Every row is always
     // available: each one presents a window, and presenting a window is
-    // something AnyFlow can always do — if the GUI is not running, the bus
+    // something OmniBridge can always do — if the GUI is not running, the bus
     // starts it. There is no state in which one of these should be greyed
     // out, and a row that greyed itself out would be a row telling the person
     // something about the daemon that the daemon has not been asked.
@@ -181,7 +181,7 @@ impl TrayMenu {
     /// The other value the specification defines is `notice`, which asks the
     /// host to make the menu more prominent because something needs the
     /// person. That is the menu's version of `NeedsAttention`, and it is
-    /// refused here for the same reason: nothing AnyFlow does is an
+    /// refused here for the same reason: nothing OmniBridge does is an
     /// interruption.
     #[zbus(property)]
     fn status(&self) -> &str {

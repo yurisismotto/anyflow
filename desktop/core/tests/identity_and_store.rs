@@ -2,14 +2,14 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use anyflow_core::clipboard_policy::ClipboardPolicy;
-use anyflow_core::identity::LocalIdentity;
-use anyflow_core::notification_policy::NotificationPolicy;
-use anyflow_core::pairing::PairingToken;
-use anyflow_core::qr::QrPayload;
-use anyflow_core::store::{Store, TrustedPeer};
-use anyflow_core::Fingerprint;
-use anyflow_proto::v1::Platform;
+use omnibridge_core::clipboard_policy::ClipboardPolicy;
+use omnibridge_core::identity::LocalIdentity;
+use omnibridge_core::notification_policy::NotificationPolicy;
+use omnibridge_core::pairing::PairingToken;
+use omnibridge_core::qr::QrPayload;
+use omnibridge_core::store::{Store, TrustedPeer};
+use omnibridge_core::Fingerprint;
+use omnibridge_proto::v1::Platform;
 
 fn identity() -> LocalIdentity {
     LocalIdentity::generate("Test Device", Platform::Linux).expect("generate identity")
@@ -139,12 +139,12 @@ fn qr_payload_rejects_hostile_input() {
     assert!(QrPayload::parse("").is_err());
     assert!(QrPayload::parse("http://evil.example/").is_err());
     // Right scheme, truncated.
-    assert!(QrPayload::parse("anyflow1:").is_err());
+    assert!(QrPayload::parse("omnibridge1:").is_err());
     // Wrong scheme version.
     let id = identity();
     let token = PairingToken::generate().expect("token");
     let good = QrPayload::encode(&id.fingerprint(), &token, id.device_id(), &[]);
-    assert!(QrPayload::parse(&good.replace("anyflow1", "anyflow9")).is_err());
+    assert!(QrPayload::parse(&good.replace("omnibridge1", "omnibridge9")).is_err());
     // Oversized payload must be refused before parsing.
     assert!(QrPayload::parse(&"a".repeat(100_000)).is_err());
 }
@@ -164,7 +164,7 @@ fn qr_payload_drops_unparseable_addresses_but_keeps_the_rest() {
     let id = identity();
     let token = PairingToken::generate().expect("token");
     let encoded = format!(
-        "anyflow1:{}:{}:{}:not-an-address,10.0.0.7:55432",
+        "omnibridge1:{}:{}:{}:not-an-address,10.0.0.7:55432",
         id.fingerprint().to_hex(),
         token.to_base32(),
         id.device_id()
@@ -350,7 +350,7 @@ fn a_newer_schema_version_is_refused_rather_than_misread() {
     let bumped = raw.replace(
         &format!(
             "\"schema_version\": {}",
-            anyflow_core::store::SCHEMA_VERSION
+            omnibridge_core::store::SCHEMA_VERSION
         ),
         "\"schema_version\": 99",
     );
@@ -406,7 +406,7 @@ fn store_never_persists_message_or_clipboard_content() {
 // ---------------------------------------------------------------------------
 //
 // `protocol/testdata/identity-{a,b}.der` are real certificates emitted by
-// `cargo run -p anyflow-core --example gen_test_vectors`. The Kotlin suite
+// `cargo run -p omnibridge-core --example gen_test_vectors`. The Kotlin suite
 // reads the same two files and must derive the same fingerprints, which makes
 // "the identity is SHA-256 over the DER SubjectPublicKeyInfo" a checked
 // contract between the two implementations rather than a shared convention.

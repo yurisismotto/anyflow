@@ -17,7 +17,7 @@
 //! carries no content at all, not even a hash of one. Eight characters of it
 //! identify a mirror across two logs and identify nothing else anywhere.
 
-use anyflow_core::notifications::NotificationId;
+use omnibridge_core::notifications::NotificationId;
 
 /// Lowercase hex for a byte slice.
 pub fn to_hex(bytes: &[u8]) -> String {

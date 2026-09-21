@@ -89,7 +89,7 @@ The PoC listener's uid (**10408**) is in the *approved* set and **not** in the
 
 Two throwaway APKs, built outside the repository in a scratch directory, with
 `aapt2` + `javac --release 17` + `d8` + `apksigner` from `build-tools 35.0.0`.
-**No AnyFlow production source was modified, and no PoC binary is committed.**
+**No OmniBridge production source was modified, and no PoC binary is committed.**
 
 * `dev.throwaway.poclistener` — a `NotificationListenerService`.
 * `dev.throwaway.pocposter` — an `Activity` that posts the test cases and exits.
@@ -190,7 +190,7 @@ or not it does.
 ## 8. An incidental finding — adaptive bundling reaches the listener
 
 One UI 8 posted a **synthetic group summary** that our listener received, with
-a key AnyFlow did not cause and null title and text:
+a key OmniBridge did not cause and null title and text:
 
 ```text
 POSTED pkg=dev.throwaway.pocposter id=0

@@ -23,7 +23,7 @@
 //! empty reads 0% and must keep reading 0%.
 
 use crate::{BatteryReading, LocalBatterySource};
-use anyflow_proto::v1::capabilities::ChargingState;
+use omnibridge_proto::v1::capabilities::ChargingState;
 
 /// `UP_DEVICE_KIND_BATTERY` from UPower's `up-types.h`. The `DisplayDevice`
 /// aggregate reports this only when it is standing in for one or more real

@@ -31,7 +31,7 @@
     <!--
       Deliberately absent, and the rule that keeps them so:
 
-        AnyFlow acquires a privileged Android capability only when a named,
+        OmniBridge acquires a privileged Android capability only when a named,
         user-visible feature requires it; only through the platform-sanctioned
         API for that feature; only with the user's explicit, separately
         revocable consent; and never as a means of defeating a platform
@@ -39,7 +39,7 @@
 
       By that rule these stay out, and no feature is a reason to revisit them,
       because each is either a workaround for a protection or a grant far wider
-      than any AnyFlow feature needs:
+      than any OmniBridge feature needs:
 
         * no BIND_ACCESSIBILITY_SERVICE
         * no QUERY_ALL_PACKAGES
@@ -108,7 +108,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
-        android:name=".AnyFlowApp"
+        android:name=".OmniBridgeApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="@string/app_name"
@@ -116,7 +116,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:theme="@style/Theme.AnyFlow">
+        android:theme="@style/Theme.OmniBridge">
 
         <activity
             android:name=".ui.MainActivity"
@@ -140,7 +140,7 @@
 
               android:screenOrientation="sensorLandscape"
 
-          and the manifest merger imported that verbatim, because AnyFlow had
+          and the manifest merger imported that verbatim, because OmniBridge had
           nothing of its own to say about it. That is why the scanner forced
           landscape on a phone held in portrait: nobody in this repository
           ever asked for landscape, and nothing here could have been changed
@@ -169,7 +169,7 @@
             tools:replace="android:screenOrientation" />
 
         <!--
-          The scanner AnyFlow actually launches (ANDROID-UX-SCANNER-INSETS-01).
+          The scanner OmniBridge actually launches (ANDROID-UX-SCANNER-INSETS-01).
 
           `PairingCaptureActivity` is the library's `CaptureActivity` with one
           thing added: an inset handler that keeps the prompt out from under
@@ -207,7 +207,7 @@
 
         <!--
           The Sharesheet entry point: Gallery / Files / Browser -> Share ->
-          AnyFlow. Exported because that is what makes it appear in the
+          OmniBridge. Exported because that is what makes it appear in the
           chooser; it accepts only a shared stream and does nothing with an
           empty or unrecognised intent.
 
@@ -222,7 +222,7 @@
             android:exported="true"
             android:label="@string/share_target_label"
             android:excludeFromRecents="true"
-            android:theme="@style/Theme.AnyFlow.Dialog">
+            android:theme="@style/Theme.OmniBridge.Dialog">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -281,15 +281,15 @@
 
           `default_autobind=false` is the load-bearing one. Without it the
           system binds this listener whenever the app is installed and access
-          is granted, and AnyFlow would be reading notifications with nobody
+          is granted, and OmniBridge would be reading notifications with nobody
           listening. With it, the binding is requested only while a paired
           computer that holds the notifications.v1 grant is connected, and
-          released when the last one goes away — which is what makes "AnyFlow
+          released when the last one goes away — which is what makes "OmniBridge
           reads your notifications only while a granted computer is connected"
           structurally true rather than a promise. See ADR-0015 §3.
 
           `default_filter_types` is a real, free, OS-enforced narrowing that
-          sits underneath AnyFlow's own per-app filter: the system delivers
+          sits underneath OmniBridge's own per-app filter: the system delivers
           only conversations and alerting notifications unless the user says
           otherwise. `disabled_filter_types` is deliberately NOT declared —
           it would grey those types out permanently in the system UI, and a
@@ -297,7 +297,7 @@
           be able to have it.
         -->
         <service
-            android:name=".notifications.AnyFlowNotificationListener"
+            android:name=".notifications.OmniBridgeNotificationListener"
             android:exported="false"
             android:label="@string/notification_listener_label"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">

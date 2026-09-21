@@ -1,5 +1,5 @@
 [package]
-name = "anyflow-capability-clipboard"
+name = "omnibridge-capability-clipboard"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -32,11 +32,11 @@ unwrap_used = "warn"
 
 [dependencies]
 # `default-features = false`: a capability crate needs the protocol half of
-# `anyflow-core`, never its Unix filesystem adapter. Leaving the default on
+# `omnibridge-core`, never its Unix filesystem adapter. Leaving the default on
 # would drag `unix-fs` into every build through feature unification, and the
 # portability gate would then pass for the wrong reason.
-anyflow-core = { version = "0.1.0", path = "../../core", default-features = false }
-anyflow-proto = { version = "0.1.0", path = "../../proto" }
+omnibridge-core = { version = "0.1.0", path = "../../core", default-features = false }
+omnibridge-proto = { version = "0.1.0", path = "../../proto" }
 async-trait = "0.1"
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
@@ -48,7 +48,7 @@ tracing = "0.1"
 # The clipboard *watch* path only. Pure Rust (x11rb's own connection backend),
 # so it adds no C toolchain requirement to a build that had none.
 #
-# It is not here to make AnyFlow an X11 application. On a GNOME Wayland
+# It is not here to make OmniBridge an X11 application. On a GNOME Wayland
 # session, Mutter mirrors the Wayland clipboard onto the Xwayland `CLIPBOARD`
 # selection, and XFIXES is the only *event-driven* view of clipboard change
 # that GNOME exposes to an ordinary client — Mutter implements neither

@@ -53,7 +53,7 @@
 //! No `image-data`, no `image-path`, no `sound-file`, no hyperlink. `urgency`
 //! is 0 or 1 and never 2.
 //!
-//! One hint is sent, `desktop-entry`, naming AnyFlow's own application id. It
+//! One hint is sent, `desktop-entry`, naming OmniBridge's own application id. It
 //! is how a future Linux *source* would recognise its own output and refuse to
 //! mirror it back — the "recognise your own output" discipline applied on the
 //! platform where it will be needed next.
@@ -67,19 +67,19 @@ const DEST: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
 const IFACE: &str = "org.freedesktop.Notifications";
 
-/// The application id AnyFlow posts under.
+/// The application id OmniBridge posts under.
 ///
 /// Matches the desktop file the packaging installs, so the shell shows the
 /// right name and icon for a mirrored notification, and so a future Linux
 /// source can recognise this process's own notifications by their
 /// `desktop-entry` hint.
-const APP_ID: &str = "io.github.yurisismotto.anyflow";
+const APP_ID: &str = "io.github.yurisismotto.omnibridge";
 
 /// `-1` asks the server for its own default expiry.
 ///
 /// Not `0` ("never expire"), which would leave every mirror on the screen
 /// until it was clicked, and not a number of our own: how long a banner stays
-/// up is a desktop-environment preference and overriding it would make AnyFlow
+/// up is a desktop-environment preference and overriding it would make OmniBridge
 /// behave unlike every other application on the machine.
 const EXPIRE_DEFAULT: i32 = -1;
 
@@ -117,7 +117,7 @@ impl DbusSink {
 
         // `GetServerInformation` is the probe: it is the cheapest call that
         // fails when nothing owns the name, and its answer is what
-        // `anyflow notifications status` reports.
+        // `omnibridge notifications status` reports.
         let (name, vendor, version, spec): (String, String, String, String) =
             match proxy.call("GetServerInformation", &()).await {
                 Ok(info) => info,

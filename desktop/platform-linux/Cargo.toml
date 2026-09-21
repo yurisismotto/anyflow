@@ -1,5 +1,5 @@
 [package]
-name = "anyflow-linux"
+name = "omnibridge-linux"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -20,10 +20,10 @@ unwrap_used = "warn"
 
 [features]
 # The KDE Plasma tray item. On by default, because the crate's own consumer
-# that matters — `anyflowd` — wants it, and a default-off feature is a feature
+# that matters — `omnibridged` — wants it, and a default-off feature is a feature
 # `cargo test --workspace` does not compile.
 #
-# `anyflow-gui` and `anyflow-cli` turn it off. Not because it would break
+# `omnibridge-gui` and `omnibridge-cli` turn it off. Not because it would break
 # anything if they had it, but because the boundary is worth stating: the tray
 # is owned by the agent, and a GUI that could publish one would be the first
 # step back towards a resident GUI. Cargo's feature unification means a
@@ -36,16 +36,16 @@ default = ["tray"]
 tray = ["dep:zbus", "dep:futures-lite"]
 
 [dependencies]
-anyflow-core = { version = "0.1.0", path = "../core", features = ["unix-fs"] }
-anyflow-control = { version = "0.1.0", path = "../control" }
-anyflow-proto = { version = "0.1.0", path = "../proto" }
+omnibridge-core = { version = "0.1.0", path = "../core", features = ["unix-fs"] }
+omnibridge-control = { version = "0.1.0", path = "../control" }
+omnibridge-proto = { version = "0.1.0", path = "../proto" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["net", "io-util", "rt"] }
 tracing = "0.1"
 
 # The session bus, for the StatusNotifierItem. Already in this workspace's
-# resolved graph — `anyflow-capability-notifications` and
-# `anyflow-capability-battery` each take it optionally, and `anyflowd` enables
+# resolved graph — `omnibridge-capability-notifications` and
+# `omnibridge-capability-battery` each take it optionally, and `omnibridged` enables
 # both — so this adds a direct edge rather than a new crate. Same
 # `default-features = false` + `tokio` as those two: zbus's own executor would
 # be a second runtime inside a process that already has one.

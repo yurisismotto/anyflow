@@ -5,5 +5,5 @@
 //! testable surface rather than private details of a binary.
 
 fn main() -> gtk::glib::ExitCode {
-    anyflow_gui::run()
+    omnibridge_gui::run()
 }

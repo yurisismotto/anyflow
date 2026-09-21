@@ -1,6 +1,6 @@
 //! Asking a human about an incoming file, over the real control socket.
 //!
-//! The unit tests in `anyflow_runtime::approval` pin the seam's own rules.
+//! The unit tests in `omnibridge_runtime::approval` pin the seam's own rules.
 //! These pin the *product*: a phone offers a file, the question reaches a
 //! desktop client over the same Unix socket the GUI uses, and the answer that
 //! travels back decides what happens to a real TLS data stream and a real
@@ -18,12 +18,12 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyflow_capability_files::transfer::{TransferId, TransferState};
-use anyflow_daemon::control::{Event, Request, Response};
-use anyflow_daemon::server;
-use anyflow_daemon::state::DaemonState;
-use anyflow_proto::v1::capabilities as pb;
 use common::*;
+use omnibridge_capability_files::transfer::{TransferId, TransferState};
+use omnibridge_daemon::control::{Event, Request, Response};
+use omnibridge_daemon::server;
+use omnibridge_daemon::state::DaemonState;
+use omnibridge_proto::v1::capabilities as pb;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
@@ -121,7 +121,7 @@ impl Provider {
     }
 }
 
-fn offer_request(event: Event) -> anyflow_daemon::control::FileOfferRequest {
+fn offer_request(event: Event) -> omnibridge_daemon::control::FileOfferRequest {
     match event {
         Event::FileOfferRequest(request) => request,
         other => panic!("expected a file offer prompt, got {other:?}"),
@@ -501,7 +501,7 @@ async fn a_decision_for_an_offer_the_provider_was_never_shown_is_ignored() {
         other => panic!("expected the abandoned offer to be declined, got {other:?}"),
     }
 
-    // The newcomer knows the id — it could have read it from `anyflow
+    // The newcomer knows the id — it could have read it from `omnibridge
     // transfers` — and answering it does nothing at all.
     newcomer.decide(&request.transfer_id, true).await;
     assert!(captured

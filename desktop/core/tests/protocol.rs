@@ -1,9 +1,9 @@
 //! Protocol-level tests: serialization, framing, versions, malformed input.
 
-use anyflow_core::framing::{self, MAX_FRAME_LEN};
-use anyflow_core::session::{negotiate_version, PROTOCOL_VERSION_MAX, PROTOCOL_VERSION_MIN};
-use anyflow_proto::v1;
-use anyflow_proto::Message;
+use omnibridge_core::framing::{self, MAX_FRAME_LEN};
+use omnibridge_core::session::{negotiate_version, PROTOCOL_VERSION_MAX, PROTOCOL_VERSION_MIN};
+use omnibridge_proto::v1;
+use omnibridge_proto::Message;
 
 fn sample_envelope() -> v1::Envelope {
     v1::Envelope {
@@ -139,7 +139,7 @@ async fn oversized_length_prefix_is_refused_without_allocating() {
         .await
         .expect_err("an oversized length prefix must be refused");
     assert!(
-        matches!(err, anyflow_core::Error::FrameTooLarge(len, limit)
+        matches!(err, omnibridge_core::Error::FrameTooLarge(len, limit)
             if len == u32::MAX && limit == MAX_FRAME_LEN),
         "unexpected error: {err:?}"
     );
@@ -151,7 +151,10 @@ async fn zero_length_frame_is_refused() {
     let err = framing::read_envelope(&mut cursor)
         .await
         .expect_err("a zero-length frame must be refused");
-    assert!(matches!(err, anyflow_core::Error::Protocol(_)), "{err:?}");
+    assert!(
+        matches!(err, omnibridge_core::Error::Protocol(_)),
+        "{err:?}"
+    );
 }
 
 #[tokio::test]
@@ -165,7 +168,7 @@ async fn malformed_protobuf_body_is_refused() {
     let err = framing::read_envelope(&mut cursor)
         .await
         .expect_err("a malformed protobuf body must be refused");
-    assert!(matches!(err, anyflow_core::Error::Decode(_)), "{err:?}");
+    assert!(matches!(err, omnibridge_core::Error::Decode(_)), "{err:?}");
 }
 
 #[tokio::test]
@@ -178,7 +181,7 @@ async fn truncated_frame_reports_closed_not_garbage() {
     let err = framing::read_envelope(&mut cursor)
         .await
         .expect_err("a truncated frame must be refused");
-    assert!(matches!(err, anyflow_core::Error::Closed), "{err:?}");
+    assert!(matches!(err, omnibridge_core::Error::Closed), "{err:?}");
 }
 
 #[tokio::test]
@@ -187,5 +190,5 @@ async fn empty_stream_reports_closed() {
     let err = framing::read_envelope(&mut cursor)
         .await
         .expect_err("an empty stream must report Closed");
-    assert!(matches!(err, anyflow_core::Error::Closed), "{err:?}");
+    assert!(matches!(err, omnibridge_core::Error::Closed), "{err:?}");
 }

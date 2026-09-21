@@ -5,7 +5,7 @@
 | **Title** | What each platform can actually do |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
-| **Scope** | Every AnyFlow capability and platform integration point, per target platform. |
+| **Scope** | Every OmniBridge capability and platform integration point, per target platform. |
 | **Decision status** | Informational. Feeds [22](22-IMPLEMENTATION-ROADMAP.md) and the product-semantics rule in §5. |
 | **Evidence** | Per-cell. Linux GNOME and Android columns are REPO VERIFIED (shipping code). Every other column is OFFICIAL DOC VERIFIED or POC REQUIRED. |
 | **Related documents** | [04](04-LINUX-PORTABILITY.md), [06](06-KDE-PLASMA-WAYLAND.md), [08](08-WINDOWS-FEASIBILITY.md), [10](10-MACOS-FEASIBILITY.md), [11](11-IOS-IPADOS-FEASIBILITY.md), [15](15-CROSS-PLATFORM-CLIPBOARD.md), [17](17-BACKGROUND-EXECUTION-MODEL.md) |
@@ -17,7 +17,7 @@
 | Value | Meaning |
 | --- | --- |
 | **SUP** | Supported. Shipping today, or the platform API is documented and unambiguous. |
-| **LIK** | Likely. Documented API exists and fits; no known obstacle; not yet proven for AnyFlow. |
+| **LIK** | Likely. Documented API exists and fits; no known obstacle; not yet proven for OmniBridge. |
 | **POC** | Proof of concept required before anyone plans around it. |
 | **LIM** | Possible but materially reduced compared to the reference behaviour. |
 | **UNS** | Not supported by our design on this platform. |
@@ -33,7 +33,7 @@ desktop differs.
 
 | Capability | Linux GNOME | Linux KDE | Windows | macOS | Android | iOS | iPadOS |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| **Discovery** (`_anyflow._tcp.local.` advertise) | SUP | SUP | POC | POC | n/a¹ | n/a¹ | n/a¹ |
+| **Discovery** (`_omnibridge._tcp.local.` advertise) | SUP | SUP | POC | POC | n/a¹ | n/a¹ | n/a¹ |
 | **Discovery** (browse) | n/a¹ | n/a¹ | LIK | LIK | SUP | POC | POC |
 | **Pairing** (QR + proof) | SUP | SUP | LIK | LIK | SUP | POC | POC |
 | **TLS 1.3 mutual + SPKI pinning** | SUP | SUP | LIK | LIK | SUP | POC | POC |
@@ -183,7 +183,7 @@ business network" (OFFICIAL DOC VERIFIED). Never `0.0.0.0/0`, never the Public p
 prompting was extended to Mac apps in recent macOS releases. **RESOLVED (V-05, V-06):**
 
 - TN3179 was retrieved in full. Local network privacy applies to **macOS from macOS 15**, and
-  *"the exception for `launchd` daemons doesn't apply to `launchd` agents"* — so AnyFlow's
+  *"the exception for `launchd` daemons doesn't apply to `launchd` agents"* — so OmniBridge's
   per-user macOS agent **does** face the Local Network prompt.
 - `NSPasteboard.AccessBehavior` arrived in **macOS 15.4** with four cases. **The General
   pasteboard defaults to asking on programmatic access.** So macOS clipboard **auto-send is
@@ -200,7 +200,7 @@ in `net/Discovery.kt`.
 
 **²⁴ iOS/iPadOS require `NSLocalNetworkUsageDescription` *and* `NSBonjourServices`**, and the
 user is prompted once. Denial is not recoverable in-app — the user must go to Settings. The
-service type must be listed literally: `_anyflow._tcp`.
+service type must be listed literally: `_omnibridge._tcp`.
 
 ---
 

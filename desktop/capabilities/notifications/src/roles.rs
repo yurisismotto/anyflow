@@ -45,8 +45,8 @@
 
 use std::collections::BTreeSet;
 
-use anyflow_core::notifications::Role;
-use anyflow_proto::v1::capabilities as pb;
+use omnibridge_core::notifications::Role;
+use omnibridge_proto::v1::capabilities as pb;
 
 /// This device's announcement state for one connection.
 ///

@@ -56,9 +56,9 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use anyflow_capability_files::transfer::TransferId;
-use anyflow_capability_files::{IncomingOffer, TransferApproval};
-use anyflow_core::Fingerprint;
+use omnibridge_capability_files::transfer::TransferId;
+use omnibridge_capability_files::{IncomingOffer, TransferApproval};
+use omnibridge_core::Fingerprint;
 use tokio::sync::{mpsc, oneshot};
 
 /// How many offers may be queued towards a provider before it is considered
@@ -297,7 +297,7 @@ impl TransferApproval for FileApproval {
                 peer = %offer.peer.to_display_short(),
                 reason = why.as_str(),
                 "declining an incoming file: no way to ask a human. Open the \
-                 AnyFlow desktop application, or start the daemon with \
+                 OmniBridge desktop application, or start the daemon with \
                  --accept-files-without-asking to accept unattended."
             );
             return false;

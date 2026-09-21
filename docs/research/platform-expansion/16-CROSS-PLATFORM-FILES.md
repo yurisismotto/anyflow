@@ -34,20 +34,20 @@ filesystem at all.
 
 The second TLS connection for bulk data ([ADR-0013](../../adr/ADR-0013-file-transfer-data-stream.md))
 is likewise portable: it is the same port, the same mutual auth, the same pins, distinguished
-by ALPN (`anyflow-data/1`). Nothing platform-specific.
+by ALPN (`omnibridge-data/1`). Nothing platform-specific.
 
 ---
 
 ## 2. Destination per platform
 
 `destination.rs` currently resolves `$XDG_DOWNLOAD_DIR` → `user-dirs.dirs` → `$HOME/Downloads`,
-then `AnyFlow/` underneath.
+then `OmniBridge/` underneath.
 
 | Platform | Downloads | Data dir | Notes |
 | --- | --- | --- | --- |
-| **Linux** | XDG chain (as today) | `$XDG_DATA_HOME/anyflow` | Correctly localised — a Brazilian desktop gets `~/Transferências` |
-| **Windows** | `SHGetKnownFolderPath(FOLDERID_Downloads)` | `%LOCALAPPDATA%\AnyFlow` | Also correctly localised |
-| **macOS** | `FileManager.urls(for: .downloadsDirectory)` | `~/Library/Application Support/AnyFlow` | POSIX modes work as-is |
+| **Linux** | XDG chain (as today) | `$XDG_DATA_HOME/omnibridge` | Correctly localised — a Brazilian desktop gets `~/Transferências` |
+| **Windows** | `SHGetKnownFolderPath(FOLDERID_Downloads)` | `%LOCALAPPDATA%\OmniBridge` | Also correctly localised |
+| **macOS** | `FileManager.urls(for: .downloadsDirectory)` | `~/Library/Application Support/OmniBridge` | POSIX modes work as-is |
 | **Android** | `MediaStore.Downloads` / SAF | app-private | Already implemented (`files/Downloads.kt`) |
 | **iOS/iPadOS** | **No such concept** | app container `Documents/` | §5 |
 
@@ -113,7 +113,7 @@ macOS adds Unicode normalisation (APFS/HFS+ NFD) and a historical Finder meaning
 Applying it everywhere rather than under `#[cfg(windows)]` is deliberate:
 - a file received on Linux and later copied to Windows or a network share carries the problem;
 - one rule set means one test suite, and `filename.rs` plus `daemon/tests/files.rs` already
-  have a good one (`daemon/tests/files.rs:930` already tests `/etc/cron.d/anyflow → anyflow`);
+  have a good one (`daemon/tests/files.rs:930` already tests `/etc/cron.d/omnibridge → omnibridge`);
 - a `#[cfg]`-gated security rule is a rule that is untested on the CI host.
 
 The existing behaviour — sanitise to a safe name, or reject — is the right shape. It just needs
@@ -131,7 +131,7 @@ unchanged (an offer carries a name, not a path), but the *product* must be redef
 | **Send** | Share Sheet (`NSExtension`) or `UIDocumentPickerViewController` | Foreground; user-initiated |
 | **Receive** | Written to the app container's `Documents/` | **Only while the app runs** |
 | Surfacing received files | `UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace` makes `Documents/` visible in the Files app | The natural equivalent of a Downloads folder |
-| "Save to Files" | Share Sheet from within AnyFlow | Lets the user move it wherever they like |
+| "Save to Files" | Share Sheet from within OmniBridge | Lets the user move it wherever they like |
 | **Background receive** | ❌ | The app is suspended; sockets may be reclaimed |
 | Mid-transfer suspension | ❌ Transfer fails | §6 |
 
@@ -158,7 +158,7 @@ Options, none for this sprint:
 | --- | --- |
 | **(a)** No resume; iOS transfers are foreground-only and restart | **Recommended for v1.** Honest, no protocol change |
 | (b) `files.v2` with byte-range resume | A real protocol change: offsets, integrity over partial content, a resume token. Would benefit every platform, and is the right long-term answer |
-| (c) `URLSession` background transfer on iOS | Continues while suspended, but is HTTP-shaped — it would mean a second protocol with its own authentication story alongside `anyflow-data/1`. **Rejected**: a parallel transport is exactly the "platform-specific protocol" the compatibility principle forbids |
+| (c) `URLSession` background transfer on iOS | Continues while suspended, but is HTTP-shaped — it would mean a second protocol with its own authentication story alongside `omnibridge-data/1`. **Rejected**: a parallel transport is exactly the "platform-specific protocol" the compatibility principle forbids |
 
 **Recommendation: (a) now; record (b) as a candidate `files.v2` driven by general value rather
 than by iOS.** Note explicitly that (b) must be `files.v2` and not a mutation of `files.v1` —

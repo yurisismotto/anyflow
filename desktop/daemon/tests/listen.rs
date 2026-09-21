@@ -11,7 +11,7 @@ mod common;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
-use anyflow_daemon::listener;
+use omnibridge_daemon::listener;
 use tokio::net::TcpStream;
 
 /// True if this host can actually use IPv6 loopback. A build machine or a

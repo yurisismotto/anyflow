@@ -1,5 +1,5 @@
 [package]
-name = "anyflow-gui"
+name = "omnibridge-gui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -22,11 +22,11 @@ todo = "warn"
 unwrap_used = "warn"
 
 [lib]
-name = "anyflow_gui"
+name = "omnibridge_gui"
 path = "src/lib.rs"
 
 [[bin]]
-name = "anyflow-gui"
+name = "omnibridge-gui"
 path = "src/main.rs"
 
 [dependencies]
@@ -35,14 +35,14 @@ path = "src/main.rs"
 # longer does is depend on the *agent* to get them — before Wave 0 a GTK
 # application pulled in mDNS, UPower and every capability crate for this
 # (audit C1).
-anyflow-control = { version = "0.1.0", path = "../control" }
+omnibridge-control = { version = "0.1.0", path = "../control" }
 # The Linux control endpoint. A desktop UI is a platform application; it is
 # the *portable* crates that must not name a platform.
 # `default-features = false` turns off the crate's `tray` feature. The tray is
-# the agent's, not the GUI's: `anyflowd` owns the StatusNotifierItem and this
+# the agent's, not the GUI's: `omnibridged` owns the StatusNotifierItem and this
 # process is what it activates. A GUI that could publish a tray item is one
 # refactor away from being kept resident to hold one.
-anyflow-linux = { version = "0.1.0", path = "../platform-linux", default-features = false }
+omnibridge-linux = { version = "0.1.0", path = "../platform-linux", default-features = false }
 # The native GUI floors. Both are enforced at build time by `system-deps`
 # reading the distribution's own pkg-config metadata, so they are a hard gate
 # rather than a hope — and neither is a conservative pin. Each was measured by

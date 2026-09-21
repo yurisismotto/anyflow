@@ -38,7 +38,7 @@ Status vocabulary: **PROPOSED** (a direction is recommended, awaiting a decision
 - **Options** (a) portable Rust core + native adapters everywhere new; (b) native
   reimplementation per platform, as Android did; (c) hybrid — Rust for desktops, native for
   mobile.
-- **Evidence** REPO VERIFIED: `anyflow-core` is already host-inverted via `SessionHost` and is
+- **Evidence** REPO VERIFIED: `omnibridge-core` is already host-inverted via `SessionHost` and is
   one file from compiling off-Unix ([01 §5](01-CURRENT-ARCHITECTURE-AUDIT.md)). OFFICIAL DOC
   VERIFIED: `x86_64-pc-windows-msvc` Tier 1, `*-apple-darwin`/`*-apple-ios` Tier 2.
 - **Recommended** **(a)**, contingent on the identity signer working.
@@ -81,7 +81,7 @@ Status vocabulary: **PROPOSED** (a direction is recommended, awaiting a decision
   the FFI shape is viable.
 - **Options** (a) custom `rustls::sign::SigningKey` over `SecKeyCreateSignature`; (b) do TLS in
   Swift with Network.framework and reimplement pinning there; (c) software key in the Keychain.
-- **Evidence** OFFICIAL DOC VERIFIED: the Enclave supports only P-256, which AnyFlow already
+- **Evidence** OFFICIAL DOC VERIFIED: the Enclave supports only P-256, which OmniBridge already
   uses; rustls documents `SigningKey` for exactly this. No `rustls-secure-enclave` crate exists —
   it must be written. (b) would mean a second implementation of the pinning verifier, which
   `tls.rs` calls "the single most dangerous thing in this codebase".
@@ -128,7 +128,7 @@ Status vocabulary: **PROPOSED** (a direction is recommended, awaiting a decision
 - **Why it matters** Whether Flatpak can be a supported Linux channel or only an experiment.
 - **Options** (a) primary; (b) experimental alongside RPM/DEB; (c) not supported.
 - **Evidence** OFFICIAL DOC VERIFIED: Flatpak has no `.local` NSS resolution and no mDNS portal.
-  **But AnyFlow does not resolve `.local` names** — it runs its own responder and dials the IP
+  **But OmniBridge does not resolve `.local` names** — it runs its own responder and dials the IP
   addresses in the record, so the documented gap may not apply. The real costs are
   `--socket=x11` (required for the GNOME clipboard watch) and a second-class CLI.
 - **Recommended** **(b)**, POC-gated.
@@ -183,7 +183,7 @@ Status vocabulary: **PROPOSED** (a direction is recommended, awaiting a decision
 - **Why it matters** Decides whether official Debian archive inclusion is realistic.
 - **Options** (a) vendor with `Cargo.lock`, ship from CI / a PPA / OBS; (b) unbundle to
   `librust-*` and pursue archive inclusion.
-- **Evidence** OFFICIAL DOC VERIFIED: Debian policy prefers unbundled crates. AnyFlow depends on
+- **Evidence** OFFICIAL DOC VERIFIED: Debian policy prefers unbundled crates. OmniBridge depends on
   `rustls 0.23`, `rcgen 0.14`, `tokio 1.53`, `prost 0.14`, `mdns-sd 0.15`, `gtk4 0.9`,
   `libadwaita 0.7` and more; the security-critical ones are exactly where a version substitution
   matters most.
@@ -197,7 +197,7 @@ Status vocabulary: **PROPOSED** (a direction is recommended, awaiting a decision
 - **Options** (a) add `key_backing` to `DeviceInfo`; (b) local display only.
 - **Evidence** It is an unverifiable self-report. A UI decoration that looks like a security
   property is worse than none.
-- **Recommended** **(b).** No protocol change. Show the *local* backing in `anyflow status` and
+- **Recommended** **(b).** No protocol change. Show the *local* backing in `omnibridge status` and
   the UI.
 - **Status** **PROPOSED.**
 - **Blocking?** No.

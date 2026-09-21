@@ -3,7 +3,7 @@
 //! Run with:
 //!
 //! ```text
-//! cargo run -p anyflow-core --example gen_test_vectors
+//! cargo run -p omnibridge-core --example gen_test_vectors
 //! ```
 //!
 //! The fixtures are real certificates produced by the real desktop identity
@@ -19,7 +19,7 @@
 
 use std::path::PathBuf;
 
-use anyflow_core::identity::LocalIdentity;
+use omnibridge_core::identity::LocalIdentity;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protocol/testdata");
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // "a" plays the paired desktop; "b" plays a different machine presenting a
     // perfectly valid certificate that simply is not the pinned one.
     for name in ["a", "b"] {
-        let identity = LocalIdentity::generate("fixture", anyflow_proto::v1::Platform::Linux)?;
+        let identity = LocalIdentity::generate("fixture", omnibridge_proto::v1::Platform::Linux)?;
         let path = out.join(format!("identity-{name}.der"));
         std::fs::write(&path, identity.certificate_der().as_ref())?;
         println!(

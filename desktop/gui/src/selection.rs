@@ -25,12 +25,12 @@
 //! `store/PeerTarget.kt`: trust is the *set* of peers, the selection is the
 //! person's *choice*, and a destination is a function of the two. Nothing
 //! downstream can see list position. Keeping the two platforms' rules the
-//! same is itself a safety property — a person who learns "AnyFlow asks when
+//! same is itself a safety property — a person who learns "OmniBridge asks when
 //! it is ambiguous" on the phone should not find the desktop guessing.
 //!
 //! # Where it is stored, and why not in the daemon
 //!
-//! `$XDG_CONFIG_HOME/anyflow/gui.json`, as an application preference.
+//! `$XDG_CONFIG_HOME/omnibridge/gui.json`, as an application preference.
 //!
 //! The daemon would be the better long-term owner: the CLI, the GUI and a
 //! future tray would then agree without any of them writing a file. That
@@ -38,7 +38,7 @@
 //! choice lives with the application that has the windows, is shared by both
 //! of them, and is recorded as a debt rather than smuggled into the socket.
 //!
-//! Deliberately **not** `$XDG_DATA_HOME/anyflow`: that is the trust store,
+//! Deliberately **not** `$XDG_DATA_HOME/omnibridge`: that is the trust store,
 //! whose 0700/0600 modes are verified on load, and a GUI preference has no
 //! business inside a directory with that contract.
 //!
@@ -151,7 +151,7 @@ impl Selection {
     ///
     /// A preference that cannot be written is not worth an error dialog: the
     /// choice still holds for this run, and the next run asks. Writing the
-    /// parent directory 0700 matches every other AnyFlow directory.
+    /// parent directory 0700 matches every other OmniBridge directory.
     fn persist(&self) {
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -177,14 +177,14 @@ impl Selection {
     }
 }
 
-/// `$XDG_CONFIG_HOME/anyflow/gui.json`, else `~/.config/anyflow/gui.json`.
+/// `$XDG_CONFIG_HOME/omnibridge/gui.json`, else `~/.config/omnibridge/gui.json`.
 fn default_path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .unwrap_or_else(|| PathBuf::from("."));
-    base.join("anyflow").join("gui.json")
+    base.join("omnibridge").join("gui.json")
 }
 
 /// Lowercases and checks that the value is fingerprint hex.
@@ -213,7 +213,7 @@ mod tests {
     fn temp(name: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
         p.push(format!(
-            "anyflow-selection-{}-{}-{name}",
+            "omnibridge-selection-{}-{}-{name}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="AnyFlow">
-  <title>AnyFlow Flow A, monochrome</title>
-  <desc>The Flow A in a single colour. Inherits the surrounding text colour, so it works on light and dark alike.</desc>
-  <path d="M 53 56 C 50 41 43 22 32 8 C 22 21 15 36 10 47 C 7.5 52.5 11.5 56.5 15.5 52 C 22 43.5 33 38 45 37.5 C 50 37.3 54 38 57 39" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>

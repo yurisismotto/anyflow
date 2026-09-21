@@ -1,7 +1,7 @@
 //! The dashboard: what is here, and what can be done with it now.
 
 use adw::prelude::*;
-use anyflow_control::{DeviceReport, Response};
+use omnibridge_control::{DeviceReport, Response};
 
 use super::Pages;
 use crate::panel::model::{self, Action, PanelModel};
@@ -13,7 +13,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
 
     if let Some(error) = &state.error {
         container.append(&widgets::security_notice(
-            "The AnyFlow daemon is not reachable",
+            "The OmniBridge daemon is not reachable",
             error,
             true,
         ));
@@ -243,7 +243,7 @@ fn platform_icon(platform: &str) -> &'static str {
 /// What is moving right now.
 ///
 /// The reference calls this "Recent activity" and shows timestamps going back
-/// half an hour. AnyFlow keeps no such log: the daemon reports the transfers
+/// half an hour. OmniBridge keeps no such log: the daemon reports the transfers
 /// of *this run* and nothing is written to disk. So this shows exactly that,
 /// and says so, rather than implying a history that does not exist.
 fn activity_card(state: &DaemonState) -> gtk::Box {
@@ -290,7 +290,7 @@ fn activity_card(state: &DaemonState) -> gtk::Box {
         }
     }
     card.append(&widgets::caption(
-        "This run only. AnyFlow keeps no transfer history on disk.",
+        "This run only. OmniBridge keeps no transfer history on disk.",
     ));
     card
 }
@@ -354,7 +354,7 @@ fn choose_and_send_file(button: &gtk::Button, action: &Action) {
                 // dashboard picks the transfer up on its next refresh, so only an
                 // outright refusal needs reporting here.
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: could not offer the file: {message}");
+                    eprintln!("omnibridge-gui: could not offer the file: {message}");
                 }
             });
         },

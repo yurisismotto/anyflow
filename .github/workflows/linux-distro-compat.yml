@@ -2,8 +2,8 @@
 #
 # What this proves, and what it does not
 # --------------------------------------
-# It proves **BUILD COMPATIBILITY**: that `anyflowd`, `anyflow` and
-# `anyflow-gui` compile on Ubuntu 24.04 LTS, Ubuntu 26.04 LTS and Debian 13
+# It proves **BUILD COMPATIBILITY**: that `omnibridged`, `omnibridge` and
+# `omnibridge-gui` compile on Ubuntu 24.04 LTS, Ubuntu 26.04 LTS and Debian 13
 # trixie, against **those distributions' own** GTK, libadwaita, glib and C
 # toolchain, from the committed `Cargo.lock`.
 #
@@ -34,14 +34,14 @@
 # its **own** archive: no PPA, no third-party repository, no backport, no
 # Flatpak SDK, no bundled newer copy. That is the whole point of the row.
 #
-# The **Rust toolchain** is installed separately, pinned to AnyFlow's declared
+# The **Rust toolchain** is installed separately, pinned to OmniBridge's declared
 # MSRV. That is deliberate and is not a contradiction: whether a given
 # distribution's default `rustc` package is new enough is a *packaging and
 # documentation* question, already answered per distribution in README.md, and
 # it is not what this workflow measures. Ubuntu 24.04's stock rustc is 1.75
 # and cannot build the lockfile; the distribution nevertheless carries
 # `rustc-1.91` in its own archive. Conflating the two would make this job go
-# red for a reason that has nothing to do with AnyFlow's source.
+# red for a reason that has nothing to do with OmniBridge's source.
 
 name: Linux distro compatibility · build only
 
@@ -74,7 +74,7 @@ env:
   # The declared floor, in one place. `desktop/Cargo.toml` carries the same
   # number and the `msrv` job asserts the two agree, so this cannot drift into
   # testing a version nothing claims.
-  ANYFLOW_MSRV: '1.88.0'
+  OMNIBRIDGE_MSRV: '1.88.0'
 
 jobs:
   # ---------------------------------------------------------------------- 1 --
@@ -107,13 +107,13 @@ jobs:
           set -eu
           declared=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
           echo "desktop/Cargo.toml declares: ${declared}"
-          echo "this job pins:              ${ANYFLOW_MSRV}"
+          echo "this job pins:              ${OMNIBRIDGE_MSRV}"
           # `1.88` and `1.88.0` name the same toolchain, so both are reduced
           # to major.minor before comparing and the manifest need not carry a
           # patch level it does not mean.
           minor() { echo "$1" | awk -F. '{ printf "%s.%s", $1, $2 }'; }
-          if [ "$(minor "${declared}")" != "$(minor "${ANYFLOW_MSRV}")" ]; then
-            echo "::error::rust-version is '${declared}' but this gate pins '${ANYFLOW_MSRV}'."
+          if [ "$(minor "${declared}")" != "$(minor "${OMNIBRIDGE_MSRV}")" ]; then
+            echo "::error::rust-version is '${declared}' but this gate pins '${OMNIBRIDGE_MSRV}'."
             echo "::error::Raising the declared MSRV must be a deliberate edit in both places,"
             echo "::error::with the dependency that moved the floor named in the commit."
             exit 1
@@ -122,9 +122,9 @@ jobs:
       - name: Toolchain identity
         run: |
           set -eux
-          rustup toolchain install "${ANYFLOW_MSRV}" --profile minimal
-          rustup run "${ANYFLOW_MSRV}" rustc -Vv
-          rustup run "${ANYFLOW_MSRV}" cargo -V
+          rustup toolchain install "${OMNIBRIDGE_MSRV}" --profile minimal
+          rustup run "${OMNIBRIDGE_MSRV}" rustc -Vv
+          rustup run "${OMNIBRIDGE_MSRV}" cargo -V
 
       # THE GATE. If this goes red, a dependency update has raised the real
       # compiler floor above the declared one. The fix is NOT to bump
@@ -133,17 +133,17 @@ jobs:
       # claim became false.
       - name: Lockfile resolves on the declared MSRV
         working-directory: desktop
-        run: rustup run "${ANYFLOW_MSRV}" cargo metadata --locked --format-version 1 > /dev/null
+        run: rustup run "${OMNIBRIDGE_MSRV}" cargo metadata --locked --format-version 1 > /dev/null
 
       - name: cargo check · daemon, CLI, GUI
         working-directory: desktop
         run: |
-          rustup run "${ANYFLOW_MSRV}" cargo check --locked \
-            -p anyflow-daemon -p anyflow-cli -p anyflow-gui
+          rustup run "${OMNIBRIDGE_MSRV}" cargo check --locked \
+            -p omnibridge-daemon -p omnibridge-cli -p omnibridge-gui
 
       - name: cargo check · the whole desktop workspace, tests included
         working-directory: desktop
-        run: rustup run "${ANYFLOW_MSRV}" cargo check --locked --workspace --all-targets
+        run: rustup run "${OMNIBRIDGE_MSRV}" cargo check --locked --workspace --all-targets
 
   # ---------------------------------------------------------------------- 2 --
   # The distro matrix. Every row is mandatory; none may be allowed to fail.
@@ -203,7 +203,7 @@ jobs:
           #
           # `git` is here for actions/checkout, which runs next and would
           # otherwise fall back to a tarball download. It is a CI tool, not a
-          # build dependency of AnyFlow, and the distinction matters: nothing
+          # build dependency of OmniBridge, and the distinction matters: nothing
           # in this list may be read as a package the product needs.
           apt-get install -y --no-install-recommends \
             gcc libc6-dev pkg-config libgtk-4-dev libadwaita-1-dev \
@@ -251,12 +251,12 @@ jobs:
       # The Rust toolchain, separately and deliberately — see the header. It
       # is pinned to the declared MSRV, so these rows prove the stronger
       # statement: this distribution's native GTK stack *and* the lowest
-      # toolchain AnyFlow claims to support, together.
+      # toolchain OmniBridge claims to support, together.
       - name: Rust toolchain · pinned to the declared MSRV
         run: |
           set -eux
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain "${ANYFLOW_MSRV}"
+            | sh -s -- -y --profile minimal --default-toolchain "${OMNIBRIDGE_MSRV}"
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
           # `desktop/rust-toolchain.toml` pins `channel = "stable"`, which is
           # right for a developer and wrong here: rustup honours that file over
@@ -265,7 +265,7 @@ jobs:
           # MSRV. Measured, not guessed — the first local container probe of
           # this workflow ran on 1.98.1 while reporting that it had installed
           # 1.88.0. `RUSTUP_TOOLCHAIN` outranks the file.
-          echo "RUSTUP_TOOLCHAIN=${ANYFLOW_MSRV}" >> "${GITHUB_ENV}"
+          echo "RUSTUP_TOOLCHAIN=${OMNIBRIDGE_MSRV}" >> "${GITHUB_ENV}"
 
       - name: Toolchain identity — and that the pin actually took
         run: |
@@ -273,9 +273,9 @@ jobs:
           rustc -Vv
           cargo -V
           case "$(rustc -V)" in
-            *"${ANYFLOW_MSRV}"*) echo "pinned to ${ANYFLOW_MSRV} as intended" ;;
+            *"${OMNIBRIDGE_MSRV}"*) echo "pinned to ${OMNIBRIDGE_MSRV} as intended" ;;
             *)
-              echo "::error::expected rustc ${ANYFLOW_MSRV}, got: $(rustc -V)"
+              echo "::error::expected rustc ${OMNIBRIDGE_MSRV}, got: $(rustc -V)"
               echo "::error::Something is overriding the toolchain — check rust-toolchain.toml."
               exit 1
               ;;
@@ -285,20 +285,20 @@ jobs:
         working-directory: desktop
         run: cargo metadata --locked --format-version 1 > /dev/null
 
-      - name: cargo check · anyflow-daemon
+      - name: cargo check · omnibridge-daemon
         working-directory: desktop
-        run: cargo check --locked -p anyflow-daemon
+        run: cargo check --locked -p omnibridge-daemon
 
-      - name: cargo check · anyflow-cli
+      - name: cargo check · omnibridge-cli
         working-directory: desktop
-        run: cargo check --locked -p anyflow-cli
+        run: cargo check --locked -p omnibridge-cli
 
       # Mandatory on every row. The GUI is the only thing here that touches
       # the distribution's GTK stack, so a matrix that skipped it would prove
       # nothing this workflow claims.
-      - name: cargo check · anyflow-gui, against THIS distribution's GTK and libadwaita
+      - name: cargo check · omnibridge-gui, against THIS distribution's GTK and libadwaita
         working-directory: desktop
-        run: cargo check --locked -p anyflow-gui
+        run: cargo check --locked -p omnibridge-gui
 
       - name: cargo check · the whole desktop workspace
         working-directory: desktop
@@ -312,7 +312,7 @@ jobs:
       # actually change, above all the clipboard capability probe, which is
       # the one place these three distributions differ from the certified host.
       # A container job runs as **root**, and root has CAP_DAC_OVERRIDE: a
-      # directory chmod'd to 0000 is still readable. Four `anyflow-core` tests
+      # directory chmod'd to 0000 is still readable. Four `omnibridge-core` tests
       # are built on exactly that being impossible — they assert that an
       # unreachable key reads back as `PermissionDenied` rather than as
       # "absent", which is the Wave 0 defect they exist to prevent. As root
@@ -342,12 +342,12 @@ jobs:
         working-directory: desktop
         run: |
           cargo test --locked \
-            -p anyflow-capability-clipboard \
-            -p anyflow-capability-files \
-            -p anyflow-capability-battery \
-            -p anyflow-core \
-            -p anyflow-control \
-            -p anyflow-proto \
+            -p omnibridge-capability-clipboard \
+            -p omnibridge-capability-files \
+            -p omnibridge-capability-battery \
+            -p omnibridge-core \
+            -p omnibridge-control \
+            -p omnibridge-proto \
             -- \
             --skip an_unreadable_secret_is_permission_denied_and_never_absence \
             --skip an_unreadable_state_file_is_permission_denied_and_never_absence \

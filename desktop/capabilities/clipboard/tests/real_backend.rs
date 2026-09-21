@@ -9,7 +9,7 @@
 //! `#[ignore]`d and must be asked for by name:
 //!
 //! ```console
-//! cargo test -p anyflow-capability-clipboard --test real_backend -- --ignored --test-threads=1
+//! cargo test -p omnibridge-capability-clipboard --test real_backend -- --ignored --test-threads=1
 //! ```
 //!
 //! `--test-threads=1` is required, not advisory: there is exactly one system
@@ -41,9 +41,9 @@
 
 use std::time::Duration;
 
-use anyflow_capability_clipboard::backend::{self, BackendError, ClipboardBackend};
-use anyflow_capability_clipboard::limits::BACKEND_TIMEOUT;
-use anyflow_capability_clipboard::text::ClipboardText;
+use omnibridge_capability_clipboard::backend::{self, BackendError, ClipboardBackend};
+use omnibridge_capability_clipboard::limits::BACKEND_TIMEOUT;
+use omnibridge_capability_clipboard::text::ClipboardText;
 
 /// Fails with an actionable message rather than a bare assertion.
 fn explain(e: &BackendError) -> String {
@@ -187,7 +187,7 @@ async fn clear_clipboard() -> Result<std::process::ExitStatus, BoundedError> {
 #[ignore = "touches the real system clipboard; run with --ignored --test-threads=1"]
 async fn the_real_clipboard_round_trips_text() {
     preserving_clipboard(|b| async move {
-        let value = ClipboardText::validate("anyflow real-backend round trip").expect("valid");
+        let value = ClipboardText::validate("omnibridge real-backend round trip").expect("valid");
         write(&b, &value, false).await;
 
         let read_back = read(&b)
@@ -241,14 +241,14 @@ async fn the_real_clipboard_preserves_unicode_and_multiline_text_byte_for_byte()
 #[ignore = "touches the real system clipboard; run with --ignored --test-threads=1"]
 async fn the_real_clipboard_carries_a_maximum_sized_clip() {
     preserving_clipboard(|b| async move {
-        let big = "x".repeat(anyflow_capability_clipboard::limits::MAX_CLIPBOARD_TEXT_BYTES);
+        let big = "x".repeat(omnibridge_capability_clipboard::limits::MAX_CLIPBOARD_TEXT_BYTES);
         let value = ClipboardText::validate(big.clone()).expect("valid at the limit");
         write(&b, &value, false).await;
 
         let read_back = read(&b).await.expect("clipboard should hold text");
         assert_eq!(
             read_back.len(),
-            anyflow_capability_clipboard::limits::MAX_CLIPBOARD_TEXT_BYTES,
+            omnibridge_capability_clipboard::limits::MAX_CLIPBOARD_TEXT_BYTES,
             "a maximum-sized clip must survive intact"
         );
         assert_eq!(read_back.as_str(), big);
@@ -303,8 +303,8 @@ async fn the_real_clipboard_carries_a_maximum_sized_clip() {
 async fn a_sensitive_write_honours_this_backend_s_advertised_capability() {
     /// Never written to an unmarked clipboard, and asserted to be absent when
     /// the capability is missing.
-    const CANARY: &str = "anyflow-sensitive-canary-3f9c1a";
-    const SENTINEL: &str = "anyflow ordinary sentinel";
+    const CANARY: &str = "omnibridge-sensitive-canary-3f9c1a";
+    const SENTINEL: &str = "omnibridge ordinary sentinel";
 
     preserving_clipboard(|b| async move {
         // The suite cannot say anything about sensitive clips on a machine
@@ -633,7 +633,7 @@ async fn a_watch_can_be_stopped_and_restarted() {
 // Detection
 // ---------------------------------------------------------------------------
 
-/// `anyflow clipboard status` must be able to say what works *before* anything
+/// `omnibridge clipboard status` must be able to say what works *before* anything
 /// is attempted, so a person is not told to turn on a flag that cannot work.
 #[tokio::test]
 #[ignore = "inspects the real session; run with --ignored --test-threads=1"]
@@ -779,7 +779,7 @@ async fn the_bound_never_reports_the_content_it_was_given() {
 #[tokio::test]
 async fn a_missing_program_is_distinguishable_from_a_locked_seat() {
     let outcome = bounded_status(
-        "anyflow-no-such-program-exists",
+        "omnibridge-no-such-program-exists",
         &[],
         Duration::from_millis(200),
     )

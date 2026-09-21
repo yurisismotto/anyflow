@@ -46,7 +46,7 @@ Checking that decision against the platforms it did not consider:
 | Linux TPM2 (future) | TPM 2.0 | ✅ | ❌ same |
 
 **Ed25519 would have made hardware-backed identity impossible on three of the four hardware
-stores AnyFlow will ever care about.** A decision made for Android compatibility turns out to
+stores OmniBridge will ever care about.** A decision made for Android compatibility turns out to
 be the only decision that works everywhere. It should be recorded as such, and it should not be
 revisited.
 
@@ -64,7 +64,7 @@ revisited.
 | **iOS/iPadOS** | Secure Enclave | ✅ | ✅ (only) | ✅ | same as macOS | Keychain | POC-IOS-04 |
 
 The asymmetry is stark and worth stating plainly: **after this expansion, Linux would be the
-only AnyFlow platform without a hardware-backed identity.**
+only OmniBridge platform without a hardware-backed identity.**
 
 ---
 
@@ -133,7 +133,7 @@ purpose (OFFICIAL DOC VERIFIED, docs.rs). The Windows path is integration, not i
 
 `MS_PLATFORM_CRYPTO_PROVIDER` is documented as ensuring "private keys are securely stored and
 cannot be extracted, even by malicious software", and is incompatible with exportable export
-policies — which is the guarantee AnyFlow wants.
+policies — which is the guarantee OmniBridge wants.
 
 Follow Android's pattern for provider selection: attempt the hardware provider, catch the
 failure, fall back. `DeviceIdentity.kt` does this for StrongBox with a comment explaining why a
@@ -149,7 +149,7 @@ No `rustls-secure-enclave` exists. Details, traps and the user-presence constrai
 - Create the key **without** user presence — `Signer::sign` is synchronous and handshakes are
   unattended.
 - `.ecdsaSignatureMessageX962SHA256` (message, not digest) — the double-hashing trap that
-  already cost AnyFlow its Android v1 keys in a different form.
+  already cost OmniBridge its Android v1 keys in a different form.
 - Certificate must be built around an externally-held public key; verify the embedded SPKI is
   byte-identical to what `Fingerprint::from_certificate_der` extracts.
 
@@ -170,7 +170,7 @@ value more than the TPM.
 (POC-LINUX-04) so Linux does not silently become the weakest platform.** Note the practical
 obstacle: unlike Windows and Apple, a Linux TPM is often not accessible to an unprivileged
 user without `tss` group membership or a resource-manager configuration — which may make it
-undeployable for the exact "no root required" model AnyFlow has.
+undeployable for the exact "no root required" model OmniBridge has.
 
 ### 5.4 Android — leave it alone
 
@@ -192,7 +192,7 @@ TPM".
 2. **It is a protocol change** with the usual obligations (versioning, backward compatibility,
    fail-closed semantics), for zero enforcement value.
 3. **The local user's own backing is the one that matters**, and that needs no protocol —
-   `anyflow status` and the UI can show it directly.
+   `omnibridge status` and the UI can show it directly.
 
 If it is ever revisited, it must be as *advisory display only*, never an input to any
 authorization or policy decision, and it must be listed as such in the threat model.
@@ -213,7 +213,7 @@ Concretely:
 | --- | --- |
 | Attempt order | Hardware first, always. Catch failure; do not query capability |
 | Fallback protection | Non-exportable **as far as the platform allows**: DPAPI user-scope on Windows, `…WhenUnlockedThisDeviceOnly` on Apple, 0600/0700 with enforcement on Linux |
-| Visibility | `anyflow status` reports the backing. The UI shows it. First-run says it |
+| Visibility | `omnibridge status` reports the backing. The UI shows it. First-run says it |
 | Silence | **Never** silently downgrade. A machine that had a TPM key and cannot reach the TPM must **fail to start**, not quietly generate a software key — that would be an identity change, breaking every pairing, presented as a hiccup |
 | Re-keying | Never automatic. A key change is a new identity and invalidates all pairings; it must be an explicit user action with an explicit warning |
 | Logging | Log the backing at startup, exactly as Android logs `isStrongBoxBacked` |
@@ -253,4 +253,4 @@ must not disturb them:
 | **WIN-002** | CNG + `rustls-cng` implementation | High |
 | **MAC-001** | `AppleSigningKey` over `SecKeyCreateSignature` | High |
 | **LINUX-007** | Linux TPM2 / PKCS#11 signer | Medium |
-| **UX-007** | Show key backing in `anyflow status`, the UI, and first-run | Medium |
+| **UX-007** | Show key backing in `omnibridge status`, the UI, and first-run | Medium |

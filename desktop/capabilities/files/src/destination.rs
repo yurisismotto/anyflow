@@ -18,7 +18,7 @@
 //!    whichever it actually uses;
 //! 3. `$HOME/Downloads`.
 //!
-//! …then `AnyFlow/` underneath. `$HOME` is read from the environment and no
+//! …then `OmniBridge/` underneath. `$HOME` is read from the environment and no
 //! path is hardcoded: there is no `/home/<user>` anywhere in this file.
 //!
 //! # Writing
@@ -83,7 +83,7 @@ impl FileSink for UnixDownloadSink {
     /// lives beside its destination so the final rename is atomic.
     fn open_temp(&self, id: TransferId) -> io::Result<(std::fs::File, PathBuf)> {
         self.prepare()?;
-        let path = self.dir.join(format!(".anyflow-{}.part", id.to_hex()));
+        let path = self.dir.join(format!(".omnibridge-{}.part", id.to_hex()));
         let file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -257,7 +257,7 @@ mod tests {
     fn temp_destination() -> (tempfile::TempDir, crate::sink::Destination) {
         use crate::sink::Destination;
         let dir = tempfile::tempdir().expect("tempdir");
-        let dest = Destination::new(dir.path().join("AnyFlow"));
+        let dest = Destination::new(dir.path().join("OmniBridge"));
         dest.prepare().expect("prepare");
         (dir, dest)
     }
@@ -391,7 +391,7 @@ mod tests {
         let (_file, temp) = dest.open_temp(id).expect("temp");
 
         let name = temp.file_name().and_then(|s| s.to_str()).expect("name");
-        assert!(name.starts_with(".anyflow-"), "{name}");
+        assert!(name.starts_with(".omnibridge-"), "{name}");
         assert!(name.ends_with(".part"), "{name}");
         assert_eq!(temp.parent(), Some(dest.dir()));
 
@@ -434,11 +434,11 @@ mod tests {
     }
 
     #[test]
-    fn the_anyflow_subdirectory_is_used() {
+    fn the_omnibridge_subdirectory_is_used() {
         let dest = crate::sink::Destination::default_location();
         assert_eq!(
             dest.dir().file_name().and_then(|s| s.to_str()),
-            Some("AnyFlow")
+            Some("OmniBridge")
         );
     }
 }

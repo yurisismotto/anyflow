@@ -4,7 +4,7 @@
 //!
 //! A session's capability set is decided once, during `HELLO`, as *what both
 //! sides implement* intersected with *what this peer is allowed to do*
-//! ([`anyflow_core::session`], the `PeerStatus::Trusted` arm). The resulting
+//! ([`omnibridge_core::session`], the `PeerStatus::Trusted` arm). The resulting
 //! vector is then the authority for the whole life of that session, in two
 //! places that matter:
 //!
@@ -63,8 +63,8 @@
 
 use std::collections::HashMap;
 
-use anyflow_core::session::SessionId;
-use anyflow_core::Fingerprint;
+use omnibridge_core::session::SessionId;
+use omnibridge_core::Fingerprint;
 use tokio::sync::Mutex;
 
 /// What a grant change means for the peer's live session.

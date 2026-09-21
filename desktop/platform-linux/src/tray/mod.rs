@@ -2,33 +2,33 @@
 //!
 //! # Who owns the icon
 //!
-//! `anyflowd` does. That is the decision this module exists to implement and
+//! `omnibridged` does. That is the decision this module exists to implement and
 //! the one worth defending, because the alternative is easier and wrong.
 //!
-//! A tray icon has to be there whenever the product is there. AnyFlow's
-//! "whenever the product is there" is `anyflowd`: a `systemd --user` service
+//! A tray icon has to be there whenever the product is there. OmniBridge's
+//! "whenever the product is there" is `omnibridged`: a `systemd --user` service
 //! that starts at login and holds the TCP listener, the mDNS record, the trust
 //! store and every capability. The GUI is not that, deliberately — it is two
 //! windows a person opens and closes, and `desktop/gui/src/lib.rs` has said so
-//! since the Quick Panel sprint: *"the agent is `anyflowd` and stays the only
-//! long-lived process AnyFlow runs."*
+//! since the Quick Panel sprint: *"the agent is `omnibridged` and stays the only
+//! long-lived process OmniBridge runs."*
 //!
 //! So the item is owned by the process that is already always running. The
-//! obvious shortcut — keep `anyflow-gui` alive forever, hidden, because GTK
-//! makes drawing a tray icon easy — would have made AnyFlow a product with two
+//! obvious shortcut — keep `omnibridge-gui` alive forever, hidden, because GTK
+//! makes drawing a tray icon easy — would have made OmniBridge a product with two
 //! resident processes, one of which exists only to hold an icon, and would
 //! have reversed a stated architectural position as a side effect of a UI
 //! feature.
 //!
 //! ```text
-//! anyflowd  ──owns──►  StatusNotifierItem  ──click──►  session D-Bus
+//! omnibridged  ──owns──►  StatusNotifierItem  ──click──►  session D-Bus
 //!  (always)             /StatusNotifierItem                 │
 //!                       /MenuBar (DBusMenu)                 ▼
-//!                                              io.github.yurisismotto.anyflow
+//!                                              io.github.yurisismotto.omnibridge
 //!                                                 org.freedesktop.Application
 //!                                                     ActivateAction(…)
 //!                                                          │
-//!                                              anyflow-gui, started by the bus
+//!                                              omnibridge-gui, started by the bus
 //!                                              if it is not already running,
 //!                                              and gone again when its window
 //!                                              is closed
@@ -36,9 +36,9 @@
 //!
 //! # No GTK, no KDE, no new dependency
 //!
-//! The daemon does not depend on `anyflow-gui`, on GTK, on Qt, on KDE
+//! The daemon does not depend on `omnibridge-gui`, on GTK, on Qt, on KDE
 //! Frameworks, on `libappindicator` or on a tray crate. It speaks the two
-//! D-Bus interfaces directly, with the `zbus` that AnyFlow's D-Bus-using
+//! D-Bus interfaces directly, with the `zbus` that OmniBridge's D-Bus-using
 //! capabilities already resolve. `KDE-STATUSNOTIFIER-V1.md` §16 records the
 //! dependency review.
 //!
@@ -67,7 +67,7 @@ pub use model::{TrayAction, ICON_NAME, ITEM_ID, ITEM_STATUS, ITEM_TITLE};
 /// Distinguishes items within one process, exactly as KDE's client does.
 ///
 /// KDE names an item `org.kde.StatusNotifierItem-<pid>-<n>` with `n` counting
-/// up per process. `anyflowd` publishes one item and one only, so `n` is
+/// up per process. `omnibridged` publishes one item and one only, so `n` is
 /// always 1 in production — the counter exists so that the deterministic tests
 /// can raise two items in a single test binary without inventing a naming
 /// scheme no shell has ever seen.
@@ -176,11 +176,11 @@ impl Drop for TrayHandle {
 /// # Supervision
 ///
 /// Everything below this line is convenience. The tray is not part of
-/// AnyFlow's security core, it holds no key, it answers no peer, and nothing
+/// OmniBridge's security core, it holds no key, it answers no peer, and nothing
 /// else in the daemon reads its state — so its failure must cost exactly the
 /// tray and nothing more. Two things make that true:
 ///
-/// * **it is not in the daemon's `select!`.** `anyflowd` races the network
+/// * **it is not in the daemon's `select!`.** `omnibridged` races the network
 ///   listener, the control server and `ctrl_c`, and the first of those to
 ///   finish ends the process. The tray is a separate `tokio::spawn`, so it can
 ///   end — cleanly, with an error, or by panicking — without the daemon
@@ -197,7 +197,7 @@ impl Drop for TrayHandle {
 pub fn spawn(activator_for: ActivatorChoice) -> TrayHandle {
     let inner = tokio::spawn(async move {
         match run(activator_for).await {
-            Ok(()) => tracing::info!("the session bus closed; the AnyFlow tray item is gone"),
+            Ok(()) => tracing::info!("the session bus closed; the OmniBridge tray item is gone"),
             Err(e) => tracing::info!(reason = %e, "no tray integration on this session"),
         }
     });
@@ -205,7 +205,7 @@ pub fn spawn(activator_for: ActivatorChoice) -> TrayHandle {
         if let Err(e) = inner.await {
             if e.is_panic() {
                 tracing::error!(
-                    "the tray task stopped unexpectedly; AnyFlow continues without a \
+                    "the tray task stopped unexpectedly; OmniBridge continues without a \
                      tray item and everything else is unaffected"
                 );
             }
@@ -236,7 +236,7 @@ async fn run(choice: ActivatorChoice) -> Result<(), TrayError> {
     let published = publish(connection, activator).await?;
     tracing::info!(
         item = %published.bus_name(),
-        "AnyFlow tray item published on the session bus"
+        "OmniBridge tray item published on the session bus"
     );
     published
         .follow_shell()

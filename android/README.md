@@ -1,4 +1,4 @@
-# AnyFlow — Android app
+# OmniBridge — Android app
 
 Kotlin, Jetpack Compose, coroutines. No Google Play Services, no analytics, no
 network access beyond the LAN socket to the paired computer.

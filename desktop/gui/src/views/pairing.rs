@@ -11,7 +11,7 @@
 //! entire reason pairing has no man-in-the-middle window.
 
 use adw::prelude::*;
-use anyflow_control::Event;
+use omnibridge_control::Event;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -34,7 +34,7 @@ pub fn present_pairing_dialog(parent: Option<&gtk::Window>, pages: &Pages) {
 
     root.append(&widgets::heading("Pair a new device"));
     root.append(&widgets::body_muted(
-        "Scan this code with AnyFlow on your other device.",
+        "Scan this code with OmniBridge on your other device.",
     ));
 
     let columns = widgets::row(SPACING_MD);
@@ -50,7 +50,7 @@ pub fn present_pairing_dialog(parent: Option<&gtk::Window>, pages: &Pages) {
         .build();
     qr_area.set_accessible_role(gtk::AccessibleRole::Img);
     qr_area.update_property(&[gtk::accessible::Property::Label(
-        "Pairing QR code. Scan it with AnyFlow on the other device.",
+        "Pairing QR code. Scan it with OmniBridge on the other device.",
     )]);
     qr_card.append(&qr_area);
     let expiry = widgets::caption("Opening a pairing window…");
@@ -271,7 +271,7 @@ fn draw_qr(cr: &gtk::cairo::Context, width: i32, height: i32, payload: &str) {
 }
 
 /// The Flowing Ribbon, in Cairo. Geometry mirrors
-/// `docs/design/assets/icon-flowing-ribbon.svg` in its 64-unit box.
+/// `docs/design/assets/omnibridge-mark.svg` in its 188x146 box.
 fn draw_ribbon(cr: &gtk::cairo::Context, x: f64, y: f64, size: f64) {
     let s = size / 64.0;
     cr.save().ok();

@@ -2,10 +2,10 @@
 
 | Field | Value |
 | --- | --- |
-| **Title** | AnyFlow on iOS and iPadOS, honestly scoped |
+| **Title** | OmniBridge on iOS and iPadOS, honestly scoped |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
-| **Scope** | What an iOS AnyFlow client can and cannot be. Discovery, permission, pairing, TLS, lifecycle, background, clipboard, files, share extension. |
+| **Scope** | What an iOS OmniBridge client can and cannot be. Discovery, permission, pairing, TLS, lifecycle, background, clipboard, files, share extension. |
 | **Decision status** | PROPOSED. **PLAT-DEC-005** (iOS background expectations) is the gating decision and is OPEN. |
 | **Evidence** | OFFICIAL DOC VERIFIED where Apple documentation was retrievable; several key pages are JS-rendered and could not be fetched — marked **EXTERNAL VERIFICATION REQUIRED**. |
 | **Related documents** | [03](03-PLATFORM-CAPABILITY-MATRIX.md), [12](12-APPLE-SECURITY-AND-INTEGRATION.md), [15](15-CROSS-PLATFORM-CLIPBOARD.md), [16](16-CROSS-PLATFORM-FILES.md), [17](17-BACKGROUND-EXECUTION-MODEL.md) |
@@ -14,7 +14,7 @@
 
 ## 1. Verdict, stated before the detail
 
-**An iOS AnyFlow can exist and can be genuinely useful. It cannot be an Android AnyFlow, and
+**An iOS OmniBridge can exist and can be genuinely useful. It cannot be an Android OmniBridge, and
 no amount of engineering will change that.**
 
 The whole platform reduces to one sentence:
@@ -28,7 +28,7 @@ socket used by the app, thereby closing the network connection represented by th
 and *"iOS puts strict limits on background execution, and its default behavior is to suspend
 your app shortly after the user has moved it to the background"*.)
 
-Everything AnyFlow's Android client does — a persistent authenticated session, a foreground
+Everything OmniBridge's Android client does — a persistent authenticated session, a foreground
 service, clipboard watching, background file receive — depends on the process continuing to
 run. On iOS it does not.
 
@@ -62,10 +62,10 @@ iOS 14 introduced local network privacy. An app that talks to devices on the LAN
 
 ```xml
 <key>NSLocalNetworkUsageDescription</key>
-<string>AnyFlow finds your paired computer on this Wi-Fi network.</string>
+<string>OmniBridge finds your paired computer on this Wi-Fi network.</string>
 <key>NSBonjourServices</key>
 <array>
-  <string>_anyflow._tcp</string>
+  <string>_omnibridge._tcp</string>
 </array>
 ```
 
@@ -77,9 +77,9 @@ Behavioural consequences that shape the UX:
 
 - The user is prompted **once**, at the first local-network operation.
 - If they deny, **the app cannot re-prompt**. Recovery is Settings → Privacy & Security →
-  Local Network. AnyFlow must detect denial and say exactly that, with a deep link to Settings.
-- The service type must be listed literally, and `_anyflow._tcp` matches what
-  `core/src/lib.rs` already advertises (`SERVICE_TYPE = "_anyflow._tcp.local."`). **No protocol
+  Local Network. OmniBridge must detect denial and say exactly that, with a deep link to Settings.
+- The service type must be listed literally, and `_omnibridge._tcp` matches what
+  `core/src/lib.rs` already advertises (`SERVICE_TYPE = "_omnibridge._tcp.local."`). **No protocol
   change needed.**
 - The prompt fires on browsing *and* on connecting to a local address — so it cannot be
   deferred past pairing.
@@ -110,7 +110,7 @@ recovery is a support burden that must be designed for, not discovered.
 
 ## 4. Discovery
 
-AnyFlow's direction is fixed: the desktop advertises, the mobile client browses
+OmniBridge's direction is fixed: the desktop advertises, the mobile client browses
 ([ADR-0005](../../adr/ADR-0005-lan-discovery-mdns.md), and `daemon/src/mdns.rs`). iOS inherits the
 browse role, matching Android's `NsdManager`.
 
@@ -131,7 +131,7 @@ defines the record model but contains no responder or browser, so there is a nat
 
 `rustls` + `ring` compiles for iOS; the pinning verifiers are unchanged.
 
-Identity is the Secure Enclave, which supports **only** P-256 — the algorithm AnyFlow already
+Identity is the Secure Enclave, which supports **only** P-256 — the algorithm OmniBridge already
 uses (OFFICIAL DOC VERIFIED; see [10 §5.1](10-MACOS-FEASIBILITY.md) for why this is fortunate).
 The same custom `rustls::sign::SigningKey` written for macOS should work on iOS, since
 `SecKeyCreateSignature` is available on both. **The macOS work is ~90% of the iOS identity
@@ -161,21 +161,21 @@ clipboard send or close cleanly, not enough to keep a session.
 
 ### 6.2 Background modes, honestly assessed
 
-`UIBackgroundModes` values and whether AnyFlow may legitimately use them:
+`UIBackgroundModes` values and whether OmniBridge may legitimately use them:
 
-| Mode | Legitimate for AnyFlow? |
+| Mode | Legitimate for OmniBridge? |
 | --- | --- |
 | `audio` | **No.** Abuse. Would be rejected and deserves to be. |
-| `location` | **No.** AnyFlow has no location purpose and declares no location permission on Android either — the manifest calls that out explicitly. |
-| `voip` | **No.** AnyFlow is not a VoIP app. This was the classic keep-alive abuse and Apple closed it. |
-| `bluetooth-central` / `bluetooth-peripheral` | **No** — unless AnyFlow one day genuinely uses BLE, which is a different product decision |
+| `location` | **No.** OmniBridge has no location purpose and declares no location permission on Android either — the manifest calls that out explicitly. |
+| `voip` | **No.** OmniBridge is not a VoIP app. This was the classic keep-alive abuse and Apple closed it. |
+| `bluetooth-central` / `bluetooth-peripheral` | **No** — unless OmniBridge one day genuinely uses BLE, which is a different product decision |
 | `external-accessory` | No |
 | `fetch` (Background App Refresh) | **Maybe, marginally.** Opportunistic, system-scheduled, no guaranteed timing. Could poll a paired desktop occasionally. Very weak. |
 | `processing` (`BGProcessingTask`) | **Maybe.** Long tasks when charging and idle. Wrong shape for clipboard, possibly usable for a deferred file transfer |
 | `remote-notification` | Requires **APNs** → §6.4 |
 
 **Conclusion: no background mode legitimately supports an always-connected LAN session, and
-AnyFlow must not pretend otherwise.**
+OmniBridge must not pretend otherwise.**
 
 **VERIFIED (V-07).** The authoritative list is eleven values: `audio`, `location`, `voip`,
 `fetch`, `remote-notification`, `external-accessory`, `bluetooth-central`,
@@ -190,7 +190,7 @@ depend on the edges, **and the edges confirm it**.
 - **Brief background:** finish an in-flight operation via `beginBackgroundTask`.
 - **On next foreground:** reconnect, receive whatever the desktop queued.
 - **`URLSession` background transfers:** genuinely continue while suspended — but they are
-  HTTP(S) against a URL, not AnyFlow's protobuf-over-TLS-1.3 session. Using them would mean a
+  HTTP(S) against a URL, not OmniBridge's protobuf-over-TLS-1.3 session. Using them would mean a
   second, HTTP-shaped protocol with its own authentication. **Rejected** for v1; noted in
   [16](16-CROSS-PLATFORM-FILES.md) as the only mechanism that could ever give iOS background
   file transfer, at a protocol cost that is not currently worth paying.
@@ -218,7 +218,7 @@ recommended direction being *accept the foreground-only model*.
 
 | Direction | Feasibility |
 | --- | --- |
-| **iOS → desktop, manual** | ✅ With `UIPasteControl`, or a paste into an AnyFlow text field, or the Share Sheet with selected text |
+| **iOS → desktop, manual** | ✅ With `UIPasteControl`, or a paste into an OmniBridge text field, or the Share Sheet with selected text |
 | **iOS → desktop, automatic** | ❌ **Platform restriction.** Reading requires either a paste gesture or a prompt, and there is no background execution to watch from |
 | **Desktop → iOS, applied while foreground** | ✅ `UIPasteboard.general.string = …`; **writing has never required permission** |
 | **Desktop → iOS, applied while background** | ❌ Not running |
@@ -229,7 +229,7 @@ directly, that is, not going through the Paste menu command, the keyboard shortc
 `UIPasteControl`" (OFFICIAL DOC VERIFIED). `UIPasteControl` is a system button the user taps,
 which hands the app the pasteboard contents without a prompt — **exactly the right primitive
 for "send my clipboard to my computer"**, because it makes the user's intent explicit, which
-is what AnyFlow wants anyway.
+is what OmniBridge wants anyway.
 
 `UIPasteboard.detectPatterns(for:)` can test for patterns *without* triggering the notification
 — useful for showing "you have a URL copied" affordances, and **not** a way to read content.
@@ -269,11 +269,11 @@ Details in [16](16-CROSS-PLATFORM-FILES.md).
 
 ---
 
-## 9. What an honest iOS AnyFlow looks like
+## 9. What an honest iOS OmniBridge looks like
 
 Given all of the above, the product is:
 
-> **A foreground companion.** Open AnyFlow, it finds your computer in about a second,
+> **A foreground companion.** Open OmniBridge, it finds your computer in about a second,
 > reconnects, and shows what is waiting. Send a file from anywhere with the Share Sheet. Send
 > your clipboard with one tap. Receive whatever your computer sent while you were away, the
 > moment you open the app.
@@ -290,7 +290,7 @@ Concretely:
   change — the desktop already holds pending clips in memory for
   `CLIPBOARD_OUTCOME_PENDING_USER`.
 - **Do** use the Share Sheet aggressively. It is the one place iOS gives an app first-class
-  entry from anywhere in the system, and it maps perfectly onto AnyFlow's manual model.
+  entry from anywhere in the system, and it maps perfectly onto OmniBridge's manual model.
 
 ### 9.1 iPadOS
 
@@ -311,9 +311,9 @@ extra once iOS exists.
 
 | ID | Question |
 | --- | --- |
-| **POC-IOS-01** | `NWBrowser` finds `_anyflow._tcp` published by the existing Linux daemon; TXT keys parse; addresses resolve. |
+| **POC-IOS-01** | `NWBrowser` finds `_omnibridge._tcp` published by the existing Linux daemon; TXT keys parse; addresses resolve. |
 | **POC-IOS-02** | Local network permission: when is it prompted, what does denial look like in code, what is the recovery UX? |
-| **POC-IOS-03** | Full pairing against the existing `anyflowd`: QR scan, proof, confirmation, trust store persistence. |
+| **POC-IOS-03** | Full pairing against the existing `omnibridged`: QR scan, proof, confirmation, trust store persistence. |
 | **POC-IOS-04** | Rust core via UniFFI + a Secure Enclave `SigningKey` completing a mutual TLS 1.3 handshake with SPKI pinning. |
 | **POC-IOS-05** | Foreground lifecycle: connect, disconnect, reconnect, network change, app switch and return — measure reconnect time. |
 | **POC-IOS-06** | **Background suspension measurement.** How long does a TLS session survive backgrounding, on a real device, on battery, with and without `beginBackgroundTask`? Does the desktop see a clean close or a hang? **This is the gate for PLAT-DEC-005.** |

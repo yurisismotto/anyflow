@@ -19,8 +19,8 @@
 2. **Throwaway.** PoC code is not the implementation and must not be merged into `develop`. It
    lives on its own branch or in a scratch repository.
 3. **A PoC that proves the pieces separately proves nothing.** The identity PoCs in particular
-   must end in a completed handshake **against the existing Linux `anyflowd`**, not against a
-   test double. This rule exists because AnyFlow has already been bitten by exactly that class
+   must end in a completed handshake **against the existing Linux `omnibridged`**, not against a
+   test double. This rule exists because OmniBridge has already been bitten by exactly that class
    of error: Android v1 keystore keys were generated without `DIGEST_NONE` and were "unusable
    for TLS client authentication" — a fact only a real handshake would have revealed, and by
    then the authorisations were immutable.
@@ -120,14 +120,14 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-CORE-01 — Cross-compile the portable crates
 
-- **Q** After the Wave 0 seams exist, do `anyflow-proto`, `anyflow-core`, the three capability crates and `anyflow-runtime` compile for a non-Unix target from a Linux host?
+- **Q** After the Wave 0 seams exist, do `omnibridge-proto`, `omnibridge-core`, the three capability crates and `omnibridge-runtime` compile for a non-Unix target from a Linux host?
 - **H** Yes, once `store.rs`, `destination.rs`, the control transport and the `x11rb` feature gate are addressed ([01 §5](01-CURRENT-ARCHITECTURE-AUDIT.md)).
 - **E** Linux + `rustup target add x86_64-pc-windows-gnu` (cheaper proxy than `-msvc`, which needs MSVC libraries).
 - **S** Build only. No Windows implementations — the platform trait impls may be `unimplemented!()` stubs.
 - **✓** `cargo build --target x86_64-pc-windows-gnu -p …` succeeds for all six crates; the full Linux test suite still passes with zero behavioural change.
 - **✗** A portable crate still needs a platform impl to compile → the seam is in the wrong place.
 - **🔒** No security control may be `#[cfg]`-ed away to make this pass. If a check has no Windows equivalent yet, it becomes a `todo!()` in the stub, not a deletion.
-- **⏱** 2 d · **⇢** ARCH-002/003/004/005/006 · **R** **PASS — 2026-08-31.** All six portable crates *built* (not merely checked) for `x86_64-pc-windows-gnu` from Fedora, `ring` included, via `mingw64-gcc` and Fedora's `rust-std-static-x86_64-pc-windows-gnu` in a scratch sysroot. No security control was `#[cfg]`-ed away and no stub was written: the platform code is behind a Cargo feature. The first attempt failed usefully — Cargo feature unification switched `unix-fs` back on through a capability crate's default dependency on `anyflow-core`, which a grep-only gate would have missed. [Evidence](../../sprints/wave-0-platform-abstraction.md)
+- **⏱** 2 d · **⇢** ARCH-002/003/004/005/006 · **R** **PASS — 2026-08-31.** All six portable crates *built* (not merely checked) for `x86_64-pc-windows-gnu` from Fedora, `ring` included, via `mingw64-gcc` and Fedora's `rust-std-static-x86_64-pc-windows-gnu` in a scratch sysroot. No security control was `#[cfg]`-ed away and no stub was written: the platform code is behind a Cargo feature. The first attempt failed usefully — Cargo feature unification switched `unix-fs` back on through a capability crate's default dependency on `omnibridge-core`, which a grep-only gate would have missed. [Evidence](../../sprints/wave-0-platform-abstraction.md)
 
 ### POC-CORE-02 — `IdentitySigner` seam is behaviour-preserving
 
@@ -145,21 +145,21 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 - **Q** Can the control socket be abstracted so a named-pipe implementation is possible, without changing the CLI/GUI protocol?
 - **H** Yes — `server.rs` is ~1000 lines of which only the accept loop is Unix-specific.
 - **E** Linux.
-- **S** Trait over listener/stream; UDS implementation; extract control types into their own crate so `anyflow-gui` stops depending on `anyflow-daemon`.
+- **S** Trait over listener/stream; UDS implementation; extract control types into their own crate so `omnibridge-gui` stops depending on `omnibridge-daemon`.
 - **✓** `daemon/tests/control.rs` passes unchanged; the GUI builds without the daemon crate.
 - **✗** The protocol turns out to depend on Unix semantics (it should not — it is newline-delimited JSON).
 - **🔒** The new crate must not weaken the "local only, never reachable from the network" property stated in `control.rs`.
-- **⏱** 2 d · **⇢** none · **R** **PASS — 2026-08-31.** `daemon/tests/control.rs` passes unmodified; `cargo tree -p anyflow-gui | grep -c anyflow-daemon` → 0, likewise for the CLI. The trait carries the `BindError::AlreadyOwned` contract the Windows named-pipe mitigation needs, and the Linux implementation honours it. A latent defect was fixed on the way: `bind` used to unlink a live socket. [Evidence](../../sprints/wave-0-platform-abstraction.md)
+- **⏱** 2 d · **⇢** none · **R** **PASS — 2026-08-31.** `daemon/tests/control.rs` passes unmodified; `cargo tree -p omnibridge-gui | grep -c omnibridge-daemon` → 0, likewise for the CLI. The trait carries the `BindError::AlreadyOwned` contract the Windows named-pipe mitigation needs, and the Linux implementation honours it. A latent defect was fixed on the way: `bind` used to unlink a live socket. [Evidence](../../sprints/wave-0-platform-abstraction.md)
 
 ---
 
 ### POC-LINUX-01 — Debian 13 trixie
 
-- **Q** Does AnyFlow build from archive packages and run on Debian stable?
+- **Q** Does OmniBridge build from archive packages and run on Debian stable?
 - **H** Yes. rustc 1.85 ≥ 1.82; GTK 4.18.6 ≥ 4.12; libadwaita 1.7.6 ≥ 1.5 (OFFICIAL DOC VERIFIED).
 - **E** Debian 13 VM, GNOME Wayland.
 - **S** Build daemon, CLI and GUI. Pair with a phone. Send a file. Sync a clipboard. Check Avahi coexistence and the default firewall.
-- **✓** All four work; `anyflow clipboard status` reports a working watch source.
+- **✓** All four work; `omnibridge clipboard status` reports a working watch source.
 - **✗** Any build failure from archive packages; mDNS not visible to the phone.
 - **🔒** Confirm `require_private_mode` behaves identically on a different filesystem/umask.
 - **⏱** 1 d · **⇢** none · **R** _pending_
@@ -177,8 +177,8 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-LINUX-03 — Flatpak viability
 
-- **Q** Can AnyFlow work as a Flatpak, and at what permission cost?
-- **H** Networking works with `--share=network` (AnyFlow does not use `.local` NSS resolution, which is the documented Flatpak gap); the blockers are `--socket=x11` on GNOME and a second-class CLI.
+- **Q** Can OmniBridge work as a Flatpak, and at what permission cost?
+- **H** Networking works with `--share=network` (OmniBridge does not use `.local` NSS resolution, which is the documented Flatpak gap); the blockers are `--socket=x11` on GNOME and a second-class CLI.
 - **E** Fedora + GNOME Wayland, `flatpak-builder`.
 - **S** Manifest bundling `wl-clipboard`; `--share=network --socket=wayland --socket=x11 --filesystem=xdg-download`; Background portal autostart.
 - **✓** mDNS visible to a phone; clipboard read/write/watch works; a file lands in the real Downloads folder; the key-mode check passes in `~/.var/app`.
@@ -189,7 +189,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 ### POC-LINUX-04 — Linux TPM2 signer
 
 - **Q** Can an unprivileged Linux user hold a non-exportable P-256 identity key in a TPM 2.0 and use it for TLS?
-- **H** Technically yes via `tss-esapi` or `tpm2-pkcs11`; the practical obstacle is unprivileged access to `/dev/tpmrm0` (group membership), which may make it undeployable for AnyFlow's "no root" model.
+- **H** Technically yes via `tss-esapi` or `tpm2-pkcs11`; the practical obstacle is unprivileged access to `/dev/tpmrm0` (group membership), which may make it undeployable for OmniBridge's "no root" model.
 - **E** Fedora with TPM 2.0.
 - **S** Key generation, certificate around the public key, a `SigningKey`, a handshake.
 - **✓** Handshake completes against the existing daemon; the whole flow works as a non-root user with no manual sysadmin step.
@@ -204,7 +204,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 - **Q** On Plasma, which watch source does `detect_watch_source()` pick, and does auto-send work — including on Ubuntu 26.04 LTS with wl-clipboard 2.2.1?
 - **H** `WatchSource::DataControl` on a distro with wl-clipboard ≥ 2.3. On Ubuntu LTS (2.2.1) it may fail if KWin has dropped `wlr-data-control` in favour of `ext-data-control` ([05 §5.3](05-DEBIAN-UBUNTU-COMPATIBILITY.md)).
 - **E** Two VMs: Fedora KDE (newer wl-clipboard) and Kubuntu 26.04 (2.2.1). Plasma Wayland.
-- **S** Run the existing daemon. Record `anyflow clipboard status`. Copy on the desktop → does the phone receive? Copy on the phone → does the desktop apply? Then test the XFIXES fallback by forcing it.
+- **S** Run the existing daemon. Record `omnibridge clipboard status`. Copy on the desktop → does the phone receive? Copy on the phone → does the desktop apply? Then test the XFIXES fallback by forcing it.
 - **✓** DataControl selected on at least one distro; auto-send works both ways; `wl-copy --sensitive` causes Klipper to skip the entry.
 - **✗** Neither DataControl nor XFIXES works on Plasma → KDE has no auto-send and needs mitigation (b) or (c) from [06 §4](06-KDE-PLASMA-WAYLAND.md).
 - **🔒** Confirm **PRIMARY is never touched**, including with Klipper's clipboard↔selection sync enabled — and record what happens when it *is* enabled ([06 §5](06-KDE-PLASMA-WAYLAND.md)).
@@ -236,7 +236,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-WIN-02 — DNS-SD discovery
 
-- **Q** Can a Windows machine advertise `_anyflow._tcp.local.` such that the **existing, unmodified** Android app finds and connects to it?
+- **Q** Can a Windows machine advertise `_omnibridge._tcp.local.` such that the **existing, unmodified** Android app finds and connects to it?
 - **H** Yes with `mdns-sd` (README claims Windows support). Fallback: `DnsServiceRegister`, which carries an unresolved question about whether it publishes A/AAAA records.
 - **E** Windows 11 + an Android device on one Wi-Fi network.
 - **S** Advertise with `mdns-sd`. Check with `dns-sd -B` from a Mac or `avahi-browse` from Linux. Then browse from the Android app.
@@ -247,7 +247,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-WIN-03 — CNG / TPM ECDSA P-256 identity
 
-- **Q** Can a non-exportable P-256 key be created in the Microsoft Platform Crypto Provider and wrapped in an AnyFlow-shaped certificate?
+- **Q** Can a non-exportable P-256 key be created in the Microsoft Platform Crypto Provider and wrapped in an OmniBridge-shaped certificate?
 - **H** Yes. CNG lists ECDSA P-256; the provider is documented as non-extractable.
 - **E** Windows 11 with TPM 2.0, and a second machine/VM **without** one.
 - **S** `NCryptOpenStorageProvider(MS_PLATFORM_CRYPTO_PROVIDER)` → `NCryptCreatePersistedKey` → `NCryptFinalizeKey`; export the public key; build a self-signed certificate around it with `rcgen`; compute `Fingerprint::from_certificate_der`.
@@ -258,9 +258,9 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-WIN-04 — TLS + SPKI pinning with a CNG key
 
-- **Q** Can a TPM-held key complete AnyFlow's mutually-authenticated, pinned TLS 1.3 handshake with the **existing Linux daemon**?
+- **Q** Can a TPM-held key complete OmniBridge's mutually-authenticated, pinned TLS 1.3 handshake with the **existing Linux daemon**?
 - **H** Yes, via `rustls-cng`'s `CngSigningKey` in a `ResolvesClientCert`/`ResolvesServerCert`.
-- **E** Windows 11 (TPM) + a Fedora machine running `anyflowd`.
+- **E** Windows 11 (TPM) + a Fedora machine running `omnibridged`.
 - **S** Wire the signer into `client_config`/`server_config`; pair; exchange a PING/PONG; then a `battery.v1` message.
 - **✓** Handshake completes in **both directions**; both sides' pins match; a deliberately wrong pin is rejected.
 - **✗** Signature scheme or encoding mismatch → the whole "portable core + hardware key" architecture needs rethinking before any platform work.
@@ -285,7 +285,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 - **E** Windows 11 with **two** user accounts.
 - **S** Start at login; lock/unlock; sleep/resume; Wi-Fi→Ethernet; switch users and confirm two agents with two identities and two pipes; confirm the port fallback works when both want 55432.
 - **✓** All of the above; user B cannot reach user A's pipe; both advertise distinct instances.
-- **✗** Only one user can run AnyFlow, or clipboard access breaks after a lock/unlock cycle.
+- **✗** Only one user can run OmniBridge, or clipboard access breaks after a lock/unlock cycle.
 - **🔒** **Explicitly attempt** to open user A's pipe from user B's session and confirm it is denied (**X3**).
 - **⏱** 3 d · **⇢** POC-WIN-01 · **R** _pending_
 
@@ -348,8 +348,8 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-MAC-03 — Secure Enclave identity
 
-- **Q** Can a Secure Enclave P-256 key be created without user presence and wrapped in an AnyFlow certificate?
-- **H** Yes. The Enclave supports only P-256, which is exactly what AnyFlow uses.
+- **Q** Can a Secure Enclave P-256 key be created without user presence and wrapped in an OmniBridge certificate?
+- **H** Yes. The Enclave supports only P-256, which is exactly what OmniBridge uses.
 - **E** Apple Silicon Mac.
 - **S** `SecKeyCreateRandomKey` with `kSecAttrTokenIDSecureEnclave` and `.privateKeyUsage` (**no** `.userPresence`); extract the public key; build a certificate; compute the fingerprint.
 - **✓** Key created; export **fails**; no biometric prompt on signing; fingerprint stable across reboots.
@@ -359,12 +359,12 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-MAC-04 — TLS + pinning with an Enclave key
 
-- **Q** Can a Secure Enclave key complete AnyFlow's pinned mutual TLS 1.3 handshake against the **existing Linux daemon**?
+- **Q** Can a Secure Enclave key complete OmniBridge's pinned mutual TLS 1.3 handshake against the **existing Linux daemon**?
 - **H** Yes, via a custom `rustls::sign::SigningKey` over `SecKeyCreateSignature` with `.ecdsaSignatureMessageX962SHA256`.
-- **E** Mac + a Fedora machine running `anyflowd`.
+- **E** Mac + a Fedora machine running `omnibridged`.
 - **S** Write the signer; wire it in; pair; PING/PONG; a `battery.v1` exchange.
 - **✓** Handshake completes both directions; pins match; **a wrong pin is rejected**.
-- **✗** Signature verification fails → almost certainly the digest trap ([12 §4](12-APPLE-SECURITY-AND-INTEGRATION.md), trap 1). This is the exact class of error that made AnyFlow's Android v1 keys unusable.
+- **✗** Signature verification fails → almost certainly the digest trap ([12 §4](12-APPLE-SECURITY-AND-INTEGRATION.md), trap 1). This is the exact class of error that made OmniBridge's Android v1 keys unusable.
 - **🔒** Negative pin test mandatory. Do **not** work around a failure by exporting the key.
 - **⏱** 3 d · **⇢** POC-MAC-03, POC-CORE-02 · **R** _pending_
 
@@ -405,10 +405,10 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-IOS-01 — Bonjour discovery
 
-- **Q** Does `NWBrowser` find `_anyflow._tcp` published by the existing Linux daemon, with parseable TXT keys?
+- **Q** Does `NWBrowser` find `_omnibridge._tcp` published by the existing Linux daemon, with parseable TXT keys?
 - **H** Yes.
-- **E** iPhone/iPad + a Fedora machine running `anyflowd`.
-- **S** `NWBrowser` with `NSBonjourServices = ["_anyflow._tcp"]`; parse `v`/`pv`/`id`/`dn`; resolve endpoints.
+- **E** iPhone/iPad + a Fedora machine running `omnibridged`.
+- **S** `NWBrowser` with `NSBonjourServices = ["_omnibridge._tcp"]`; parse `v`/`pv`/`id`/`dn`; resolve endpoints.
 - **✓** Service found; TXT parsed; both address families resolved; the `Endpoints.kt` ordering rules reproduce sensibly.
 - **✗** TXT keys unavailable through `NWBrowser`'s API surface.
 - **🔒** Discovery grants nothing; a spoofed record must lead only to a failed handshake.
@@ -427,7 +427,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 
 ### POC-IOS-03 — Pairing
 
-- **Q** Can an iOS client complete the full pairing flow against the existing `anyflowd`?
+- **Q** Can an iOS client complete the full pairing flow against the existing `omnibridged`?
 - **H** Yes; the pairing proof is portable Rust and the QR payload format is fixed.
 - **E** iPhone + Fedora daemon.
 - **S** QR scan; `PairRequest` with the HMAC proof; human confirmation on the desktop; trust-store persistence on both sides.
@@ -512,14 +512,14 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 | **Question** | After Wave 0, does `cargo check` succeed for the six portable crates on `x86_64-pc-windows-msvc`? |
 | **Why docs cannot answer** | `ring` requires MSVC and a C toolchain (V-10, upstream `BUILDING.md`), so a Linux cross-compile is not a valid gate. Whether the portable crates are otherwise clean is only knowable by compiling |
 | **Input** | The post-Wave-0 workspace |
-| **Minimal scope** | `cargo check -p anyflow-proto -p anyflow-core -p anyflow-control -p anyflow-capability-{clipboard,files,battery} --no-default-features --target x86_64-pc-windows-msvc` |
-| **Success** | Clean. `anyflow-runtime` deliberately excluded — its `mdns-sd` Windows behaviour is V-12 |
+| **Minimal scope** | `cargo check -p omnibridge-proto -p omnibridge-core -p omnibridge-control -p omnibridge-capability-{clipboard,files,battery} --no-default-features --target x86_64-pc-windows-msvc` |
+| **Success** | Clean. `omnibridge-runtime` deliberately excluded — its `mdns-sd` Windows behaviour is V-12 |
 | **Failure** | Any `std::os::unix` leak, or an unexpected transitive Unix-only dependency |
 | **Output** | The gate that becomes CI-001 |
 | **VM?** | ✅ GitHub-hosted `windows-latest` has MSVC |
 | **Hardware?** | None beyond a CI runner |
 | **Blocks** | Wave 0 acceptance (G3), CI-001 |
-| **Result** | ✅ **PASS — 2026-09-01.** Green on a GitHub-hosted `windows-2025-vs2026` runner (Windows Server 2025 10.0.26100), `rustc 1.98.0` with **`host: x86_64-pc-windows-msvc`**, `cargo 1.98.0`, Visual Studio Enterprise 2026 18.9.12112.369. The specified `cargo check --no-default-features --target x86_64-pc-windows-msvc` over the six portable crates is clean; the same six also **build**, and their portable test targets link — 14 MSVC executables. `ring` was compiled by MSVC (`ring_core_0_17_14_.lib`), not substituted. The boundary was additionally asserted on the **resolved** dependency graph (87 packages, no platform crate, no `unix-fs`/`linux-backends`/`upower`), because the failure POC-CORE-01 actually hit was Cargo feature unification, which a source grep cannot see. `anyflow-runtime` excluded as specified. 12/12 steps `success`, no `continue-on-error`. **This is CI-001**, permanent on PRs to `main`/`develop`. [Run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649) · commit `cfd33f6` · [full evidence](../../sprints/wave-0-platform-abstraction.md) |
+| **Result** | ✅ **PASS — 2026-09-01.** Green on a GitHub-hosted `windows-2025-vs2026` runner (Windows Server 2025 10.0.26100), `rustc 1.98.0` with **`host: x86_64-pc-windows-msvc`**, `cargo 1.98.0`, Visual Studio Enterprise 2026 18.9.12112.369. The specified `cargo check --no-default-features --target x86_64-pc-windows-msvc` over the six portable crates is clean; the same six also **build**, and their portable test targets link — 14 MSVC executables. `ring` was compiled by MSVC (`ring_core_0_17_14_.lib`), not substituted. The boundary was additionally asserted on the **resolved** dependency graph (87 packages, no platform crate, no `unix-fs`/`linux-backends`/`upower`), because the failure POC-CORE-01 actually hit was Cargo feature unification, which a source grep cannot see. `omnibridge-runtime` excluded as specified. 12/12 steps `success`, no `continue-on-error`. **This is CI-001**, permanent on PRs to `main`/`develop`. [Run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649) · commit `cfd33f6` · [full evidence](../../sprints/wave-0-platform-abstraction.md) |
 | **Class** | **P0 — architecture blocking** |
 
 ### POC-LINUX-05 — `wl-copy --sensitive` on real Debian/Ubuntu 🆕
@@ -527,7 +527,7 @@ Each entry: **Q** question · **H** hypothesis · **E** environment · **S** sco
 | Field | Value |
 | --- | --- |
 | **Question** | Does `wl-copy --sensitive` fail as predicted on wl-clipboard 2.2.1, and does a probe detect it reliably? |
-| **Why docs cannot answer** | The source proves the flag is absent and that `exit(1)` follows; what needs measuring is AnyFlow's end-to-end behaviour and the probe's reliability |
+| **Why docs cannot answer** | The source proves the flag is absent and that `exit(1)` follows; what needs measuring is OmniBridge's end-to-end behaviour and the probe's reliability |
 | **Input** | Debian 13, Ubuntu 24.04, Ubuntu 26.04; a paired Android device sending a `sensitive_hint` clip |
 | **Minimal scope** | Send a sensitive clip to each; observe. Then run the proposed probe |
 | **Success** | The failure reproduces; the probe detects 2.2.1 without false positives; a 2.3.0 system is unaffected |

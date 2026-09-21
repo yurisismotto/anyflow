@@ -1,12 +1,12 @@
 //! Per-peer `notifications.v1` policy, as this device stores it.
 //!
-//! This type lives in `anyflow-core` rather than in the notifications
+//! This type lives in `omnibridge-core` rather than in the notifications
 //! capability for the reason [`crate::clipboard_policy`] gives: it is
 //! *persisted*, and the trust store is core's. A capability crate cannot own
 //! a field of [`crate::store::TrustedPeer`] without core depending on it, and
 //! core depending on a capability would invert the plugin model. The
 //! capability re-exports it, so callers still say
-//! `anyflow_capability_notifications::NotificationPolicy`.
+//! `omnibridge_capability_notifications::NotificationPolicy`.
 //!
 //! # Two different questions, and a third
 //!
@@ -94,7 +94,7 @@ impl LockPolicy {
 /// ```
 ///
 /// `allow_mirror` defaulting on is not a silent widening: reaching this type
-/// at all already required an explicit `anyflow grant <device>
+/// at all already required an explicit `omnibridge grant <device>
 /// notifications.v1`, which is never automatic. What the default *does* say is
 /// that the grant means what it looks like it means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

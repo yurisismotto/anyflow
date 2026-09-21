@@ -28,7 +28,7 @@ edition = "2021"
 #   zbus 5.19.0 / zvariant / zcheapstr      1.87
 #
 # So a toolchain below 1.88 fails in Cargo's resolver, before compiling one
-# line of AnyFlow. That is not academic: Debian 13 trixie's stock `rustc` is
+# line of OmniBridge. That is not academic: Debian 13 trixie's stock `rustc` is
 # 1.85.1 and Ubuntu 24.04's `rustc-1.82` package is exactly 1.82, and both
 # were measured failing here (LINUX-UBUNTU-DEBIAN-COMPAT-U0.md §20.3).
 #
@@ -50,13 +50,13 @@ repository = "https://github.com/yurisismotto/anyflow"
 # `unsafe_code` used to live here as `forbid`, workspace-wide. `forbid` cannot
 # be relaxed by an inner `#[allow]`, which made it impossible for a future
 # platform adapter (Win32, CNG, Security.framework, IOKit all need FFI) to
-# exist without first weakening the guarantee for `anyflow-core` too.
+# exist without first weakening the guarantee for `omnibridge-core` too.
 #
 # The lint is now declared per crate, in each crate's own `[lints]` table:
 #
-#   forbid  anyflow-proto, anyflow-core, anyflow-control, anyflow-runtime,
-#           anyflow-capability-{battery,clipboard,files}
-#   deny    anyflow-linux, anyflow-daemon, anyflow-cli, anyflow-gui
+#   forbid  omnibridge-proto, omnibridge-core, omnibridge-control, omnibridge-runtime,
+#           omnibridge-capability-{battery,clipboard,files}
+#   deny    omnibridge-linux, omnibridge-daemon, omnibridge-cli, omnibridge-gui
 #
 # Relaxing the *workspace default* to `deny` was considered and rejected: it
 # would silently drop the guarantee from the crates where it matters most.

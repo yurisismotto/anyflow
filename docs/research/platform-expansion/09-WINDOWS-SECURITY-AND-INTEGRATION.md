@@ -5,7 +5,7 @@
 | **Title** | Windows security model, local IPC, multi-user, updates, attack surface |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
-| **Scope** | Everything security-relevant about running AnyFlow on Windows that [08](08-WINDOWS-FEASIBILITY.md) states but does not analyse. |
+| **Scope** | Everything security-relevant about running OmniBridge on Windows that [08](08-WINDOWS-FEASIBILITY.md) states but does not analyse. |
 | **Decision status** | PROPOSED |
 | **Evidence** | OFFICIAL DOC VERIFIED from `learn.microsoft.com`; REPO VERIFIED for the Linux controls being mapped. |
 | **Related documents** | [08](08-WINDOWS-FEASIBILITY.md), [14](14-CROSS-PLATFORM-IDENTITY-AND-KEY-STORAGE.md), [20](20-SECURITY-THREAT-ANALYSIS.md), [../../security/THREAT_MODEL.md](../../security/THREAT_MODEL.md) |
@@ -17,7 +17,7 @@
 > Expansion must not weaken the model. Where a platform cannot provide an equivalent control,
 > say so explicitly rather than dropping it quietly.
 
-AnyFlow's Linux security posture rests on controls that have no direct Windows analogue.
+OmniBridge's Linux security posture rests on controls that have no direct Windows analogue.
 This document maps each one, and names the two places where Windows is genuinely *stronger*
 and the three where it is genuinely weaker.
 
@@ -28,11 +28,11 @@ and the three where it is genuinely weaker.
 | # | Linux control | Where | Windows equivalent | Verdict |
 | --- | --- | --- | --- | --- |
 | C1 | Private key file mode 0600, **enforced at load**; refuses to start otherwise | `store.rs::require_private_mode` | With a TPM key there **is no key file**. Software fallback: DACL granting only the user SID, plus DPAPI. An equivalent *enforcement* check must be written — see §3 | **Stronger** (TPM) / **parity** (fallback), if the check is written |
-| C2 | Data dir 0700, auto-hardened | `store.rs::harden_dir` | `%LOCALAPPDATA%\AnyFlow` inherits a user-only ACL by default. Must be *verified*, not assumed | Parity, needs code |
+| C2 | Data dir 0700, auto-hardened | `store.rs::harden_dir` | `%LOCALAPPDATA%\OmniBridge` inherits a user-only ACL by default. Must be *verified*, not assumed | Parity, needs code |
 | C3 | Atomic write with the final mode from creation | `store.rs::write_atomic` | `CreateFile(CREATE_NEW)` + explicit SD + `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` | Parity |
 | C4 | Control socket unreachable by other users (dir 0700 in `$XDG_RUNTIME_DIR`) | `control.rs`, `server.rs` | Named pipe with a DACL restricted to the owning SID, **and `GetNamedPipeClientProcessId` / impersonation to verify the caller** | **Stronger** — Windows can *authenticate* the client, Unix relies on path permissions. §4 |
 | C5 | Unprivileged daemon; no root, no capabilities | `daemon/src/main.rs` | Agent runs as the interactive user, not elevated, not `LocalSystem` | Parity |
-| C6 | systemd sandbox: `ProtectSystem=strict`, `SystemCallFilter`, `RestrictAddressFamilies`, `MemoryDenyWriteExecute`, … | `anyflowd.service` | **No equivalent.** AppContainer/MSIX-container would be the closest and conflicts with clipboard + firewall + arbitrary Downloads writes | **WEAKER — accepted gap.** §5 |
+| C6 | systemd sandbox: `ProtectSystem=strict`, `SystemCallFilter`, `RestrictAddressFamilies`, `MemoryDenyWriteExecute`, … | `omnibridged.service` | **No equivalent.** AppContainer/MSIX-container would be the closest and conflicts with clipboard + firewall + arbitrary Downloads writes | **WEAKER — accepted gap.** §5 |
 | C7 | `O_EXCL` defeats a symlink planted in the download dir | `destination.rs` | `CREATE_NEW` gives the same guarantee. Reparse points need a deliberate decision | Parity, needs care |
 | C8 | Filename sanitisation | `filename.rs` | **Insufficient.** No reserved device names, no trailing dot/space, no `:`/`\` handling | **WEAKER until fixed.** §6 |
 | C9 | One user per session; the daemon is per-user | implicit | Fast user switching means **several interactive sessions at once**. §7 | Needs design |
@@ -74,7 +74,7 @@ Fallback policy, stated plainly:
   before the TEE (`DeviceIdentity.kt`, REPO VERIFIED — and note it uses `runCatching` because
   StrongBox "throws only at generation time", which is the same pattern needed here).
 - Fall back to `MS_KEY_STORAGE_PROVIDER` **without** `NCRYPT_ALLOW_EXPORT_FLAG`.
-- **Record which one was used, and show it.** `anyflow status` and the UI must say
+- **Record which one was used, and show it.** `omnibridge status` and the UI must say
   "hardware-backed (TPM)" or "software key".
 - Do **not** re-key silently if a TPM appears later. The identity is the pin; changing it
   breaks every pairing. A re-key must be a user-initiated action with a clear warning.
@@ -96,7 +96,7 @@ Windows has no `$XDG_RUNTIME_DIR`. The named pipe namespace is machine-global:
 `\\.\pipe\<name>` is visible to every session on the box. So the pipe must carry its own
 access control:
 
-1. **Name it per-user:** `\\.\pipe\AnyFlow\<user SID>\control`. Not for security — names are
+1. **Name it per-user:** `\\.\pipe\OmniBridge\<user SID>\control`. Not for security — names are
    not secrets — but so that fast user switching gives each session its own agent and pipe
    without collision (§7).
 2. **DACL restricted to the owning user's SID**, denying everyone else including
@@ -104,8 +104,8 @@ access control:
    control.
 3. **Verify the caller.** `GetNamedPipeClientProcessId` / `ImpersonateNamedPipeClient` lets
    the server confirm the connecting process's token belongs to the same user. Unix cannot do
-   this without `SO_PEERCRED`, and AnyFlow does not do it on Linux. **This is one of the two
-   places Windows lets AnyFlow be stronger than its reference platform — take it.**
+   this without `SO_PEERCRED`, and OmniBridge does not do it on Linux. **This is one of the two
+   places Windows lets OmniBridge be stronger than its reference platform — take it.**
 4. **`FILE_FLAG_FIRST_PIPE_INSTANCE`** on creation, so a hostile process cannot pre-create the
    pipe name and impersonate the agent (a classic named-pipe squatting attack). Without this
    flag, a malicious process that starts first owns the name and the *UI* would connect to it.
@@ -126,7 +126,7 @@ Deliberately rejected alternatives:
 
 ## 5. The sandboxing gap, stated honestly
 
-`anyflowd.service` is hardened well beyond what most desktop daemons bother with:
+`omnibridged.service` is hardened well beyond what most desktop daemons bother with:
 `ProtectSystem=strict`, `ProtectHome=read-only` with one writable path, `NoNewPrivileges`,
 `RestrictNamespaces`, `MemoryDenyWriteExecute`, `SystemCallArchitectures=native`,
 `SystemCallFilter=@system-service` minus `@privileged @resources @obsolete`, and
@@ -144,7 +144,7 @@ Deliberately rejected alternatives:
 **Verdict: accept the gap, do not hide it.** Concretely:
 
 - Apply the process mitigations that *are* compatible — dynamic-code prohibition in
-  particular, since AnyFlow JITs nothing. (**WIN-006**)
+  particular, since OmniBridge JITs nothing. (**WIN-006**)
 - Record in [20](20-SECURITY-THREAT-ANALYSIS.md) that "the Windows agent is not sandboxed to
   the degree the Linux daemon is" as an accepted risk with a named mitigation set.
 - Do **not** claim parity in user-facing material.
@@ -221,7 +221,7 @@ users has the same conflict there).
 
 ### 7.2 The security consequence to state loudly
 
-Because the identity is per-user, **user B on the same PC is a different AnyFlow device from
+Because the identity is per-user, **user B on the same PC is a different OmniBridge device from
 user A**, with a different fingerprint, requiring its own pairing. That is correct and is what
 the threat model implies. It should be said in the docs, because the naive expectation is
 "I paired with the computer".
@@ -233,7 +233,7 @@ the threat model implies. It should be said in the docs, because the naive expec
 | # | Surface | Risk | Mitigation |
 | --- | --- | --- | --- |
 | W1 | Named-pipe squatting | A process that creates the pipe name first impersonates the agent; the UI connects to it and leaks control commands | `FILE_FLAG_FIRST_PIPE_INSTANCE`, per-SID DACL, and the UI verifying the server's process token |
-| W2 | Cloud Clipboard | A clip AnyFlow writes is uploaded to the user's Microsoft account — a local-first product silently touching a cloud | Set `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0 and `CanUploadToCloudClipboard`=0 for `sensitive_hint` clips; document the general behaviour. **VERIFIED (V-04)** — exact names and semantics confirmed |
+| W2 | Cloud Clipboard | A clip OmniBridge writes is uploaded to the user's Microsoft account — a local-first product silently touching a cloud | Set `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0 and `CanUploadToCloudClipboard`=0 for `sensitive_hint` clips; document the general behaviour. **VERIFIED (V-04)** — exact names and semantics confirmed |
 | W3 | Clipboard history | Every received clip lands in Win+V history | Same mitigation as W2 |
 | W4 | Firewall misconfiguration | A rule scoped to Public/Any exposes the listener on untrusted networks | Installer creates Private+LocalSubnet rules explicitly rather than relying on the Windows prompt, whose default includes Public |
 | W5 | Installer tampering / unsigned binaries | SmartScreen bypass, supply-chain | Authenticode + MSIX signing; reproducible CI artifacts; publish hashes |

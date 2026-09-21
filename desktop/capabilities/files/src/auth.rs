@@ -18,14 +18,14 @@
 //! ```text
 //! mac = HMAC-SHA256(
 //!     key = stream_challenge,
-//!     msg = "anyflow/files.v1/data-stream/v1"
+//!     msg = "omnibridge/files.v1/data-stream/v1"
 //!           || len_prefixed(acceptor_fingerprint)
 //!           || len_prefixed(dialer_fingerprint)
 //!           || len_prefixed(transfer_id))
 //! ```
 //!
 //! This is deliberately the same shape as the pairing proof in
-//! `anyflow_core::pairing`: a standard MAC, a domain separator, and every
+//! `omnibridge_core::pairing`: a standard MAC, a domain separator, and every
 //! field length-prefixed so two different field splits cannot produce the
 //! same message. No new cryptography was invented here; a reader who has
 //! understood the pairing proof has already understood this.
@@ -49,8 +49,8 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
-use anyflow_core::error::{Error, Result};
-use anyflow_core::Fingerprint;
+use omnibridge_core::error::{Error, Result};
+use omnibridge_core::Fingerprint;
 use rand::TryRngCore;
 
 use crate::limits::{STREAM_CHALLENGE_LEN, TRANSFER_ID_LEN};
@@ -60,7 +60,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// Domain separator. Versioned with the capability, so a future `files.v2`
 /// cannot have a proof from `files.v1` replayed into it.
-const DATA_STREAM_DOMAIN: &[u8] = b"anyflow/files.v1/data-stream/v1";
+const DATA_STREAM_DOMAIN: &[u8] = b"omnibridge/files.v1/data-stream/v1";
 
 /// The single-use secret that keys a data stream's MAC.
 ///
@@ -68,7 +68,7 @@ const DATA_STREAM_DOMAIN: &[u8] = b"anyflow/files.v1/data-stream/v1";
 /// [`PairingToken`]. It is a key, and keys do not belong in logs, in `Debug`
 /// output or in memory after use.
 ///
-/// [`PairingToken`]: anyflow_core::pairing::PairingToken
+/// [`PairingToken`]: omnibridge_core::pairing::PairingToken
 pub struct StreamChallenge([u8; STREAM_CHALLENGE_LEN]);
 
 impl StreamChallenge {
@@ -274,7 +274,7 @@ mod tests {
         let mac = compute_stream_mac(&challenge(0x01), &fp(0x02), &fp(0x03), &id(0x04));
         assert_eq!(
             mac.iter().map(|b| format!("{b:02x}")).collect::<String>(),
-            "dc03a57c8cc240452a3d109540a529b7c4172bd3dce2d983a2d8bfcd37fa1f58"
+            "503aaf7d8c15b38971f4fbcc3ec34742ae27263ac94f2507ecab7c3691764576"
         );
     }
 }

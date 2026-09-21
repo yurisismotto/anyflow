@@ -1,11 +1,11 @@
 //! Who is allowed to use the clipboard, asked freshly.
 //!
-//! The policy *type* lives in [`anyflow_core::clipboard_policy`], because it
+//! The policy *type* lives in [`omnibridge_core::clipboard_policy`], because it
 //! is persisted in the trust store and the trust store is core's. What lives
 //! here is the question the capability actually asks at runtime, and the
 //! contract the daemon answers it with.
 
-pub use anyflow_core::clipboard_policy::ClipboardPolicy;
+pub use omnibridge_core::clipboard_policy::ClipboardPolicy;
 
 /// Answers, freshly, what a peer is allowed to do with the clipboard.
 ///
@@ -24,7 +24,7 @@ pub trait ClipboardAuthorizer: Send + Sync {
     /// is unknown, revoked, or has no `clipboard.v1` grant — the grant check
     /// and the policy lookup are one call so that a caller cannot do one and
     /// forget the other.
-    async fn policy_for(&self, peer: &anyflow_core::Fingerprint) -> ClipboardPolicy;
+    async fn policy_for(&self, peer: &omnibridge_core::Fingerprint) -> ClipboardPolicy;
 
     /// Every peer that should receive local clipboard changes automatically:
     /// granted `clipboard.v1`, not revoked, and [`ClipboardPolicy::
@@ -36,5 +36,5 @@ pub trait ClipboardAuthorizer: Send + Sync {
     /// feature that is off and a feature that is merely quiet.
     ///
     /// [`ClipboardPolicy::may_auto_send`]: ClipboardPolicy::may_auto_send
-    async fn auto_send_peers(&self) -> Vec<anyflow_core::Fingerprint>;
+    async fn auto_send_peers(&self) -> Vec<omnibridge_core::Fingerprint>;
 }

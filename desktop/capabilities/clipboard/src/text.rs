@@ -43,7 +43,7 @@ impl std::fmt::Display for TextRejection {
             Self::TooLarge { bytes } => write!(
                 f,
                 "clipboard text is {bytes} bytes; the limit is \
-                 {MAX_CLIPBOARD_TEXT_BYTES} bytes. Use `anyflow send` to \
+                 {MAX_CLIPBOARD_TEXT_BYTES} bytes. Use `omnibridge send` to \
                  share something this size as a file."
             ),
             other => f.write_str(other.as_str()),

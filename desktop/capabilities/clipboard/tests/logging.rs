@@ -15,9 +15,9 @@ mod common;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use anyflow_capability_clipboard::backend::{BackendError, MemoryBackend};
-use anyflow_capability_clipboard::{ClipboardPolicy, ClipboardText};
 use common::*;
+use omnibridge_capability_clipboard::backend::{BackendError, MemoryBackend};
+use omnibridge_capability_clipboard::{ClipboardPolicy, ClipboardText};
 use tracing_subscriber::fmt::MakeWriter;
 
 /// Canaries. Each is unique, so a hit is unambiguous.

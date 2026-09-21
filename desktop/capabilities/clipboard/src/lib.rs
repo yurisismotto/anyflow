@@ -13,7 +13,7 @@
 //!
 //! | Property | Enforced by |
 //! | --- | --- |
-//! | only a paired device can speak at all | TLS 1.3 + SPKI pinning (`anyflow_core::tls`) |
+//! | only a paired device can speak at all | TLS 1.3 + SPKI pinning (`omnibridge_core::tls`) |
 //! | only an explicitly *granted* device may use the clipboard | [`ClipboardAuthorizer`], re-asked per message |
 //! | direction and automation are separate from the grant | [`ClipboardPolicy`] |
 //! | a peer cannot widen its own policy | there is no protocol message that sets one |
@@ -43,11 +43,11 @@ use rand::TryRngCore;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::Instant;
 
-use anyflow_core::capability::{Capability, CapabilityContext, OutboundMessage};
-use anyflow_core::error::{Error, Result};
-use anyflow_core::Fingerprint;
-use anyflow_proto::v1::capabilities as pb;
-use anyflow_proto::Message;
+use omnibridge_core::capability::{Capability, CapabilityContext, OutboundMessage};
+use omnibridge_core::error::{Error, Result};
+use omnibridge_core::Fingerprint;
+use omnibridge_proto::v1::capabilities as pb;
+use omnibridge_proto::Message;
 
 use backend::{BackendError, ClipboardBackend};
 use dedup::{EventCache, SuppressionCache};
@@ -142,7 +142,7 @@ impl std::fmt::Display for SendError {
         match self {
             Self::NotPermitted => f.write_str(
                 "this device is not allowed to send clipboard text to that peer. \
-                 Grant it with `anyflow grant <device> clipboard.v1`.",
+                 Grant it with `omnibridge grant <device> clipboard.v1`.",
             ),
             Self::NotConnected => f.write_str("that device is not currently connected"),
             Self::NothingToSend => f.write_str("the clipboard is empty, or does not contain text"),
@@ -414,7 +414,7 @@ impl ClipboardManager {
         let origin = if update.origin_device_id.is_empty() {
             peer_device_id.to_string()
         } else {
-            anyflow_core::discovery::sanitize_device_name(&update.origin_device_id)
+            omnibridge_core::discovery::sanitize_device_name(&update.origin_device_id)
         };
 
         if !policy.may_auto_receive() {
@@ -551,7 +551,7 @@ impl ClipboardManager {
 
     /// Sends the current local clipboard to one peer, by explicit request.
     ///
-    /// This is the manual path — `anyflow clipboard send <device>` — and it
+    /// This is the manual path — `omnibridge clipboard send <device>` — and it
     /// is deliberately not gated on `auto_send`: a human asking is a
     /// different act from a watcher firing, and only the second one needs the
     /// automatic opt-in.
@@ -704,7 +704,7 @@ impl ClipboardManager {
         }
     }
 
-    /// The last outcome each peer reported, for `anyflow clipboard status`.
+    /// The last outcome each peer reported, for `omnibridge clipboard status`.
     pub async fn last_results(&self) -> HashMap<Fingerprint, Outcome> {
         self.last_results.lock().await.clone()
     }

@@ -6,7 +6,7 @@
 # under clippy**, production and test code alike, on the toolchain this project
 # is developed against. It is a source-hygiene gate and nothing more: it runs
 # no test, binds no socket and touches no desktop session, so a green tick here
-# says nothing about whether AnyFlow works.
+# says nothing about whether OmniBridge works.
 #
 # Why it exists
 # -------------
@@ -36,19 +36,19 @@
 # whatever 1.88 knew and defeat the point. And a new lint appearing on stable
 # is a reason to fix the code, never a reason to raise `rust-version` — the
 # declared floor moves only when a dependency actually moves it, deliberately,
-# in `desktop/Cargo.toml` and in that workflow's `ANYFLOW_MSRV` together.
+# in `desktop/Cargo.toml` and in that workflow's `OMNIBRIDGE_MSRV` together.
 #
 # Why `--all-features`
 # --------------------
 # Measured from the workspace rather than assumed. Every feature declared in
 # `desktop/` is additive and Linux-enabling, and none excludes another:
 #
-#   anyflow-core                 default = ["unix-fs"]
-#   anyflow-capability-files     default = ["unix-fs"]
-#   anyflow-capability-clipboard default = ["linux-backends"]
-#   anyflow-capability-notif.    default = ["linux-dbus"]
-#   anyflow-runtime / -daemon    default = ["upower"]
-#   anyflow-capability-battery   default = []        upower = ["dep:zbus"]
+#   omnibridge-core                 default = ["unix-fs"]
+#   omnibridge-capability-files     default = ["unix-fs"]
+#   omnibridge-capability-clipboard default = ["linux-backends"]
+#   omnibridge-capability-notif.    default = ["linux-dbus"]
+#   omnibridge-runtime / -daemon    default = ["upower"]
+#   omnibridge-capability-battery   default = []        upower = ["dep:zbus"]
 #
 # So `--all-features` is precisely the default set plus `battery/upower`, which
 # the daemon turns on anyway — i.e. the shipped Linux desktop configuration,
@@ -113,8 +113,8 @@ jobs:
       # same reasons, and nothing else:
       #   gcc, libc6-dev    ring compiles C and assembly
       #   pkg-config        how system-deps finds the GTK stack
-      #   libgtk-4-dev      anyflow-gui only
-      #   libadwaita-1-dev  anyflow-gui only
+      #   libgtk-4-dev      omnibridge-gui only
+      #   libadwaita-1-dev  omnibridge-gui only
       # In particular no libssl-dev (transport is rustls/ring), no
       # libdbus-1-dev (zbus 5 is pure Rust), no libx11-dev (x11rb brings its
       # own connection) and no protobuf-compiler (protox compiles in-process).

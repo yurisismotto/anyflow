@@ -48,7 +48,7 @@ const XFIXES_MINOR: u32 = 0;
 
 /// Checks that an XFIXES clipboard watch can be established here.
 ///
-/// Called once, at backend detection, so that `anyflow clipboard status` can
+/// Called once, at backend detection, so that `omnibridge clipboard status` can
 /// state the truth before anything is attempted. Everything it opens is
 /// closed again.
 pub fn probe() -> Result<(), String> {
@@ -150,7 +150,7 @@ pub fn watch_clipboard() -> BackendResult<ClipboardWatch> {
     // A private atom so the stop message cannot be confused with anything a
     // real application sends.
     let stop_atom = conn
-        .intern_atom(false, b"_ANYFLOW_CLIPBOARD_WATCH_STOP")
+        .intern_atom(false, b"_OMNIBRIDGE_CLIPBOARD_WATCH_STOP")
         .map_err(|e| BackendError::Failed(format!("InternAtom failed: {e}")))?
         .reply()
         .map_err(|e| BackendError::Failed(format!("InternAtom failed: {e}")))?
@@ -158,7 +158,7 @@ pub fn watch_clipboard() -> BackendResult<ClipboardWatch> {
 
     let thread_conn = Arc::clone(&conn);
     let handle = std::thread::Builder::new()
-        .name("anyflow-clipboard-x11".to_string())
+        .name("omnibridge-clipboard-x11".to_string())
         .spawn(move || {
             loop {
                 let event = match thread_conn.wait_for_event() {

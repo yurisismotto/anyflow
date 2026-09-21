@@ -2,25 +2,25 @@
 <!--
   The Activity themes exist only to dress the window before Compose draws its
   first frame: background colour, no action bar, transparent system bars. All
-  real styling lives in AnyFlowTheme (ui/theme/Theme.kt).
+  real styling lives in OmniBridgeTheme (ui/theme/Theme.kt).
 
   Getting windowBackground right matters more than it looks — it is what the
   person sees during the cold-start gap, and leaving it at the platform
   default is what makes an app flash white before painting its own dark UI.
 -->
 <resources>
-    <style name="Theme.AnyFlow" parent="@android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/anyflow_background</item>
+    <style name="Theme.OmniBridge" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/omnibridge_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
-        <item name="android:colorAccent">@color/anyflow_accent</item>
+        <item name="android:colorAccent">@color/omnibridge_accent</item>
     </style>
 
     <!-- The Sharesheet target. A dialog window, same palette. -->
-    <style name="Theme.AnyFlow.Dialog" parent="@android:style/Theme.Material.Light.Dialog.NoActionBar">
+    <style name="Theme.OmniBridge.Dialog" parent="@android:style/Theme.Material.Light.Dialog.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:colorAccent">@color/anyflow_accent</item>
+        <item name="android:colorAccent">@color/omnibridge_accent</item>
     </style>
 </resources>

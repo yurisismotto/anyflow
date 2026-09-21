@@ -218,7 +218,7 @@ impl Default for Settings {
     /// and this value is only ever seen if a caller builds `Settings` by hand.
     fn default() -> Self {
         Self {
-            device_name: "AnyFlow Device".to_string(),
+            device_name: "OmniBridge Device".to_string(),
             listen_port: crate::DEFAULT_PORT,
             auto_grant: vec!["battery.v1".to_string()],
         }
@@ -263,7 +263,7 @@ pub struct StoreConfig {
     /// Supplied by the adapter, not decided by the storage layer. Before
     /// Wave 0 `Platform::Linux` was hardcoded in this file, which meant
     /// persistence decided the platform (audit finding C2).
-    pub platform: anyflow_proto::v1::Platform,
+    pub platform: omnibridge_proto::v1::Platform,
     /// This machine's name, for a first run.
     pub default_device_name: String,
 }
@@ -316,7 +316,7 @@ impl Store {
     /// Opens the store on this machine's default platform storage.
     ///
     /// Available only with the `unix-fs` feature, which is on by default.
-    /// With it off, `anyflow-core` has no filesystem or environment
+    /// With it off, `omnibridge-core` has no filesystem or environment
     /// assumption at all and [`Store::open_with`] is the only door.
     #[cfg(feature = "unix-fs")]
     pub fn open(dir: impl AsRef<std::path::Path>) -> Result<Self> {
@@ -324,7 +324,7 @@ impl Store {
         Self::open_with(StoreConfig {
             secrets: Arc::new(FileSecretStore::new(dir.as_ref())),
             backend: Arc::new(SoftwareBacking),
-            platform: anyflow_proto::v1::Platform::Linux,
+            platform: omnibridge_proto::v1::Platform::Linux,
             default_device_name: default_device_name(),
         })
     }
@@ -368,7 +368,7 @@ impl Store {
 
     /// Reports what the stored identity looks like, without touching it.
     ///
-    /// A pure observation, for `anyflow status` and for tests that need to
+    /// A pure observation, for `omnibridge status` and for tests that need to
     /// prove nothing was regenerated.
     pub fn probe_identity(
         secrets: &dyn SecretStore,
@@ -391,7 +391,7 @@ impl Store {
     fn initialize(
         secrets: Arc<dyn SecretStore>,
         backend: Arc<dyn IdentityBackend>,
-        platform: anyflow_proto::v1::Platform,
+        platform: omnibridge_proto::v1::Platform,
         device_name: String,
     ) -> Result<Self> {
         let settings = Settings {
@@ -420,7 +420,7 @@ impl Store {
     fn load(
         secrets: Arc<dyn SecretStore>,
         backend: Arc<dyn IdentityBackend>,
-        platform: anyflow_proto::v1::Platform,
+        platform: omnibridge_proto::v1::Platform,
         state_bytes: &[u8],
         secret: Vec<u8>,
     ) -> Result<Self> {
@@ -492,7 +492,7 @@ impl Store {
 
     /// How this device's private key is protected.
     ///
-    /// Shown by `anyflow status`. Never advertised to a peer: a device's
+    /// Shown by `omnibridge status`. Never advertised to a peer: a device's
     /// claim about its own key storage is unverifiable, and an unverifiable
     /// self-report is not a security property (PLAT-DEC-012).
     pub fn key_backing(&self) -> KeyBacking {
@@ -546,7 +546,7 @@ impl Store {
         self.peers.get(fp).filter(|p| !p.revoked)
     }
 
-    /// Looks up a peer including revoked ones (for `anyflow devices` output).
+    /// Looks up a peer including revoked ones (for `omnibridge devices` output).
     pub fn peer_record(&self, fp: &Fingerprint) -> Option<&TrustedPeer> {
         self.peers.get(fp)
     }
@@ -720,7 +720,7 @@ impl Store {
     }
 }
 
-/// Default location: `$XDG_DATA_HOME/anyflow`, else `~/.local/share/…`.
+/// Default location: `$XDG_DATA_HOME/omnibridge`, else `~/.local/share/…`.
 ///
 /// Re-exported from the Unix adapter so existing callers keep their import
 /// path. It is feature-gated for the same reason the adapter is.
@@ -870,7 +870,7 @@ fn refuse_access(what: &str, e: &StoreAccessError) -> Resolution {
             message: detail.clone(),
         },
         StoreAccessError::PermissionDenied { .. } => refuse(IdentityState::Lost(format!(
-            "{what} exists but cannot be read ({e}). AnyFlow will not generate \
+            "{what} exists but cannot be read ({e}). OmniBridge will not generate \
              a replacement identity over one it cannot read"
         ))),
         StoreAccessError::Io { .. } => refuse(IdentityState::TemporarilyUnavailable(format!(

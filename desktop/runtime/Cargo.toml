@@ -1,12 +1,12 @@
 [package]
-name = "anyflow-runtime"
+name = "omnibridge-runtime"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [lints.rust]
-# The portable half of the AnyFlow Agent: `unsafe` is forbidden outright.
+# The portable half of the OmniBridge Agent: `unsafe` is forbidden outright.
 unsafe_code = "forbid"
 
 [lints.clippy]
@@ -15,18 +15,18 @@ unwrap_used = "warn"
 
 [features]
 default = ["upower"]
-upower = ["anyflow-capability-battery/upower"]
+upower = ["omnibridge-capability-battery/upower"]
 
 [dependencies]
 # The agent takes its storage adapter from whoever composes it, so it needs
-# no filesystem implementation of its own. See `anyflow-linux`.
-anyflow-core = { version = "0.1.0", path = "../core", default-features = false }
-anyflow-proto = { version = "0.1.0", path = "../proto" }
-anyflow-control = { version = "0.1.0", path = "../control" }
-anyflow-capability-battery = { version = "0.1.0", path = "../capabilities/battery" }
-anyflow-capability-clipboard = { version = "0.1.0", path = "../capabilities/clipboard" }
-anyflow-capability-files = { version = "0.1.0", path = "../capabilities/files" }
-anyflow-capability-notifications = { version = "0.1.0", path = "../capabilities/notifications" }
+# no filesystem implementation of its own. See `omnibridge-linux`.
+omnibridge-core = { version = "0.1.0", path = "../core", default-features = false }
+omnibridge-proto = { version = "0.1.0", path = "../proto" }
+omnibridge-control = { version = "0.1.0", path = "../control" }
+omnibridge-capability-battery = { version = "0.1.0", path = "../capabilities/battery" }
+omnibridge-capability-clipboard = { version = "0.1.0", path = "../capabilities/clipboard" }
+omnibridge-capability-files = { version = "0.1.0", path = "../capabilities/files" }
+omnibridge-capability-notifications = { version = "0.1.0", path = "../capabilities/notifications" }
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }

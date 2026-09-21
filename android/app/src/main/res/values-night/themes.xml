@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Dark counterparts. The palette derives from Ink; see ui/theme/Color.kt. -->
 <resources>
-    <style name="Theme.AnyFlow" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/anyflow_background_dark</item>
+    <style name="Theme.OmniBridge" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/omnibridge_background_dark</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:colorAccent">@color/anyflow_accent</item>
+        <item name="android:colorAccent">@color/omnibridge_accent</item>
     </style>
 
-    <style name="Theme.AnyFlow.Dialog" parent="@android:style/Theme.Material.Dialog.NoActionBar">
+    <style name="Theme.OmniBridge.Dialog" parent="@android:style/Theme.Material.Dialog.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:colorAccent">@color/anyflow_accent</item>
+        <item name="android:colorAccent">@color/omnibridge_accent</item>
     </style>
 </resources>

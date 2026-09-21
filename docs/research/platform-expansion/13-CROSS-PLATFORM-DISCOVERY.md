@@ -2,12 +2,12 @@
 
 | Field | Value |
 | --- | --- |
-| **Title** | Keeping `_anyflow._tcp.local.` working on five platforms |
+| **Title** | Keeping `_omnibridge._tcp.local.` working on five platforms |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
 | **Scope** | mDNS/DNS-SD stacks per platform, TXT records, address families, interface and network changes, interoperability testing. |
 | **Decision status** | PROPOSED |
-| **Evidence** | REPO VERIFIED for AnyFlow's record and behaviour; OFFICIAL DOC VERIFIED for platform APIs; POC REQUIRED for every coexistence claim. |
+| **Evidence** | REPO VERIFIED for OmniBridge's record and behaviour; OFFICIAL DOC VERIFIED for platform APIs; POC REQUIRED for every coexistence claim. |
 | **⚠ Verification update** | **V-03 PARTIALLY VERIFIED**: `DNS_SERVICE_INSTANCE` carries host + IPv4 + IPv6, but on-wire A/AAAA publication is undocumented — demoted to a *contingent* question, since `mdns-sd` publishes its own address records. **V-12 STILL OPEN** and correctly a PoC. **New (iOS/macOS):** TN3179 confirms *all* Bonjour operations need local-network access, while **listening for and accepting incoming TCP does not**. `DnsServiceRegister` registration is *"tied to the lifetime of the calling process"*. See [26 §V-03, §V-05](26-EXTERNAL-VERIFICATION-CLOSEOUT.md). |
 | **Related documents** | [04](04-LINUX-PORTABILITY.md), [08](08-WINDOWS-FEASIBILITY.md), [10](10-MACOS-FEASIBILITY.md), [11](11-IOS-IPADOS-FEASIBILITY.md), [20](20-SECURITY-THREAT-ANALYSIS.md) |
 
@@ -20,7 +20,7 @@ client depends on it and an expansion must not break a shipped device:
 
 | Element | Value | Source |
 | --- | --- | --- |
-| Service type | `_anyflow._tcp.local.` | `core/src/lib.rs::SERVICE_TYPE` |
+| Service type | `_omnibridge._tcp.local.` | `core/src/lib.rs::SERVICE_TYPE` |
 | Instance name | the **device id** (128-bit hex), not the human name | `daemon/src/mdns.rs` |
 | Host name | `{device_id}.local.` | `daemon/src/mdns.rs` |
 | Port | advertised in SRV; `DEFAULT_PORT` 55432 is only a default | `core/src/lib.rs` |
@@ -66,7 +66,7 @@ Every desktop platform already runs a system mDNS responder:
 
 | Platform | System responder | Notes |
 | --- | --- | --- |
-| Linux | `avahi-daemon` (or `systemd-resolved` with mDNS enabled) | AnyFlow has coexisted with it through certification on Fedora |
+| Linux | `avahi-daemon` (or `systemd-resolved` with mDNS enabled) | OmniBridge has coexisted with it through certification on Fedora |
 | Windows | Built-in mDNS (behind the DNS-SD APIs) | Untested with a second responder |
 | macOS | `mDNSResponder` | Historically the least tolerant |
 
@@ -85,7 +85,7 @@ raises three concrete issues:
    on Linux — which is why the systemd unit's `RestrictAddressFamilies` includes it — and needs
    an equivalent on Windows (`NotifyIpInterfaceChange`) and macOS (`SCNetworkReachability` or
    the system responder's own handling). **If this silently stops working on a new platform,
-   discovery degrades after the first Wi-Fi change and looks like "AnyFlow randomly stops
+   discovery degrades after the first Wi-Fi change and looks like "OmniBridge randomly stops
    finding my computer".**
 
 **Recommendation:** treat "does a second responder coexist" as a **release gate** on each new
@@ -162,7 +162,7 @@ Note that the port always comes from the SRV record; no client hardcodes 55432. 
 | **VPN active** | A full-tunnel VPN can capture multicast or change the default route; a split-tunnel usually leaves the LAN alone | **Untested anywhere.** A common real-world configuration and a likely support issue. **POC.** |
 | Multiple interfaces | Advertise on all usable ones; the client must handle per-interface link-local scoping | `IfKind` filtering exists for families, not per-interface. `Endpoints.kt` handles zones |
 | Firewall | Blocks 5353 or 55432 | Differs by platform → [07 §7](07-LINUX-PACKAGING.md), [08 §10](08-WINDOWS-FEASIBILITY.md) |
-| **Client isolation / AP isolation** | Guest Wi-Fi that blocks peer-to-peer traffic makes AnyFlow silently non-functional | Not detected today. A diagnostic ("found the device but cannot connect") would help. **UX-005** |
+| **Client isolation / AP isolation** | Guest Wi-Fi that blocks peer-to-peer traffic makes OmniBridge silently non-functional | Not detected today. A diagnostic ("found the device but cannot connect") would help. **UX-005** |
 
 The VPN and AP-isolation rows are the two most likely causes of a user reporting "it doesn't
 work" with nothing wrong in the logs, and neither is currently detected or explained. Worth a
@@ -187,7 +187,7 @@ opportunity to lose them:
 5. **Publishing a stable `id` and `dn` is an accepted, documented privacy cost** — an observer
    in a café can tell the same laptop came back. The documented mitigation is a per-network
    toggle to suppress advertisement, which **does not exist yet** and becomes more important as
-   AnyFlow ships on laptops that travel. **UX-006.**
+   OmniBridge ships on laptops that travel. **UX-006.**
 
 Point 5 is worth elevating: it is the only place where the expansion makes an existing accepted
 risk *worse* (more devices, more networks, more travel) without any code change.
@@ -232,4 +232,4 @@ for automating the desktop-side half.
    it into the shared core.
 6. **Add diagnostics for VPN and AP isolation** — the two invisible failure modes.
 7. **Implement the advertisement-suppression toggle** the threat model already promises, before
-   AnyFlow is on laptops in cafés at scale.
+   OmniBridge is on laptops in cafés at scale.

@@ -12,7 +12,7 @@
 //! `NotificationListenerService`, no policy, no filtering, no caches, no
 //! timers and no I/O. Those are the runtime halves and they belong to the
 //! platform waves: the Android source adapter (N1) and the Linux sink crate
-//! `anyflow-capability-notifications` (N2), which will re-export this module
+//! `omnibridge-capability-notifications` (N2), which will re-export this module
 //! exactly as the plan has `desktop/core/src/notification_policy.rs`
 //! re-exported by the capability.
 //!
@@ -41,7 +41,7 @@
 
 use std::collections::BTreeSet;
 
-use anyflow_proto::v1::capabilities as pb;
+use omnibridge_proto::v1::capabilities as pb;
 
 /// The canonical capability id.
 ///

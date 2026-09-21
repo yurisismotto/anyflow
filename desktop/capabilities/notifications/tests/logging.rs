@@ -20,10 +20,10 @@ mod common;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use anyflow_capability_notifications::backend::{CloseReason, SinkError};
-use anyflow_capability_notifications::{LockPolicy, NotificationPolicy};
-use anyflow_proto::v1::capabilities as pb;
 use common::*;
+use omnibridge_capability_notifications::backend::{CloseReason, SinkError};
+use omnibridge_capability_notifications::{LockPolicy, NotificationPolicy};
+use omnibridge_proto::v1::capabilities as pb;
 use tracing_subscriber::fmt::MakeWriter;
 
 const TITLE: &str = "CANARY-TITLE-a41f9c2e7b";
@@ -155,7 +155,7 @@ async fn a_refusal_logs_no_content() {
         let mut oversized = canary_upsert(2);
         oversized.body = format!(
             "{BODY}{}",
-            "y".repeat(anyflow_core::notifications::MAX_BODY_BYTES)
+            "y".repeat(omnibridge_core::notifications::MAX_BODY_BYTES)
         );
         h.send_upsert(oversized).await;
         h.expect_outcome(pb::NotificationOutcome::TooLarge).await;

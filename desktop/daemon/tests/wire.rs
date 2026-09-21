@@ -11,11 +11,11 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyflow_core::framing;
-use anyflow_core::session::PROTOCOL_VERSION_MAX;
-use anyflow_core::Error;
-use anyflow_proto::v1;
 use common::{TestClient, TestServer};
+use omnibridge_core::framing;
+use omnibridge_core::session::PROTOCOL_VERSION_MAX;
+use omnibridge_core::Error;
+use omnibridge_proto::v1;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 const TTL: Duration = Duration::from_secs(30);
@@ -364,7 +364,7 @@ async fn an_unknown_peer_cannot_send_anything_but_a_pair_request() {
 
     let ack = read_ack(&mut tls).await;
     assert_eq!(ack.status, v1::HelloStatus::PairingRequired as i32);
-    assert_eq!(ack.pairing_nonce.len(), anyflow_core::pairing::NONCE_LEN);
+    assert_eq!(ack.pairing_nonce.len(), omnibridge_core::pairing::NONCE_LEN);
 
     // A PING instead of the expected PAIR_REQUEST.
     framing::write_envelope(
@@ -449,7 +449,7 @@ async fn a_client_without_a_certificate_is_rejected_during_the_handshake() {
     let server = TestServer::start().await;
     common::init_crypto();
 
-    let verifier = anyflow_core::tls::PinnedServerCertVerifier::new(server.fingerprint);
+    let verifier = omnibridge_core::tls::PinnedServerCertVerifier::new(server.fingerprint);
     let config = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -463,7 +463,7 @@ async fn a_client_without_a_certificate_is_rejected_during_the_handshake() {
     let tcp = tokio::net::TcpStream::connect(server.addr)
         .await
         .expect("tcp");
-    let name = rustls_pki_types::ServerName::try_from("anyflow.invalid").expect("name");
+    let name = rustls_pki_types::ServerName::try_from("omnibridge.invalid").expect("name");
 
     let mut stream = match connector.connect(name, tcp).await {
         // rustls may only surface the server's alert on first use, so a

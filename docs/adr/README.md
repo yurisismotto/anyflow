@@ -15,10 +15,11 @@ alternatives that were actually considered, and what the decision costs.
 | [0008](ADR-0008-capability-architecture.md) | Capability-based protocol architecture | Accepted |
 | [0009](ADR-0009-android-background-execution.md) | Android background execution | Accepted |
 | [0010](ADR-0010-protocol-envelope-and-framing.md) | Protocol envelope and framing | Accepted |
-| [0011](ADR-0011-project-naming-and-wire-identifiers.md) | Project naming and wire identifiers | Accepted |
+| [0011](ADR-0011-project-naming-and-wire-identifiers.md) | Project naming and wire identifiers | Accepted · identifier tables superseded by 0018 |
 | [0012](ADR-0012-bulk-transfer-and-frame-limit.md) | Bulk transfer and the 64 KiB frame limit | Accepted |
 | [0013](ADR-0013-file-transfer-data-stream.md) | The `files.v1` authenticated data stream | Accepted |
 | [0014](ADR-0014-clipboard-change-notification.md) | Detecting clipboard changes on the Linux desktop | Accepted |
 | [0015](ADR-0015-notification-access.md) | Android notification access and the `notifications.v1` security boundary | Accepted |
 | [0016](ADR-0016-notification-identity.md) | `notifications.v1` opaque notification identity | Accepted |
 | [0017](ADR-0017-capability-roles.md) | Runtime-narrowable capability roles | Accepted |
+| [0018](ADR-0018-rename-to-omnibridge.md) | Rename to OmniBridge | Accepted · supersedes 0011's identifier tables |

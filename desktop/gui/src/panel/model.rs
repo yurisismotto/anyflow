@@ -29,7 +29,7 @@
 //! capability revoked between the draw and the click is refused *there*,
 //! which is why this layer is allowed to work from a two-second-old poll.
 
-use anyflow_control::{
+use omnibridge_control::{
     transfer_direction, transfer_failure, transfer_state, ClipboardPeerReport,
     ClipboardStatusReport, DeviceReport, DeviceState, NotificationPeerReport,
     NotificationsStatusReport, Request, StatusReport, TransferReport,
@@ -46,7 +46,7 @@ pub const BATTERY: &str = "battery.v1";
 // Daemon health
 // ---------------------------------------------------------------------------
 
-/// Whether there is an AnyFlow service to talk to at all.
+/// Whether there is an OmniBridge service to talk to at all.
 ///
 /// Three states rather than two: "we have not heard back yet" is the first
 /// second of every panel and is not a failure, and drawing it as one would
@@ -677,7 +677,7 @@ impl Outcome {
 /// # What this is not
 ///
 /// Not history. These are read out of the daemon's in-memory list for the
-/// current run and nothing here is written anywhere: restarting `anyflowd`
+/// current run and nothing here is written anywhere: restarting `omnibridged`
 /// empties it, which is the intended behaviour and not a defect.
 ///
 /// # What it deliberately cannot carry
@@ -772,7 +772,7 @@ impl RecentTransfer {
             (Outcome::Failed, _) => format!("{} did not finish.", self.filename),
         };
         format!(
-            "{what} Device {}. Open AnyFlow Settings for the full list.",
+            "{what} Device {}. Open OmniBridge Settings for the full list.",
             widgets_group(&self.peer_fingerprint_short)
         )
     }
@@ -916,7 +916,7 @@ fn health_of(state: &DaemonState) -> Health {
         // path and an errno, which tells the person nothing they can act on;
         // Settings and the log still carry it verbatim.
         return Health::Unavailable {
-            headline: "AnyFlow service is not available".into(),
+            headline: "OmniBridge service is not available".into(),
         };
     }
     match state.status {
@@ -934,7 +934,7 @@ fn health_of(state: &DaemonState) -> Health {
 fn connection_for<'a>(
     status: Option<&'a StatusReport>,
     device: &DeviceReport,
-) -> Option<&'a anyflow_control::ConnectionReport> {
+) -> Option<&'a omnibridge_control::ConnectionReport> {
     let status = status?;
     let mut hits = status.connections.iter().filter(|c| {
         c.device_id == device.device_id && c.fingerprint_short == device.fingerprint_short
@@ -1062,13 +1062,13 @@ fn preconditions<'a>(
 ) -> Result<&'a PeerCard, Action> {
     match health {
         Health::Unavailable { headline } => return Err(Action::blocked(headline.clone())),
-        Health::Reaching => return Err(Action::blocked("Connecting to the AnyFlow service…")),
+        Health::Reaching => return Err(Action::blocked("Connecting to the OmniBridge service…")),
         Health::Available => {}
     }
     match target {
         Target::NoTrustedPeer => {
             return Err(Action::blocked(
-                "No device is paired yet. Pair one in AnyFlow Settings.",
+                "No device is paired yet. Pair one in OmniBridge Settings.",
             ))
         }
         Target::MustChoose { stale_choice: true } => {
@@ -1130,7 +1130,7 @@ fn clipboard_action(
         Err(blocked) => return blocked,
     };
     let Some(report) = report else {
-        return Action::blocked("Waiting for the AnyFlow service…");
+        return Action::blocked("Waiting for the OmniBridge service…");
     };
     if !report.enabled {
         return Action::blocked("Clipboard sharing is not enabled on this computer.");
@@ -1154,7 +1154,7 @@ fn clipboard_action(
             peer.name
         )),
         None => Action::blocked(format!(
-            "The AnyFlow service has no clipboard policy for {}.",
+            "The OmniBridge service has no clipboard policy for {}.",
             peer.name
         )),
     }
@@ -1194,7 +1194,7 @@ fn files_status(health: &Health, peer: Option<&PeerCard>) -> StatusLine {
     if !health.is_available() {
         return StatusLine::new(
             StatusValue::Unavailable,
-            "The AnyFlow service is not running.",
+            "The OmniBridge service is not running.",
         );
     }
     let Some(peer) = peer else {
@@ -1245,11 +1245,14 @@ fn clipboard_status(
     if !health.is_available() {
         return StatusLine::new(
             StatusValue::Unavailable,
-            "The AnyFlow service is not running.",
+            "The OmniBridge service is not running.",
         );
     }
     let Some(report) = report else {
-        return StatusLine::new(StatusValue::Unavailable, "Waiting for the AnyFlow service.");
+        return StatusLine::new(
+            StatusValue::Unavailable,
+            "Waiting for the OmniBridge service.",
+        );
     };
     if !report.enabled {
         return StatusLine::new(
@@ -1352,11 +1355,14 @@ fn notifications_status(
     if !health.is_available() {
         return StatusLine::new(
             StatusValue::Unavailable,
-            "The AnyFlow service is not running.",
+            "The OmniBridge service is not running.",
         );
     }
     let Some(report) = report else {
-        return StatusLine::new(StatusValue::Unavailable, "Waiting for the AnyFlow service.");
+        return StatusLine::new(
+            StatusValue::Unavailable,
+            "Waiting for the OmniBridge service.",
+        );
     };
     if !report.enabled {
         return StatusLine::new(

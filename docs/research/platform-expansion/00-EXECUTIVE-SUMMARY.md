@@ -30,7 +30,7 @@
 
 ## 1. The headline
 
-**AnyFlow is in a much better position for cross-platform expansion than its own documentation
+**OmniBridge is in a much better position for cross-platform expansion than its own documentation
 suggests, and the reason is a series of decisions already made for other reasons.**
 
 Four in particular:
@@ -39,7 +39,7 @@ Four in particular:
    It turns out to be the *only* algorithm supported by the Apple Secure Enclave (which accepts
    256-bit EC keys and nothing else) and a first-class algorithm in Windows CNG. Ed25519 — the
    better primitive on paper, and the one a greenfield project would have picked — would have
-   made hardware-backed identity impossible on three of the four hardware keystores AnyFlow will
+   made hardware-backed identity impossible on three of the four hardware keystores OmniBridge will
    ever care about.
 2. **`rustls` + `ring` instead of OpenSSL or a platform TLS stack.** The pinning verifiers, the
    TLS-1.3-only version list and the proof-of-possession check compile unchanged on every
@@ -51,9 +51,9 @@ Four in particular:
 
 Against that, one structural gap:
 
-> **There is not a single `cfg(target_os)` in the entire Rust workspace.** AnyFlow does not have
+> **There is not a single `cfg(target_os)` in the entire Rust workspace.** OmniBridge does not have
 > a platform boundary — it has Linux code that happens to be the only code. Creating that
-> boundary is the whole of Wave 0, and it is small: **one file in `anyflow-core`, one file in
+> boundary is the whole of Wave 0, and it is small: **one file in `omnibridge-core`, one file in
 > the files capability, and the control-socket transport.**
 
 ---
@@ -178,7 +178,7 @@ the three PoCs that matter most.
 
 Two properties of this ordering are deliberate:
 
-- **Waves 0–4 are a complete, shippable outcome.** At their end AnyFlow can honestly say it
+- **Waves 0–4 are a complete, shippable outcome.** At their end OmniBridge can honestly say it
   supports *Linux*, not *Fedora*. Nothing after that point is required for it. Given one
   maintainer and five platforms, having a legitimate stopping point is a feature.
 - **Windows before macOS**, despite macOS needing fewer code changes, because `rustls-cng` makes
@@ -207,7 +207,7 @@ Thirty-five PoCs are specified in [21](21-POC-MASTER-PLAN.md). Three decide the 
 
 A rule applied throughout: **an identity PoC that proves the pieces separately proves nothing.**
 Each must end in a completed handshake against the existing Linux daemon, with a negative test
-confirming a wrong pin is rejected. AnyFlow has already been bitten by this class of error —
+confirming a wrong pin is rejected. OmniBridge has already been bitten by this class of error —
 Android v1 Keystore keys were generated without `DIGEST_NONE` and were unusable for TLS client
 authentication, a fact only a real handshake would have revealed, and by then the keystore
 authorisations were immutable.
@@ -223,7 +223,7 @@ authorisations were immutable.
 | 3 | **Silent identity regeneration** | If a TPM or Enclave becomes unreadable, the "no key yet" path would generate a new identity and break every pairing while looking like a hiccup |
 | 4 | **iOS background limits make the product not worth shipping** | A legitimate outcome, and better discovered by POC-IOS-06 than after Wave 9 |
 | 5 | **Scope creep — five platforms, one maintainer** | Mitigated by Waves 0–4 being a complete outcome |
-| 6 | **Cloud or push creeping in to "fix" iOS** | Would change what AnyFlow is. Rejected explicitly and on the record |
+| 6 | **Cloud or push creeping in to "fix" iOS** | Would change what OmniBridge is. Rejected explicitly and on the record |
 | 7 | **libadwaita floor drifts above 1.5** | Silently drops Ubuntu 24.04 LTS, supported to 2029. Invisible without a CI job |
 | 8 | **No Mac available** | Waves 7–9 cannot ship at all without one, plus an Apple Developer Program membership |
 

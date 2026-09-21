@@ -26,7 +26,7 @@ ALPN, and authenticated by a MAC over a single-use challenge.**
 
 ### A second connection, not a multiplexer
 
-`anyflow/1` is the control session. `anyflow-data/1` is a data stream. Both
+`omnibridge/1` is the control session. `omnibridge-data/1` is a data stream. Both
 arrive at the same listener, on the same port, with the same mutual
 authentication and the same pinned identities; the listener reads
 `alpn_protocol()` after the handshake and routes accordingly.
@@ -63,14 +63,14 @@ The receiver's acceptance carries a fresh, single-use, 32-byte
 ```text
 mac = HMAC-SHA256(
     key = stream_challenge,
-    msg = "anyflow/files.v1/data-stream/v1"
+    msg = "omnibridge/files.v1/data-stream/v1"
           || len_prefixed(acceptor_identity_fingerprint)
           || len_prefixed(dialer_identity_fingerprint)
           || len_prefixed(transfer_id))
 ```
 
 Deliberately the same construction as the pairing proof in
-`anyflow_core::pairing`: a standard MAC, a versioned domain separator, and
+`omnibridge_core::pairing`: a standard MAC, a versioned domain separator, and
 every field length-prefixed so two different field splits cannot produce the
 same message. No new cryptography was invented; a reader who has understood
 the pairing proof has already understood this.
@@ -153,7 +153,7 @@ full by ADR-0012.
 * The listener now has two kinds of connection to route between. The routing
   is one `match` on the negotiated ALPN, immediately after the handshake, and
   it fails closed.
-* A future capability that needs bulk transfer reuses `anyflow-data/1` and the
+* A future capability that needs bulk transfer reuses `omnibridge-data/1` and the
   same challenge construction rather than inventing a third path.
 * The phone can never receive a transfer while it has no control session,
   because it would have nowhere to learn a challenge from. That is correct and

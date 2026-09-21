@@ -3,7 +3,7 @@
 **Status:** Accepted · 2026-09-08
 
 Canonical record for how a mirrored notification is *named* on the wire.
-[ADR-0015](ADR-0015-notification-access.md) decides whether AnyFlow may read
+[ADR-0015](ADR-0015-notification-access.md) decides whether OmniBridge may read
 notifications at all and under what contract; this ADR decides what a
 notification is called once it may. The two do not overlap.
 
@@ -49,7 +49,7 @@ of every app, for ever, having never had a destination-side purpose.
 ```text
 notification_id = HMAC-SHA256(
     key = device_notification_secret,
-    msg = "anyflow/notifications.v1/id/v1" || len32(platform_key) || platform_key
+    msg = "omnibridge/notifications.v1/id/v1" || len32(platform_key) || platform_key
 )[0..16]
 ```
 
@@ -196,7 +196,7 @@ dismissal working across a source process restart without persisting anything.
 ### 11. `content_hash` is not identity
 
 ```text
-content_hash = SHA-256("anyflow/notifications.v1/content/v1" || len32-prefixed semantic fields)
+content_hash = SHA-256("omnibridge/notifications.v1/content/v1" || len32-prefixed semantic fields)
 ```
 
 Used for three things and no others: suppressing a re-send when a source
@@ -214,7 +214,7 @@ platform adapter and ships in **N1**, with the Android listener.
 **N0 implements the protocol type and its rules only**: the exact width, the
 validation, the refusal semantics, the fail-closed answers, and the tests. It
 manufactures no Android implementation in portable code, and defines no secret.
-`anyflow_core::notifications::NotificationId` is deliberately opaque — it can be
+`omnibridge_core::notifications::NotificationId` is deliberately opaque — it can be
 constructed from 16 bytes and compared, and it knows nothing about how those
 bytes were produced.
 
@@ -233,7 +233,7 @@ bytes were produced.
   one, and neither needs a schema change.
 * **The 16-byte width is now a compatibility constant.** Changing it is a
   `notifications.v2` decision, and the field-set regression test in
-  `anyflow-proto` pins it.
+  `omnibridge-proto` pins it.
 
 ### What this costs
 
@@ -246,7 +246,7 @@ is only satisfying if someone remembers this file exists.
 
 * Wire schema and field limits:
   [02 §5](../research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md) and
-  `protocol/proto/anyflow/v1/capabilities/notifications_v1.proto`.
+  `protocol/proto/omnibridge/v1/capabilities/notifications_v1.proto`.
 * Review record: [the decision report](../../NOTIFICATIONS-V1-DECISION-REPORT.md) §6.
 * Roles and the runtime narrowing mechanism: [ADR-0017](ADR-0017-capability-roles.md).
 * The access contract this operates under: [ADR-0015](ADR-0015-notification-access.md).

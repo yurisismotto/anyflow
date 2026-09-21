@@ -41,7 +41,7 @@ impl std::fmt::Display for BindError {
             Self::AlreadyOwned { detail } => write!(
                 f,
                 "the local control endpoint is already owned by another \
-                 process: {detail}. AnyFlow will not bind an alternative name, \
+                 process: {detail}. OmniBridge will not bind an alternative name, \
                  because a client that has to search for the agent can be \
                  answered by whatever squatted on the first one"
             ),

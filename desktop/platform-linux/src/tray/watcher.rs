@@ -19,7 +19,7 @@
 //! * **it de-duplicates.** A second registration of the same service and path
 //!   returns immediately. That is a safety net and not a licence: the loop
 //!   below registers once per watcher owner because a shell that *did* honour
-//!   a duplicate would show two AnyFlow icons.
+//!   a duplicate would show two OmniBridge icons.
 //!
 //! # Why this is not a retry loop
 //!
@@ -80,7 +80,7 @@ pub async fn follow(connection: &zbus::Connection, item_bus_name: &str) -> zbus:
             // state of a GNOME session, not a fault, and the daemon is
             // entirely healthy without one.
             tracing::info!(
-                "no desktop tray host on this session; the AnyFlow tray item is \
+                "no desktop tray host on this session; the OmniBridge tray item is \
                  published and will register itself if one appears"
             );
         }
@@ -108,7 +108,7 @@ pub async fn follow(connection: &zbus::Connection, item_bus_name: &str) -> zbus:
                     // is nothing to gain: an exported object nobody is looking
                     // at costs nothing.
                     tracing::info!(
-                        "the desktop tray host went away; the AnyFlow tray item stays \
+                        "the desktop tray host went away; the OmniBridge tray item stays \
                          published and will re-register when one returns"
                     );
                 }
@@ -133,7 +133,7 @@ async fn register(connection: &zbus::Connection, item_bus_name: &str) -> bool {
     };
     match proxy.call_method(REGISTER_METHOD, &(item_bus_name,)).await {
         Ok(_) => {
-            tracing::info!(item = %item_bus_name, "registered an AnyFlow tray item with the desktop shell");
+            tracing::info!(item = %item_bus_name, "registered an OmniBridge tray item with the desktop shell");
             true
         }
         Err(e) => {
@@ -141,7 +141,7 @@ async fn register(connection: &zbus::Connection, item_bus_name: &str) -> bool {
             // the next attempt.
             tracing::info!(
                 reason = %super::activate::describe_bus_error(&e),
-                "the desktop tray host refused the AnyFlow tray item"
+                "the desktop tray host refused the OmniBridge tray item"
             );
             false
         }

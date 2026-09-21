@@ -3,17 +3,17 @@
 //! Each test names its gate. They are written against the manager rather than
 //! a live TLS session on purpose: the transport's own guarantees (pinning,
 //! sequence numbers, envelope de-duplication) already have suites in
-//! `anyflow-core`, and re-testing them here would only prove that the mocks
+//! `omnibridge-core`, and re-testing them here would only prove that the mocks
 //! agree with each other. What is tested here is what this capability adds.
 
 mod common;
 
-use anyflow_capability_clipboard::backend::{BackendError, MemoryBackend};
-use anyflow_capability_clipboard::{
+use common::*;
+use omnibridge_capability_clipboard::backend::{BackendError, MemoryBackend};
+use omnibridge_capability_clipboard::{
     limits, ClipboardManager, ClipboardPolicy, ClipboardText, SendError,
 };
-use anyflow_proto::v1::capabilities as pb;
-use common::*;
+use omnibridge_proto::v1::capabilities as pb;
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -750,7 +750,7 @@ async fn clip_sec_13_no_inbound_message_can_widen_local_policy() {
     let payloads: Vec<Vec<u8>> = vec![
         update_payload(&event_id(20), "phone", "text", true),
         {
-            use anyflow_proto::Message as _;
+            use omnibridge_proto::Message as _;
             pb::ClipboardControl {
                 body: Some(pb::clipboard_control::Body::Result(pb::ClipboardResult {
                     event_id: event_id(20),
@@ -773,7 +773,7 @@ async fn clip_sec_13_no_inbound_message_can_widen_local_policy() {
 
     // Read back from the authorizer, which is the only thing that can hold a
     // policy at all: the manager has no setter for one, by construction.
-    use anyflow_capability_clipboard::ClipboardAuthorizer as _;
+    use omnibridge_capability_clipboard::ClipboardAuthorizer as _;
     assert_eq!(
         desktop.authorizer.policy_for(&phone).await,
         restrictive,
@@ -1135,7 +1135,7 @@ async fn a_backend_failure_is_reported_and_releases_the_suppression_entry() {
 /// person applying it:
 ///
 ///  * the daemon's log said "the session is locked: wl-copy and wl-paste
-///    cannot obtain a seat behind the lock screen", while `anyflow clipboard
+///    cannot obtain a seat behind the lock screen", while `omnibridge clipboard
 ///    apply` said only "the clipboard backend refused the write". The
 ///    actionable half was thrown away at the one place a human reads it.
 ///  * the clip was removed from the pending map *before* the write was
@@ -1256,7 +1256,7 @@ async fn a_manager_with_no_authorizer_denies_everything() {
     // not become an open door.
     let backend = Arc::new(MemoryBackend::new());
     let manager = ClipboardManager::new(
-        Arc::clone(&backend) as Arc<dyn anyflow_capability_clipboard::backend::ClipboardBackend>,
+        Arc::clone(&backend) as Arc<dyn omnibridge_capability_clipboard::backend::ClipboardBackend>,
         "desktop",
     );
     let phone = fp(0x8d);

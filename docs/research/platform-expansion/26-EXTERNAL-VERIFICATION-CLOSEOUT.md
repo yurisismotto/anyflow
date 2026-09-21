@@ -92,7 +92,7 @@ Status vocabulary: **VERIFIED** · **REFUTED** · **PARTIALLY VERIFIED** · **ST
 | V-04 | **VERIFIED** | Three formats, exact names and semantics confirmed — including one Research v1 missed |
 | V-05 | **VERIFIED** | TN3179 retrieved in full; local network privacy also applies to **macOS 15+** |
 | V-06 | **VERIFIED** | `NSPasteboard.AccessBehavior`, macOS **15.4**, four cases, **default is ask** |
-| V-07 | **VERIFIED** | Authoritative list obtained; none of the eleven values fits AnyFlow |
+| V-07 | **VERIFIED** | Authoritative list obtained; none of the eleven values fits OmniBridge |
 | V-08 | **STILL OPEN** | Community convention; adoption breadth not establishable from a primary source |
 | V-09 | **PARTIALLY VERIFIED** | Extensions share the container app's privilege; a background-undetermined edge case exists |
 | V-10 | **VERIFIED** | `ring` upstream: "currently requires a C (but not C++) toolchain" |
@@ -183,7 +183,7 @@ Two facts were verified and are useful regardless:
 
 - Minimum supported client: **Windows 10, desktop apps only**.
 - *"The registration is tied to the lifetime of the calling process. If the process goes away,
-  the service will be automatically deregistered."* — the same semantics AnyFlow's
+  the service will be automatically deregistered."* — the same semantics OmniBridge's
   `Advertisement`/`Drop` pair implements today.
 
 **Impact: reduced priority.** This only matters if `mdns-sd` is *replaced* on Windows. Since
@@ -255,7 +255,7 @@ and *"All Bonjour operations require local network access"* — registering, bro
 > program running as root; Command-line tools run from Terminal or over SSH…
 > **The exception for `launchd` daemons doesn't apply to `launchd` agents.**
 
-AnyFlow's macOS process must be a **per-user agent** (it needs the user's pasteboard and login
+OmniBridge's macOS process must be a **per-user agent** (it needs the user's pasteboard and login
 session — the same reason Windows needs an agent, [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md)
 PLAT-DEC-002). So it **will** face the Local Network prompt. Two consequences:
 
@@ -275,7 +275,7 @@ PLAT-DEC-002). So it **will** face the Local Network prompt. Two consequences:
 > display the local network alert. **To work around this, update your code to not exit
 > immediately after a local network operation fails.**
 
-AnyFlow's daemon currently treats a bind failure as fatal. On macOS that behaviour would produce
+OmniBridge's daemon currently treats a bind failure as fatal. On macOS that behaviour would produce
 an agent that can never obtain the permission it needs — a permanent, silent failure. This is a
 **named requirement on the macOS adapter**, new in this sprint (MAC-010, [25](25-IMPLEMENTATION-BACKLOG.md)).
 
@@ -308,7 +308,7 @@ user accounts; macOS keeps the state **per user account**; `AllowedEthernetLocal
   the user in System Settings, per app, and only after the app has triggered an alert. An app
   cannot declare or request it.
 
-**Impact — this is the most consequential macOS finding of the sprint.** AnyFlow's automatic
+**Impact — this is the most consequential macOS finding of the sprint.** OmniBridge's automatic
 clipboard *send* is by definition programmatic, non-user-originated access to the General
 pasteboard. On macOS 15.4+ the default outcome is an **alert**, and silent operation requires
 the user to have chosen `.alwaysAllow` in System Settings afterwards.
@@ -483,7 +483,7 @@ evidence:
        print_usage(stderr, argv[0]);
        exit(1);
    ```
-4. AnyFlow passes the flag unconditionally when the clip is sensitive
+4. OmniBridge passes the flag unconditionally when the clip is sensitive
    (`backend/wayland.rs:263-267`), and treats a non-zero exit as a hard failure
    (`backend/wayland.rs:310-315`): `Err(BackendError::Failed("wl-copy exited with …"))`.
 5. Archive versions (packages.debian.org / packages.ubuntu.com, 2026-08-31):
@@ -501,7 +501,7 @@ Three things make this more serious than the KDE data-control issue:
 - It is **invisible on the development machine**, because Fedora's snapshot has the flag (V-11).
   This is precisely the Fedora-monoculture blind spot Wave 1 exists to remove.
 
-The failure direction is at least the safe one: fail-closed. AnyFlow does not paste the password
+The failure direction is at least the safe one: fail-closed. OmniBridge does not paste the password
 without the hint; it refuses. That is the right choice and should be preserved. But the user sees
 an unexplained failure for exactly one class of clip.
 
@@ -568,8 +568,8 @@ for Fedora (V-11).
    `stonking` already has it. This is a transient distribution-packaging mismatch, not an
    architectural problem — which is an argument for mitigation (a) (document, probe, degrade
    honestly) over mitigation (b) (implement `ext-data-control` in-process).
-3. **The right lever is an Ubuntu bug report**, not AnyFlow code. wl-clipboard 2.3.0 in
-   resolute-updates fixes both this *and* `--sensitive` for every Ubuntu user, not just AnyFlow's.
+3. **The right lever is an Ubuntu bug report**, not OmniBridge code. wl-clipboard 2.3.0 in
+   resolute-updates fixes both this *and* `--sensitive` for every Ubuntu user, not just OmniBridge's.
 4. **Debian is fine throughout**, in both stable and testing, for auto-send.
 5. `--sensitive` is broken far more widely than auto-send — see §5.1.
 
@@ -634,7 +634,7 @@ The brief asked for this distinction explicitly. Evidence now separates them cle
 | Hardened runtime | ❌ | ✅ required for notarization | Notarizing macOS software |
 
 The middle row is the change. Research v1 filed Developer ID under distribution. TN3179 makes it
-a **runtime correctness** requirement for AnyFlow specifically:
+a **runtime correctness** requirement for OmniBridge specifically:
 
 > Local network privacy tracks the identity of your program using its code signature. This
 > presents a challenge on macOS, which allows for unsigned code and ad hoc signed code… To ensure
@@ -643,7 +643,7 @@ a **runtime correctness** requirement for AnyFlow specifically:
 > as part of its implementation. If your main executable has no UUID, or shares a UUID with other
 > programs, local network privacy may behave weirdly.
 
-An unsigned AnyFlow agent may have its Local Network grant attributed unstably across rebuilds —
+An unsigned OmniBridge agent may have its Local Network grant attributed unstably across rebuilds —
 which for a product whose entire function is local networking means the permission silently
 resets. **R-09 (Developer ID paperwork) therefore rises in severity**: it gates the macOS PoCs,
 not just the macOS release.
@@ -667,7 +667,7 @@ inert. The Windows clipboard is a per-window-station object; a service's noninte
 not the logged-in user's `WinSta0`. **A service cannot see the user's clipboard.** PLAT-DEC-002
 is settled by first-party documentation.
 
-Microsoft's own recommended shape is the one AnyFlow already has on Linux:
+Microsoft's own recommended shape is the one OmniBridge already has on Linux:
 
 > Create a separate hidden GUI application and use `CreateProcessAsUser`… Design the GUI
 > application to communicate with the service through some method of interprocess communication
@@ -690,7 +690,7 @@ learn.microsoft.com, `CreateNamedPipeA`, verbatim on `lpSecurityAttributes`:
 > full control to the LocalSystem account, administrators, and the creator owner. **They also
 > grant read access to members of the Everyone group and the anonymous account.**
 
-**AnyFlow must never pass `NULL`.** The default exposes the control plane to Everyone and to
+**OmniBridge must never pass `NULL`.** The default exposes the control plane to Everyone and to
 anonymous. This is a concrete, mandatory requirement, and it is a stronger statement than
 [09](09-WINDOWS-SECURITY-AND-INTEGRATION.md) makes.
 
@@ -801,11 +801,11 @@ Note both return the config **directly, not a `Result`** — so the `.map_err(Er
 | Implements the signer? | **Yes** — `impl Signer for CngSigner`, `impl SigningKey for CngSigningKey` | `src/signer.rs` @ `v0.7.1` |
 | Handles P-256? | **Yes** — `256 => &[SignatureScheme::ECDSA_NISTP256_SHA256]` | `src/signer.rs` |
 | Handles the DER problem? | **Yes** — `p1363_to_der()` via `CryptEncodeObjectEx`/`X509_ECC_SIGNATURE`, with unit tests covering high-bit and stripped-zero cases | `src/signer.rs` |
-| License | MIT/Apache-2.0 — compatible with AnyFlow's Apache-2.0 | `Cargo.toml` |
+| License | MIT/Apache-2.0 — compatible with OmniBridge's Apache-2.0 | `Cargo.toml` |
 
 **Two integration constraints Research v1 did not surface:**
 
-- **Default features pull `aws-lc-rs`**: `default = ["logging", "tls12", "aws-lc-rs"]`. AnyFlow
+- **Default features pull `aws-lc-rs`**: `default = ["logging", "tls12", "aws-lc-rs"]`. OmniBridge
   uses `ring` everywhere. The dependency must be
   `rustls-cng = { version = "0.7", default-features = false, features = ["ring"] }` — otherwise the
   build drags in a second crypto provider with a heavier toolchain requirement.
@@ -841,12 +841,12 @@ unsafe_code = "forbid"
 ```
 
 `forbid` — not `deny` — **cannot be overridden by an inner `#[allow]`**. Every platform adapter
-AnyFlow will write needs `unsafe`: Win32 FFI, CNG, `Security.framework`, `SecKeyCreateSignature`,
+OmniBridge will write needs `unsafe`: Win32 FFI, CNG, `Security.framework`, `SecKeyCreateSignature`,
 IOKit. `windows-sys` and `objc2`-family calls are unsafe by construction.
 
 This is a **Wave 0 blocker nobody had noticed**, and it is trivially fixable — but only if it is
 fixed deliberately. The lint must become per-crate rather than workspace-wide, so that
-`anyflow-core` and the capability crates keep `forbid` (which is a genuine security property worth
+`omnibridge-core` and the capability crates keep `forbid` (which is a genuine security property worth
 protecting) while adapter crates get `deny` with narrowly-scoped `#[allow]`. Doing it the other way
 round — relaxing the workspace default — would silently drop the guarantee from the security core.
 Filed as **ARCH-010 (P0, Wave 0)**.
@@ -882,7 +882,7 @@ bug is that a missing-or-unreadable key **routes around** that path entirely.
 The realistic trigger is not exotic: a partial restore from backup, a botched `rsync`, a
 half-completed migration, or a permissions accident on the data directory. The result is a new
 identity, an empty trust store, and every paired device silently broken — presented to the user as
-if AnyFlow had simply started fresh.
+if OmniBridge had simply started fresh.
 
 **This must be fixed in Wave 0**, before any hardware backing exists to make it worse. SEC-009 is
 rewritten in [25](25-IMPLEMENTATION-BACKLOG.md) to cover the software case first, and
@@ -908,7 +908,7 @@ materially and is reflected in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md).
 
 ### 11.4 `Platform::Linux` is hardcoded in the store, not derived
 
-`store.rs:154` and `store.rs:188` both pass `anyflow_proto::v1::Platform::Linux` literally, in
+`store.rs:154` and `store.rs:188` both pass `omnibridge_proto::v1::Platform::Linux` literally, in
 `initialize()` and `load()` respectively. So the platform identity is decided by the *storage*
 layer. Any platform adapter must be able to supply it, which makes this a Wave 0 seam item
 (small, but it would otherwise be discovered mid-Wave-5). Filed as **ARCH-011**.
@@ -980,7 +980,7 @@ partial. From *Protecting keys with the Secure Enclave*, verbatim:
 
 Five consequences, three of them new:
 
-1. **P-256-only confirms AnyFlow's most important accidental decision.** ADR-0006 chose P-256 for
+1. **P-256-only confirms OmniBridge's most important accidental decision.** ADR-0006 chose P-256 for
    Android Keystore. It is the *only* algorithm the Enclave accepts. Verified, not inferred.
 2. **Non-exportability is confirmed as fundamental**, which is the whole justification for
    replacing `key_pkcs8_der`.
@@ -989,7 +989,7 @@ Five consequences, three of them new:
    backing must generate a **new identity**, which means **re-pairing every peer**. This is a
    product decision, not an implementation detail, and it must be made before the first Apple
    release ships a software fallback. Raised as **PLAT-DEC-015**.
-4. **NEW — `.privateKeyUsage` is the same trap that already bit AnyFlow once.** Key generation
+4. **NEW — `.privateKeyUsage` is the same trap that already bit OmniBridge once.** Key generation
    succeeds and signing fails later, exactly as the Android v1 `DIGEST_NONE` keys did — and, as
    there, the access-control flags are immutable after creation. MAC-002 must cover it explicitly.
 5. **NEW — Intel Macs without a T1/T2 have no Secure Enclave.** A software fallback on macOS is
@@ -998,7 +998,7 @@ Five consequences, three of them new:
 
 On accessibility class: the documentation recommends
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, but qualifies it — *"generally preferred unless
-your app operates in the background."* AnyFlow's agent does. The documented alternative,
+your app operates in the background."* OmniBridge's agent does. The documented alternative,
 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, is *"recommended for items that need to be
 accessed by background applications"* and *"do not migrate to a new device"* — which is precisely
 the correct property for a device identity. **Recommendation: `AfterFirstUnlockThisDeviceOnly`,

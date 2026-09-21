@@ -1,4 +1,4 @@
-# AnyFlow protocol — v1
+# OmniBridge protocol — v1
 
 ## Invariants
 
@@ -51,8 +51,8 @@ a single application byte:
 
 | ALPN | Connection |
 | --- | --- |
-| `anyflow/1` | control session — HELLO, pairing, capability messages |
-| `anyflow-data/1` | a `files.v1` data stream — one transfer's bytes |
+| `omnibridge/1` | control session — HELLO, pairing, capability messages |
+| `omnibridge-data/1` | a `files.v1` data stream — one transfer's bytes |
 
 A connection that negotiates neither is dropped. Treating an absent ALPN as
 "probably a control session" would hand the handshake path to any client that
@@ -88,7 +88,7 @@ connection.
 ```
 Phone                                        Desktop
   │                                             │
-  │──── TCP + TLS 1.3 (mutual, ALPN anyflow/1) ─│
+  │──── TCP + TLS 1.3 (mutual, ALPN omnibridge/1) ─│
   │     phone pins the desktop SPKI             │
   │     desktop proves possession of its key    │
   │     desktop learns the phone's SPKI         │
@@ -125,12 +125,12 @@ is open. **Anything else closes the connection**, including a `PING`.
 ## Pairing proof
 
 ```
-proof        = HMAC-SHA256(token, "anyflow/pairing-proof/v1"
+proof        = HMAC-SHA256(token, "omnibridge/pairing-proof/v1"
                                   ‖ len32(responder_fp) ‖ responder_fp
                                   ‖ len32(initiator_fp) ‖ initiator_fp
                                   ‖ len32(nonce)        ‖ nonce)
 
-confirmation = HMAC-SHA256(token, "anyflow/pairing-confirm/v1" ‖ …)
+confirmation = HMAC-SHA256(token, "omnibridge/pairing-confirm/v1" ‖ …)
 ```
 
 * `token` — 20 raw bytes (the base32 in the QR, decoded)
@@ -159,7 +159,7 @@ A violation is fatal. A correct peer never produces one.
 ## QR payload
 
 ```
-anyflow1:<responder-fingerprint-hex>:<token-base32>:<device-id>:<addr>[,<addr>…]
+omnibridge1:<responder-fingerprint-hex>:<token-base32>:<device-id>:<addr>[,<addr>…]
 ```
 
 Maximum 512 bytes. The fingerprint is the load-bearing field: it is pinned
@@ -216,7 +216,7 @@ DataStreamReady { status, reason }                       acceptor → dialer
 ```text
 mac = HMAC-SHA256(
     key = stream_challenge,
-    msg = "anyflow/files.v1/data-stream/v1"
+    msg = "omnibridge/files.v1/data-stream/v1"
           || len_prefixed(acceptor_identity_fingerprint)
           || len_prefixed(dialer_identity_fingerprint)
           || len_prefixed(transfer_id))
@@ -300,7 +300,7 @@ NotificationControl {
 ```
 
 `notification_id` is **exactly 16 bytes**, derived at the source as
-`HMAC-SHA256(device_notification_secret, "anyflow/notifications.v1/id/v1" ||
+`HMAC-SHA256(device_notification_secret, "omnibridge/notifications.v1/id/v1" ||
 len32(key) || key)[0..16]`. The raw Android `key` is never transmitted: it
 carries a profile id and an install-specific uid that have no destination-side
 purpose. An id of any other width is refused and *not answered* — there is
@@ -332,7 +332,7 @@ There is **no** field for an action, a reply, a `PendingIntent`, a
 `RemoteViews`, a serialized platform notification, an image or an arbitrary
 blob — and the only `bytes` fields in the schema are the four fixed-width
 identifiers. That is asserted against the compiled descriptors by
-`anyflow-proto`'s `notifications_schema` test, so a field cannot be added
+`omnibridge-proto`'s `notifications_schema` test, so a field cannot be added
 without someone arguing for it.
 
 Additive: it adds one file, imports nothing, and changes no other schema. An old
@@ -354,5 +354,5 @@ Held in memory only, dropped on disconnect. Never persisted.
 
 ## mDNS
 
-`_anyflow._tcp.local.`, TXT: `v=1`, `pv=1-1`, `id=<hex>`, `dn=<name>`.
+`_omnibridge._tcp.local.`, TXT: `v=1`, `pv=1-1`, `id=<hex>`, `dn=<name>`.
 The fingerprint is **not** published. See ADR-0005.

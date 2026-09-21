@@ -11,7 +11,7 @@
 
 > **Nothing in this document is implemented.** No `.proto` file was created or
 > modified on this branch. The schema below is a proposal in fenced blocks, to
-> be turned into `protocol/proto/anyflow/v1/capabilities/notifications_v1.proto`
+> be turned into `protocol/proto/omnibridge/v1/capabilities/notifications_v1.proto`
 > in wave N0.
 
 ---
@@ -43,11 +43,11 @@ stops being true — which is one of the reasons v1 carries none (§6.4).
 ## 2. The shape of the schema
 
 ```protobuf
-// protocol/proto/anyflow/v1/capabilities/notifications_v1.proto   (PROPOSED)
+// protocol/proto/omnibridge/v1/capabilities/notifications_v1.proto   (PROPOSED)
 syntax = "proto3";
-package anyflow.v1.capabilities;
+package omnibridge.v1.capabilities;
 
-option java_package = "io.github.yurisismotto.anyflow.proto.capabilities";
+option java_package = "io.github.yurisismotto.omnibridge.proto.capabilities";
 option java_outer_classname = "NotificationsV1Proto";
 option java_multiple_files = true;
 
@@ -106,7 +106,7 @@ message NotificationRoles {
 
 `HELLO.capabilities` is a flat list of ids and the transport is deliberately
 capability-agnostic ([ADR-0008](../../adr/ADR-0008-capability-architecture.md):
-*"There is no capability name anywhere in `anyflow-core`'s transport code"*).
+*"There is no capability name anywhere in `omnibridge-core`'s transport code"*).
 Putting role vocabulary there would push notification semantics into the
 handshake, and `notifications.v1/source` as a separate id is exactly the
 "four capability ids" alternative that ADR-0008 rejected for clipboard.
@@ -392,7 +392,7 @@ never been needed there.
 ```text
 notification_id = HMAC-SHA256(
     key = device_notification_secret,
-    msg = "anyflow/notifications.v1/id/v1" || len32(key) || key
+    msg = "omnibridge/notifications.v1/id/v1" || len32(key) || key
 )[0..16]
 ```
 
@@ -445,7 +445,7 @@ hashed key, and from HMAC-SHA256 not colliding at 128 bits.
 
 ```text
 content_hash = SHA-256(
-    "anyflow/notifications.v1/content/v1"
+    "omnibridge/notifications.v1/content/v1"
     || len32(app_id) || app_id || len32(title) || title || len32(body) || body
     || len32(importance) || len32(privacy) || len32(progress_repr) || …)
 ```
@@ -527,7 +527,7 @@ enum NotificationImportance {
 ```
 
 Android importance `NONE(0)` never appears: a notification with importance NONE
-is not shown to the user on their own device, so mirroring it would make AnyFlow
+is not shown to the user on their own device, so mirroring it would make OmniBridge
 *more* intrusive than the phone.
 
 Sink mapping on Linux, and the decision behind it:
@@ -575,7 +575,7 @@ Two rules make the hint fail safe rather than fail useful:
   clear enough that forwarding it to another machine cannot be right.
 
 And the rule that matters most, carried over verbatim from the brief and from
-the clipboard work: **AnyFlow does not attempt to detect sensitive content
+the clipboard work: **OmniBridge does not attempt to detect sensitive content
 itself.** No OTP regex, no "looks like a bank" heuristic, no keyword list. A
 guess dressed up as a security control is worse than an honest boundary —
 [THREAT_MODEL.md T10](../../security/THREAT_MODEL.md) already says this about
@@ -633,7 +633,7 @@ produces one notification entry, not hundreds.
 `group_id` is an 8-byte digest, not the platform group string:
 
 ```text
-group_id = SHA-256("anyflow/notifications.v1/group/v1" || len32(group_key) || group_key)[0..8]
+group_id = SHA-256("omnibridge/notifications.v1/group/v1" || len32(group_key) || group_key)[0..8]
 ```
 
 Android's `getGroupKey()` embeds the package and often app-internal identifiers.
@@ -804,9 +804,9 @@ permanent one.
   peer's mirrors close after the grace.
 * **Cause content to be persisted.** It cannot. During the grace the *content*
   lives in the notification server (gnome-shell), where it was already visible;
-  AnyFlow's `MirrorTable` holds `(peer_fingerprint, notification_id) →`
+  OmniBridge's `MirrorTable` holds `(peer_fingerprint, notification_id) →`
   freedesktop id plus a `content_hash` digest. No notification body is written
-  anywhere by AnyFlow, in memory or on disk, to implement the grace.
+  anywhere by OmniBridge, in memory or on disk, to implement the grace.
 
 ---
 
@@ -899,7 +899,7 @@ immediately because no echo is coming.
 
 ### 9.4 The four hard loop rules
 
-1. **AnyFlow never sources its own notifications.** The listener drops
+1. **OmniBridge never sources its own notifications.** The listener drops
    `sbn.getPackageName() == context.packageName` before anything else — before
    the filter, before policy, before the cache. It is a hard rule, not a
    default: there is no setting that turns it off. This is what stops the
@@ -919,7 +919,7 @@ immediately because no echo is coming.
    exists so that the day a Linux source is added, the loop is already
    impossible rather than newly possible.
 4. **Sink-created mirrors are marked.** Every notification the sink posts sets
-   the `desktop-entry` hint to AnyFlow's own application id. A future Linux
+   the `desktop-entry` hint to OmniBridge's own application id. A future Linux
    source skips them by that marker — the same "recognise your own output"
    discipline, applied on the platform where it will be needed next.
 
@@ -1047,7 +1047,7 @@ So: **the source truncates, the receiver refuses.**
 ## 12. Compatibility
 
 `notifications.v1` requires **no change to `envelope.proto` or `core.proto`**.
-It adds one file under `protocol/proto/anyflow/v1/capabilities/`, one
+It adds one file under `protocol/proto/omnibridge/v1/capabilities/`, one
 `Capability` implementation per side, and one registry entry — the four-step
 recipe in [OVERVIEW.md "Extending it"](../../architecture/OVERVIEW.md).
 

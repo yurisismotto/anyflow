@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Installs AnyFlow's desktop entry, application icon and D-Bus activation
+# Installs OmniBridge's desktop entry, application icon and D-Bus activation
 # entry into an XDG data directory.
 #
 # ---------------------------------------------------------------------------
@@ -10,13 +10,13 @@
 # On a Wayland session the shell — not the application — decides what icon a
 # window gets, and it has exactly one way to work it out:
 #
-#     xdg_toplevel.set_app_id("io.github.yurisismotto.anyflow")
+#     xdg_toplevel.set_app_id("io.github.yurisismotto.omnibridge")
 #         -> the .desktop file with that id, from XDG_DATA_DIRS
 #             -> its Icon= name
 #                 -> that name in the *shell's* icon theme
 #
 # Every link in that chain is outside this process. An icon compiled into the
-# AnyFlow binary is private to AnyFlow, and `gtk_window_set_default_icon_name`
+# OmniBridge binary is private to OmniBridge, and `gtk_window_set_default_icon_name`
 # has no transport at all under xdg-shell: Mutter advertises no
 # `xdg_toplevel_icon_manager_v1`, and there is no Wayland equivalent of X11's
 # `_NET_WM_ICON`. So on Wayland the window falls back to a generic glyph until
@@ -31,7 +31,7 @@
 # The third file, the D-Bus activation entry, is the one exception and is a
 # template for a reason the file's own header explains: a service file's
 # `Exec` must be an absolute path, so exactly one line has to be derived from
-# the prefix. Nothing about AnyFlow's *identity* is derived — the bus name in
+# the prefix. Nothing about OmniBridge's *identity* is derived — the bus name in
 # it is the same literal as everywhere else.
 #
 # ---------------------------------------------------------------------------
@@ -46,15 +46,15 @@
 #   ./install-desktop-metadata.sh --prefix /usr --destdir "$RPM_BUILD_ROOT"
 #
 # It needs no root, touches nothing outside the prefix it is given, and is not
-# run by the application: AnyFlow never installs anything at startup.
+# run by the application: OmniBridge never installs anything at startup.
 
 set -euo pipefail
 
 # Must match APP_ID in ../src/lib.rs, the Wayland app_id, the D-Bus name, the
 # desktop file's basename, its Icon= key, the D-Bus service file's basename
 # and its Name= key, and the tray item's IconName. One string, and tests in
-# both `anyflow-gui` and `anyflow-linux` assert every copy of it agrees.
-APP_ID="io.github.yurisismotto.anyflow"
+# both `omnibridge-gui` and `omnibridge-linux` assert every copy of it agrees.
+APP_ID="io.github.yurisismotto.omnibridge"
 
 here() { cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd; }
 TOOLS="$(here)"
@@ -66,7 +66,7 @@ DESKTOP_SRC="$TOOLS/../data/$APP_ID.desktop"
 DBUS_SRC="$TOOLS/../data/$APP_ID.service.in"
 # The canonical mark, from the one place the brand documentation points at.
 # build.rs derives the compiled-in copy from this same file.
-ICON_SRC="$TOOLS/../../../docs/design/assets/app-icon.svg"
+ICON_SRC="$TOOLS/../../../docs/design/assets/omnibridge-app-icon.svg"
 
 prefix="${HOME}/.local"
 destdir=""
@@ -100,7 +100,7 @@ icon_dir="$destdir$prefix/share/icons/hicolor/scalable/apps"
 desktop_dst="$apps_dir/$APP_ID.desktop"
 icon_dst="$icon_dir/$APP_ID.svg"
 dbus_dst="$dbus_dir/$APP_ID.service"
-bin_dst="$destdir$prefix/bin/anyflow-gui"
+bin_dst="$destdir$prefix/bin/omnibridge-gui"
 
 # Refreshing the caches is for a live session only. In DESTDIR mode the
 # package's own file triggers do it on the installing machine, and running it
@@ -192,13 +192,13 @@ cat <<EOF
 
 Desktop metadata installed under $prefix.
 
-The D-Bus activation entry means the session bus can *start* AnyFlow when
+The D-Bus activation entry means the session bus can *start* OmniBridge when
 something asks for one of its actions by name — which is what the KDE tray
 item does when no GUI is running. The bus rereads this directory on demand,
 so no restart is needed.
 
 GNOME Shell matches a window to this entry by its Wayland app_id, which is
 already $APP_ID — so a window opened from now on
-resolves the AnyFlow icon. A window that was already open when this ran may
+resolves the OmniBridge icon. A window that was already open when this ran may
 keep the generic one until it is reopened.
 EOF

@@ -1,7 +1,7 @@
 //! The trust store: who is trusted, with what, and how to stop.
 
 use adw::prelude::*;
-use anyflow_control::{Request, Response};
+use omnibridge_control::{Request, Response};
 
 use super::Pages;
 use crate::widgets::{self, SPACING_SM};
@@ -55,7 +55,7 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
     // is the count of *visible revoked* rows — the exact set the action
     // touches. With none, the button is not drawn at all rather than drawn
     // grey: there is nothing on this screen it could be read as referring to.
-    let revoked_visible: Vec<&anyflow_control::DeviceReport> =
+    let revoked_visible: Vec<&omnibridge_control::DeviceReport> =
         devices.iter().filter(|d| d.revoked).collect();
     if revoked_visible.len() > 1 {
         let card = widgets::card();
@@ -220,7 +220,9 @@ fn confirm_remove(button: &gtk::Button, fingerprint: String, name: String, pages
             },
             move |reply| {
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: could not remove the device from the list: {message}");
+                    eprintln!(
+                        "omnibridge-gui: could not remove the device from the list: {message}"
+                    );
                     pages.refresh_now();
                     return;
                 }
@@ -262,7 +264,7 @@ fn confirm_remove_all(button: &gtk::Button, fingerprints: Vec<String>, pages: Pa
         let fingerprints = fingerprints.clone();
         client::send(Request::HideAllRevokedDevices, move |reply| {
             if let Ok(Response::Error { message }) = reply {
-                eprintln!("anyflow-gui: could not remove the revoked devices: {message}");
+                eprintln!("omnibridge-gui: could not remove the revoked devices: {message}");
                 pages.refresh_now();
                 return;
             }
@@ -326,7 +328,7 @@ fn grant_row(
             },
             move |reply| {
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: the daemon refused the grant change: {message}");
+                    eprintln!("omnibridge-gui: the daemon refused the grant change: {message}");
                 }
                 pages.refresh_now();
             },
@@ -362,7 +364,7 @@ fn confirm_revoke(button: &gtk::Button, device_id: String, name: String, pages: 
             },
             move |reply| {
                 if let Ok(Response::Error { message }) = reply {
-                    eprintln!("anyflow-gui: could not revoke: {message}");
+                    eprintln!("omnibridge-gui: could not revoke: {message}");
                 }
                 pages.refresh_now();
             },

@@ -2,19 +2,19 @@
 
 | Field | Value |
 | --- | --- |
-| **Title** | How AnyFlow should be delivered on Linux |
+| **Title** | How OmniBridge should be delivered on Linux |
 | **Status** | Research / Draft |
 | **Last reviewed** | 2026-08-31 |
-| **Scope** | RPM, DEB, tarball, Flatpak, AppImage, Snap — assessed against what AnyFlow actually needs from the host. |
+| **Scope** | RPM, DEB, tarball, Flatpak, AppImage, Snap — assessed against what OmniBridge actually needs from the host. |
 | **Decision status** | PROPOSED. **PLAT-DEC-007** (Flatpak viability) is OPEN and POC-gated. |
 | **Evidence** | REPO VERIFIED for current packaging; OFFICIAL DOC VERIFIED for Flatpak sandbox behaviour; POC REQUIRED where marked. |
 | **Related documents** | [04](04-LINUX-PORTABILITY.md), [05](05-DEBIAN-UBUNTU-COMPATIBILITY.md), [19](19-PACKAGING-AND-DISTRIBUTION.md), [20](20-SECURITY-THREAT-ANALYSIS.md) |
 
 ---
 
-## 1. What AnyFlow needs from the host
+## 1. What OmniBridge needs from the host
 
-Packaging formats are usually compared on convenience. That is the wrong axis here. AnyFlow
+Packaging formats are usually compared on convenience. That is the wrong axis here. OmniBridge
 is a **deep desktop-integration application**: it owns the system clipboard, runs
 continuously, binds a listening TCP port, speaks multicast DNS, writes into the user's
 Downloads folder, and starts at login. A format that sandboxes any one of those away does not
@@ -41,7 +41,7 @@ Nine requirements, eight sandbox-sensitive. That is the finding that decides thi
 ## 2. Current state
 
 `packaging/fedora/` contains an RPM spec and a systemd user unit. The spec installs
-`anyflowd`, `anyflow` and `anyflowd.service`, plus `LICENSE`, `README.md` and `docs/`.
+`omnibridged`, `omnibridge` and `omnibridged.service`, plus `LICENSE`, `README.md` and `docs/`.
 
 Gaps, all of them format-independent (repeated from [04 §11](04-LINUX-PORTABILITY.md) because
 they are packaging work):
@@ -50,9 +50,9 @@ they are packaging work):
 - no `.desktop` entry, so no menu entry and no icon;
 - no `hicolor` icon install, though `docs/design/assets/` has the artwork and
   `gui/build.rs` already compiles it into a GResource;
-- no AppStream `metainfo.xml`, so AnyFlow is invisible in GNOME Software and KDE Discover;
+- no AppStream `metainfo.xml`, so OmniBridge is invisible in GNOME Software and KDE Discover;
 - no XDG autostart entry — the daemon only starts if the user runs
-  `systemctl --user enable --now anyflowd.service`, which `%post` tells them to do;
+  `systemctl --user enable --now omnibridged.service`, which `%post` tells them to do;
 - `wl-clipboard` is not declared even as a weak dependency, though `upower` is
   (`Recommends: upower`).
 
@@ -83,7 +83,7 @@ Nothing here is hard. All of it is on the critical path for "Linux is a supporte
 
 Same profile as RPM. Build-dependency detail is in [05 §6](05-DEBIAN-UBUNTU-COMPATIBILITY.md).
 The only structural difference is Debian's preference for unbundled `librust-*` crates, which
-AnyFlow's dependency set makes impractical for a first package (**PLAT-DEC-011**).
+OmniBridge's dependency set makes impractical for a first package (**PLAT-DEC-011**).
 
 **Verdict: PRIMARY for Debian/Ubuntu.** Ship from CI first; pursue archive inclusion later, if
 ever.
@@ -99,7 +99,7 @@ ever.
 | desktop integration | ⚠️ Manual |
 | maintenance | Very low |
 
-Genuinely useful for: distributions AnyFlow does not package for, non-systemd distros, test
+Genuinely useful for: distributions OmniBridge does not package for, non-systemd distros, test
 labs, CI, and users who want to try it without touching the package manager. It should exist
 because it costs one CI job.
 
@@ -112,20 +112,20 @@ sandbox collides with the most of §1. Assessing it honestly matters more than p
 
 | Requirement | Under Flatpak |
 | --- | --- |
-| `wl-copy` / `wl-paste` | **Must be built into the Flatpak.** The host's binaries are not on the sandbox `PATH`. Doable (a small manifest module), but it means AnyFlow ships its own `wl-clipboard`, and a version mismatch with the compositor's protocol (see [06 §4](06-KDE-PLASMA-WAYLAND.md)) becomes AnyFlow's problem rather than the distro's — arguably *better*, since it lets AnyFlow guarantee 2.3.0. |
+| `wl-copy` / `wl-paste` | **Must be built into the Flatpak.** The host's binaries are not on the sandbox `PATH`. Doable (a small manifest module), but it means OmniBridge ships its own `wl-clipboard`, and a version mismatch with the compositor's protocol (see [06 §4](06-KDE-PLASMA-WAYLAND.md)) becomes OmniBridge's problem rather than the distro's — arguably *better*, since it lets OmniBridge guarantee 2.3.0. |
 | Wayland clipboard access | The bundled `wl-copy` needs the Wayland socket: `--socket=wayland`. Should work. **POC.** |
-| Xwayland XFIXES fallback | Needs `--socket=x11`, which is a notably broad permission. On GNOME this is the *only* watch source (ADR-0014), so a Flatpak GNOME build cannot do auto-send without it. **This is a real tension: the format's security value is undercut by exactly the permission AnyFlow needs on its primary desktop.** |
+| Xwayland XFIXES fallback | Needs `--socket=x11`, which is a notably broad permission. On GNOME this is the *only* watch source (ADR-0014), so a Flatpak GNOME build cannot do auto-send without it. **This is a real tension: the format's security value is undercut by exactly the permission OmniBridge needs on its primary desktop.** |
 | TCP listener | `--share=network` gives host networking. ✅ |
-| **mDNS** | The known Flatpak limitation is that **`.local` name resolution does not work in the sandbox** — there is no NSS/Avahi path, and an mDNS portal is still only a discussion upstream (OFFICIAL DOC VERIFIED: flatpak issues #348, #4044; xdg-desktop-portal discussion #1365). **But AnyFlow does not resolve `.local` names.** It runs its own responder (`mdns-sd`) and dials the IP addresses from the DNS-SD record. With `--share=network` the sandbox shares the host network namespace, so multicast on 5353 should work. **This is the single most important unknown about Flatpak for AnyFlow, and it is testable in an hour.** |
+| **mDNS** | The known Flatpak limitation is that **`.local` name resolution does not work in the sandbox** — there is no NSS/Avahi path, and an mDNS portal is still only a discussion upstream (OFFICIAL DOC VERIFIED: flatpak issues #348, #4044; xdg-desktop-portal discussion #1365). **But OmniBridge does not resolve `.local` names.** It runs its own responder (`mdns-sd`) and dials the IP addresses from the DNS-SD record. With `--share=network` the sandbox shares the host network namespace, so multicast on 5353 should work. **This is the single most important unknown about Flatpak for OmniBridge, and it is testable in an hour.** |
 | Downloads directory | `--filesystem=xdg-download` grants it. Or the FileTransfer/Documents portal, which would be more idiomatic but is a code change. |
 | 0600 key + mode enforcement | The data dir maps to `~/.var/app/<id>/data`. `require_private_mode` should still pass. **POC.** |
 | Background / autostart | The **Background portal** (`org.freedesktop.portal.Background`) with `autostart`. This is the supported way and it is a *user-visible permission prompt*, which is arguably correct for a background network daemon. |
-| CLI (`anyflow`) | Awkward. `flatpak run --command=anyflow io.github.yurisismotto.AnyFlow status` is not a CLI anyone wants. A wrapper script helps; it is still second-class. |
+| CLI (`omnibridge`) | Awkward. `flatpak run --command=omnibridge io.github.yurisismotto.OmniBridge status` is not a CLI anyone wants. A wrapper script helps; it is still second-class. |
 | UPower | `--system-talk-name=org.freedesktop.UPower`. Optional anyway. |
-| Updates, signing, integration | ✅ Flathub does all of this well, and the AppStream metainfo AnyFlow needs anyway is required there. |
+| Updates, signing, integration | ✅ Flathub does all of this well, and the AppStream metainfo OmniBridge needs anyway is required there. |
 
 **Verdict: EXPERIMENTAL, POC-gated (PLAT-DEC-007).** Flatpak is *plausible* — more plausible
-than the "no mDNS in Flatpak" headline suggests, because AnyFlow's discovery does not use the
+than the "no mDNS in Flatpak" headline suggests, because OmniBridge's discovery does not use the
 mechanism that is broken. The blockers are the `--socket=x11` requirement on GNOME and the
 second-class CLI, not networking.
 
@@ -162,14 +162,14 @@ already covers that use case better.
 | Aspect | Assessment |
 | --- | --- |
 | Sandbox | Similar constraints to Flatpak, with interfaces instead of permissions |
-| Relevant interfaces | `network`, `network-bind`, `wayland`, `x11`, `home`, `desktop`, `upower-observe`; **`avahi-observe`/`avahi-control` for mDNS**, which are *Avahi-shaped* and AnyFlow does not use Avahi |
+| Relevant interfaces | `network`, `network-bind`, `wayland`, `x11`, `home`, `desktop`, `upower-observe`; **`avahi-observe`/`avahi-control` for mDNS**, which are *Avahi-shaped* and OmniBridge does not use Avahi |
 | Daemon support | Genuinely good — snapd supports daemons natively, which is better than Flatpak here |
 | Store | Single vendor, and a store account requirement |
 | Auto-update | Enforced, which some users dislike |
 
 **Verdict: NOT RECOMMENDED for v1**, absent a specific reason. Snap is technically the best
 *daemon* story among sandboxed formats, but the Avahi-shaped mDNS interfaces do not match
-AnyFlow's own-responder design, and Ubuntu users are well served by a `.deb`. Revisit only if
+OmniBridge's own-responder design, and Ubuntu users are well served by a `.deb`. Revisit only if
 Ubuntu adoption makes it worth it.
 
 ---
@@ -181,7 +181,7 @@ Worth isolating, because it is the most quoted objection and the most misunderst
 The documented Flatpak limitation is **`.local` hostname resolution**: `getaddrinfo("x.local")`
 inside a sandbox has no path to Avahi or systemd-resolved, and upstream has no portal for it.
 
-AnyFlow's discovery does **not** work that way:
+OmniBridge's discovery does **not** work that way:
 
 - `daemon/src/mdns.rs` registers a service with `mdns-sd`, an **in-process responder**, and
   uses `.enable_addr_auto()` so the crate tracks interface addresses itself;
@@ -189,7 +189,7 @@ AnyFlow's discovery does **not** work that way:
   the record**, not from a hostname;
 - Android's `NsdManager` likewise resolves to addresses.
 
-So the failing mechanism is one AnyFlow does not use. What AnyFlow needs is: a socket bound to
+So the failing mechanism is one OmniBridge does not use. What OmniBridge needs is: a socket bound to
 UDP 5353 that can send and receive multicast on the host's interfaces. `--share=network`
 shares the host network namespace, which should provide exactly that.
 
@@ -200,7 +200,7 @@ Unverified parts, which is why this is POC and not a conclusion:
 - whether `IP_ADD_MEMBERSHIP` on each interface is permitted.
 
 **POC-LINUX-03** answers all three in one sitting. Until then, "Flatpak breaks mDNS" is an
-unverified claim about AnyFlow specifically, and this document declines to repeat it as fact.
+unverified claim about OmniBridge specifically, and this document declines to repeat it as fact.
 
 ---
 
@@ -215,7 +215,7 @@ unverified claim about AnyFlow specifically, and this document declines to repea
 | **AppImage** | **NOT RECOMMENDED** | GTK bundling cost, no update path, no daemon story |
 | **Snap** | **NOT RECOMMENDED (v1)** | Avahi-shaped interfaces do not match our design |
 
-Stated as the brief asks: **do not choose a universal format because it is popular.** AnyFlow
+Stated as the brief asks: **do not choose a universal format because it is popular.** OmniBridge
 is closer to a system agent than to an application, and system agents are packaged by the
 system.
 
@@ -225,8 +225,8 @@ system.
 
 | Package | Contents | Depends |
 | --- | --- | --- |
-| `anyflow` | `anyflowd`, `anyflow`, `anyflowd.service`, autostart `.desktop`, docs, licence | libc only; `Recommends: upower`, `Suggests: wl-clipboard` |
-| `anyflow-gui` | `anyflow-gui`, `.desktop`, hicolor icons, AppStream metainfo | `anyflow (= version)`, GTK ≥ 4.12, libadwaita ≥ 1.5 |
+| `omnibridge` | `omnibridged`, `omnibridge`, `omnibridged.service`, autostart `.desktop`, docs, licence | libc only; `Recommends: upower`, `Suggests: wl-clipboard` |
+| `omnibridge-gui` | `omnibridge-gui`, `.desktop`, hicolor icons, AppStream metainfo | `omnibridge (= version)`, GTK ≥ 4.12, libadwaita ≥ 1.5 |
 
 The split exists so distributions below the libadwaita floor
 ([05](05-DEBIAN-UBUNTU-COMPATIBILITY.md)) can still ship the daemon.
@@ -234,10 +234,10 @@ The split exists so distributions below the libadwaita floor
 Files that need to be *authored*, not just installed:
 
 ```
-packaging/common/io.github.yurisismotto.AnyFlow.desktop
-packaging/common/io.github.yurisismotto.AnyFlow.metainfo.xml
-packaging/common/anyflow-autostart.desktop          # X-GNOME-Autostart-enabled
-packaging/common/icons/hicolor/scalable/apps/io.github.yurisismotto.AnyFlow.svg
+packaging/common/io.github.yurisismotto.OmniBridge.desktop
+packaging/common/io.github.yurisismotto.OmniBridge.metainfo.xml
+packaging/common/omnibridge-autostart.desktop          # X-GNOME-Autostart-enabled
+packaging/common/icons/hicolor/scalable/apps/io.github.yurisismotto.OmniBridge.svg
 ```
 
 Artwork already exists in `docs/design/assets/` (`app-icon.svg`, `logo-flowing-a.svg`,
@@ -248,7 +248,7 @@ icon install is a copy, not a design task.
 
 ## 7. Firewall, which packaging must not ignore
 
-`anyflowd` binds TCP 55432 and joins multicast 5353. Default host behaviour differs:
+`omnibridged` binds TCP 55432 and joins multicast 5353. Default host behaviour differs:
 
 | Distro | Default firewall | Inbound 55432 | mDNS |
 | --- | --- | --- | --- |
@@ -261,8 +261,8 @@ connection from the phone, and Debian/Ubuntu "just work". Whether certification 
 (because the dev machine already had a rule) is worth checking.
 
 **Recommendation:** ship a firewalld service definition
-(`/usr/lib/firewalld/services/anyflow.xml`) in the RPM, and **do not enable it silently**.
-Tell the user in `%post`, or better, have `anyflow status` detect an unreachable listener and
+(`/usr/lib/firewalld/services/omnibridge.xml`) in the RPM, and **do not enable it silently**.
+Tell the user in `%post`, or better, have `omnibridge status` detect an unreachable listener and
 say so. Opening a port without consent is the wrong default even for one's own package.
 Recorded as **PKG-008**, **LINUX-004**.
 
@@ -276,7 +276,7 @@ changing, never open to the world.
 
 | ID | Question |
 | --- | --- |
-| **POC-LINUX-03** | Does AnyFlow work as a Flatpak? Specifically: multicast on 5353 with `--share=network`; bundled `wl-clipboard` against the host compositor; XFIXES via `--socket=x11`; key-mode enforcement in `~/.var/app`; autostart via the Background portal. |
+| **POC-LINUX-03** | Does OmniBridge work as a Flatpak? Specifically: multicast on 5353 with `--share=network`; bundled `wl-clipboard` against the host compositor; XFIXES via `--socket=x11`; key-mode enforcement in `~/.var/app`; autostart via the Background portal. |
 
 | Backlog | Item |
 | --- | --- |
@@ -284,7 +284,7 @@ changing, never open to the world.
 | **PKG-002** | Package the GUI binary |
 | **PKG-003** | XDG autostart entry alongside the systemd unit |
 | **PKG-004** | Declare `wl-clipboard`; distro-neutral "not installed" message |
-| **PKG-005** | Split `anyflow` / `anyflow-gui` |
+| **PKG-005** | Split `omnibridge` / `omnibridge-gui` |
 | **PKG-006** | Gate graphical tests out of buildd/mock `%check` |
 | **PKG-007** | Recommend `xdg-desktop-portal-{gtk,kde}` |
 | **PKG-008** | firewalld service definition, not auto-enabled |

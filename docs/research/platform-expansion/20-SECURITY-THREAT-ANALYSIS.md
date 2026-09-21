@@ -50,7 +50,7 @@ Format: existing mitigation → what changes → recommended mitigation → how 
 
 | | |
 | --- | --- |
-| **Risk** | A hostile local process creates `\\.\pipe\AnyFlow\…` before the agent does. The UI connects to it and hands over control commands — pair, grant, send clipboard |
+| **Risk** | A hostile local process creates `\\.\pipe\OmniBridge\…` before the agent does. The UI connects to it and hands over control commands — pair, grant, send clipboard |
 | **Existing** | Linux is immune: the socket path lives in a 0700 per-user directory |
 | **Mitigation** | `FILE_FLAG_FIRST_PIPE_INSTANCE`; per-SID DACL; UI verifies the server process token; per-SID pipe name |
 | **Verify** | POC-WIN-07 must include a hostile-squatter test, not just a happy path |
@@ -90,7 +90,7 @@ Format: existing mitigation → what changes → recommended mitigation → how 
 | | |
 | --- | --- |
 | **Risk** | The Linux daemon runs under `ProtectSystem=strict`, `SystemCallFilter`, `RestrictAddressFamilies`, `MemoryDenyWriteExecute`. Windows and macOS agents have no equivalent, so a memory-safety bug (in a dependency; the workspace itself is `unsafe_code = "forbid"`) has more room |
-| **Existing** | `anyflowd.service` |
+| **Existing** | `omnibridged.service` |
 | **Mitigation** | Windows: process mitigation policies (dynamic-code prohibition, CFG, signature policy). macOS: hardened runtime without JIT entitlements. **Record as an accepted, named gap; do not claim parity** |
 | **Verify** | Documentation review; **SEC-005** |
 
@@ -98,11 +98,11 @@ Format: existing mitigation → what changes → recommended mitigation → how 
 
 | | |
 | --- | --- |
-| **Risk** | A clip AnyFlow writes on Windows is uploaded to the user's Microsoft account by Cloud Clipboard, or retained in Win+V history. A local-first product silently touching a cloud |
+| **Risk** | A clip OmniBridge writes on Windows is uploaded to the user's Microsoft account by Cloud Clipboard, or retained in Win+V history. A local-first product silently touching a cloud |
 | **Existing** | `sensitive_hint` is honoured on Linux (`wl-copy --sensitive`) and Android (`EXTRA_IS_SENSITIVE`) |
 | **Mitigation** | **WIN-008** — set all three exclusion formats (`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0, `CanUploadToCloudClipboard`=0) for sensitive clips; document the general behaviour. **VERIFIED (V-04)** — names and semantics confirmed, WIN-008 implementable |
 | **Verify** | POC-WIN-05 with clipboard history enabled |
-| **Note** | This is the user's own setting, but AnyFlow is the thing putting data there |
+| **Note** | This is the user's own setting, but OmniBridge is the thing putting data there |
 
 ### X8 — macOS pasteboard polling and privacy
 
@@ -153,7 +153,7 @@ Format: existing mitigation → what changes → recommended mitigation → how 
 | | |
 | --- | --- |
 | **Risk** | A rule scoped to Public or `0.0.0.0/0` exposes the listener on café and hotel networks. Windows' own "allow through firewall" prompt defaults to including Public |
-| **Existing** | Linux: no rule is created at all (Fedora's firewalld may in fact *block* AnyFlow — the opposite problem) |
+| **Existing** | Linux: no rule is created at all (Fedora's firewalld may in fact *block* OmniBridge — the opposite problem) |
 | **Mitigation** | Installer creates Private + `LocalSubnet` rules explicitly; never rely on the prompt; remove rules on uninstall (**WIN-011**) |
 | **Verify** | POC-WIN-08, including a negative test on a Public network |
 

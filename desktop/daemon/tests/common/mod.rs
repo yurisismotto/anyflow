@@ -1,7 +1,7 @@
 //! Test harness: a full second device, over real TLS, in-process.
 //!
 //! Nothing here weakens security to make tests pass. The client uses the same
-//! `anyflow_core::tls::client_config` as production code, with real
+//! `omnibridge_core::tls::client_config` as production code, with real
 //! certificate pinning. Tests that expect a rejection get one from the actual
 //! verifier, not from a stub.
 
@@ -11,18 +11,18 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyflow_capability_battery::{BatteryCapability, BatteryState};
-use anyflow_core::capability::CapabilityRegistry;
-use anyflow_core::error::{PairingError, Result};
-use anyflow_core::identity::LocalIdentity;
-use anyflow_core::pairing::PairingToken;
-use anyflow_core::session::{
+use omnibridge_capability_battery::{BatteryCapability, BatteryState};
+use omnibridge_core::capability::CapabilityRegistry;
+use omnibridge_core::error::{PairingError, Result};
+use omnibridge_core::identity::LocalIdentity;
+use omnibridge_core::pairing::PairingToken;
+use omnibridge_core::session::{
     self, ClientHandshake, PeerStatus, SessionHandle, SessionHost, SessionId,
 };
-use anyflow_core::store::Store;
-use anyflow_core::Fingerprint;
-use anyflow_daemon::state::DaemonState;
-use anyflow_proto::v1;
+use omnibridge_core::store::Store;
+use omnibridge_core::Fingerprint;
+use omnibridge_daemon::state::DaemonState;
+use omnibridge_proto::v1;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_rustls::{TlsAcceptor, TlsConnector};
@@ -46,7 +46,7 @@ pub struct TestServer {
     pub fingerprint: Fingerprint,
     pub battery: Arc<BatteryState>,
     /// Which address families this server's listener actually accepts on.
-    pub families: anyflow_daemon::listener::Families,
+    pub families: omnibridge_daemon::listener::Families,
     /// `files.v1`, in the acceptor role: this is the end that listens.
     pub transfers: Arc<TransferManager>,
     /// `clipboard.v1`, with an in-memory clipboard so the suite never touches
@@ -180,7 +180,7 @@ impl TestServer {
             ))))
             .build();
 
-        let tls = anyflow_core::tls::server_config(store.identity()).expect("server config");
+        let tls = omnibridge_core::tls::server_config(store.identity()).expect("server config");
         let acceptor = TlsAcceptor::from(tls);
 
         let mut state_builder = DaemonState::new(store, registry, Arc::clone(&battery))
@@ -211,7 +211,7 @@ impl TestServer {
             .await;
 
         let (listeners, addr, families) = if dual_stack {
-            let bound = anyflow_daemon::listener::bind_endpoints(0).expect("bind");
+            let bound = omnibridge_daemon::listener::bind_endpoints(0).expect("bind");
             let addr = SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, bound.port));
             (bound.listeners, addr, bound.families)
         } else {
@@ -220,7 +220,7 @@ impl TestServer {
             (
                 vec![listener],
                 addr,
-                anyflow_daemon::listener::Families {
+                omnibridge_daemon::listener::Families {
                     ipv4: true,
                     ipv6: false,
                 },
@@ -229,7 +229,7 @@ impl TestServer {
 
         let accept_state = Arc::clone(&state);
         tokio::spawn(async move {
-            let _ = anyflow_daemon::listener::run(listeners, acceptor, accept_state).await;
+            let _ = omnibridge_daemon::listener::run(listeners, acceptor, accept_state).await;
         });
 
         Self {
@@ -317,7 +317,7 @@ impl TestServer {
     pub async fn notification_policy(
         &self,
         peer: Fingerprint,
-    ) -> anyflow_core::notification_policy::NotificationPolicy {
+    ) -> omnibridge_core::notification_policy::NotificationPolicy {
         let store = self.state.store.lock().await;
         store
             .peer_record(&peer)
@@ -670,11 +670,12 @@ impl TestClient {
         addr: SocketAddr,
         pinned: Fingerprint,
     ) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
-        let config = anyflow_core::tls::client_config(&self.identity, pinned)?;
+        let config = omnibridge_core::tls::client_config(&self.identity, pinned)?;
         let connector = TlsConnector::from(config);
         let tcp = TcpStream::connect(addr).await?;
         // The name is irrelevant: our verifier pins the key and ignores it.
-        let name = rustls_pki_types::ServerName::try_from("anyflow.invalid").expect("static name");
+        let name =
+            rustls_pki_types::ServerName::try_from("omnibridge.invalid").expect("static name");
         Ok(connector.connect(name, tcp).await?)
     }
 
@@ -705,7 +706,7 @@ impl TestClient {
                 });
 
                 let handle = ready_rx.await.map_err(|_| {
-                    anyflow_core::Error::Protocol("session ended before it started")
+                    omnibridge_core::Error::Protocol("session ended before it started")
                 })?;
 
                 Ok(ConnectedSession {
@@ -714,9 +715,9 @@ impl TestClient {
                     negotiated_capabilities: capabilities,
                 })
             }
-            ClientHandshake::PairingRequired => {
-                Err(anyflow_core::Error::Pairing(PairingError::NotInPairingMode))
-            }
+            ClientHandshake::PairingRequired => Err(omnibridge_core::Error::Pairing(
+                PairingError::NotInPairingMode,
+            )),
         }
     }
 }
@@ -820,25 +821,25 @@ where
 // a real TLS data stream, real pinning, the real MAC. A test that expects a
 // refusal gets it from the code that runs in production, never from a stub.
 
-use anyflow_capability_clipboard::backend::{ClipboardBackend, MemoryBackend};
-use anyflow_capability_clipboard::{
+use omnibridge_capability_clipboard::backend::{ClipboardBackend, MemoryBackend};
+use omnibridge_capability_clipboard::{
     ClipboardAuthorizer, ClipboardCapability, ClipboardManager, ClipboardPolicy,
 };
-use anyflow_capability_files::transfer::{FailureReason, TransferId, TransferState};
-use anyflow_capability_files::{
+use omnibridge_capability_files::transfer::{FailureReason, TransferId, TransferState};
+use omnibridge_capability_files::{
     DataStreamDialer, DataStreamIo, Destination, FilesAuthorizer, FilesCapability, FilesConfig,
     IncomingOffer, StreamRole, TransferApproval, TransferManager, TransferSnapshot,
 };
-use anyflow_capability_notifications::backend::{
+use omnibridge_capability_notifications::backend::{
     LockSource, MemoryLock, MemorySink, NotificationSink,
 };
-use anyflow_capability_notifications::{
+use omnibridge_capability_notifications::{
     NotificationAuthorizer, NotificationManager, NotificationPolicy, NotificationsCapability,
 };
-use anyflow_daemon::approval::FileApproval;
+use omnibridge_daemon::approval::FileApproval;
 
 fn is_partial(name: &str) -> bool {
-    name.starts_with(".anyflow-") || name.ends_with(".part")
+    name.starts_with(".omnibridge-") || name.ends_with(".part")
 }
 
 /// A `TransferApproval` a test can steer.
@@ -944,10 +945,10 @@ pub async fn open_data_stream(
     identity: &LocalIdentity,
     pinned: Fingerprint,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>> {
-    let config = anyflow_core::tls::data_stream_client_config(identity, pinned)?;
+    let config = omnibridge_core::tls::data_stream_client_config(identity, pinned)?;
     let connector = TlsConnector::from(config);
     let tcp = TcpStream::connect(addr).await?;
-    let name = rustls_pki_types::ServerName::try_from("anyflow.invalid").expect("static name");
+    let name = rustls_pki_types::ServerName::try_from("omnibridge.invalid").expect("static name");
     Ok(connector.connect(name, tcp).await?)
 }
 
@@ -1030,14 +1031,14 @@ pub struct CapturingCapability {
 }
 
 #[async_trait::async_trait]
-impl anyflow_core::capability::Capability for CapturingCapability {
+impl omnibridge_core::capability::Capability for CapturingCapability {
     fn id(&self) -> &str {
         &self.id
     }
 
     async fn on_message(
         &self,
-        _ctx: &anyflow_core::capability::CapabilityContext,
+        _ctx: &omnibridge_core::capability::CapabilityContext,
         payload: &[u8],
     ) -> Result<()> {
         let _ = self.tx.send(payload.to_vec());
@@ -1132,9 +1133,9 @@ impl Captured {
     }
 }
 
-pub use anyflow_proto::v1::capabilities as pb;
+pub use omnibridge_proto::v1::capabilities as pb;
 /// The same module, under a name the clipboard helpers read better with.
-pub use anyflow_proto::v1::capabilities as clip_pb;
+pub use omnibridge_proto::v1::capabilities as clip_pb;
 
 /// The raw notification side of a client: what the desktop said, undigested.
 pub struct CapturedNotifications {
@@ -1207,7 +1208,7 @@ pub async fn send_notification_control(
     );
     session
         .handle
-        .send_capability(anyflow_core::capability::OutboundMessage {
+        .send_capability(omnibridge_core::capability::OutboundMessage {
             capability_id: "notifications.v1".to_string(),
             payload,
         })
@@ -1220,7 +1221,7 @@ pub async fn send_files_control(session: &ConnectedSession, body: pb::file_contr
         <pb::FileControl as prost::Message>::encode_to_vec(&pb::FileControl { body: Some(body) });
     session
         .handle
-        .send_capability(anyflow_core::capability::OutboundMessage {
+        .send_capability(omnibridge_core::capability::OutboundMessage {
             capability_id: "files.v1".to_string(),
             payload,
         })
