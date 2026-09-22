@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# verify-release.sh — the command a user runs before installing anything.
+#
+# It answers two questions in the only order that is useful:
+#
+#   1. did the OmniBridge maintainer sign this release's manifest?
+#   2. are the files beside it the files that manifest describes?
+#
+# Checking the digests first and the signature afterwards would be checking a
+# download against itself. So the signature is checked first, and the manifest
+# is only trusted once it is known to be the maintainer's.
+#
+# WHY A MISSING SIGNATURE IS A FAILURE AND NOT A SKIP
+# ---------------------------------------------------
+# An attacker who can substitute artifacts can also delete `SHA256SUMS.asc`.
+# A verifier that reports "no signature found, checking digests only" and exits
+# 0 therefore gives its strongest answer -- "verified" -- in exactly the case
+# it is meant to catch. `--allow-unsigned` exists for the pre-RC period when
+# there is genuinely no key yet; it is opt-in, it prints a warning that says
+# what is not being checked, and it is never the default.
+
+set -uo pipefail
+
+DIR=""; KEYRING=""; EXPECT_FPR="${OMNIBRIDGE_SIGNING_FPR:-}"; ALLOW_UNSIGNED=0
+usage() {
+    cat >&2 <<USAGE
+usage: $0 --dir RELEASE_DIR [--keyring FILE] [--fingerprint FPR] [--allow-unsigned]
+
+  --dir           directory holding the artifacts, SHA256SUMS and SHA256SUMS.asc
+  --keyring       a keyring holding ONLY the expected public key; without it,
+                  the user's default gpg keyring is used
+  --fingerprint   the full fingerprint the signature must carry; defaults to
+                  \$OMNIBRIDGE_SIGNING_FPR. Without one, any key the keyring
+                  trusts is accepted, which is weaker and is said so.
+  --allow-unsigned  proceed when there is no signature at all. Prints what is
+                  not being checked. Not the default, and never in CI.
+USAGE
+    exit 2
+}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dir) DIR="$2"; shift 2 ;;
+        --keyring) KEYRING="$2"; shift 2 ;;
+        --fingerprint) EXPECT_FPR="$2"; shift 2 ;;
+        --allow-unsigned) ALLOW_UNSIGNED=1; shift ;;
+        -h|--help) usage ;;
+        *) echo "unknown argument: $1" >&2; usage ;;
+    esac
+done
+[ -n "$DIR" ] || usage
+
+die() { printf '\nVERIFICATION FAILED: %s\n' "$*" >&2; exit 3; }
+say() { printf 'verify: %s\n' "$*"; }
+
+[ -d "$DIR" ] || die "'$DIR' is not a directory"
+MANIFEST="$DIR/SHA256SUMS"
+SIG="$DIR/SHA256SUMS.asc"
+[ -f "$MANIFEST" ] || die "no SHA256SUMS in '$DIR'; there is nothing to verify against"
+[ -s "$MANIFEST" ] || die "SHA256SUMS is empty"
+n_entries="$(grep -c . <"$MANIFEST" || true)"
+[ "${n_entries:-0}" -ge 1 ] 2>/dev/null || die "SHA256SUMS lists no files"
+say "SHA256SUMS lists $n_entries file(s)"
+
+# ---------------------------------------------------------------------------
+# 1. the signature
+# ---------------------------------------------------------------------------
+if [ ! -f "$SIG" ]; then
+    if [ "$ALLOW_UNSIGNED" = "1" ]; then
+        cat >&2 <<'WARN'
+
+WARNING: this release carries no SHA256SUMS.asc, and --allow-unsigned was
+given. The digests below prove the download is internally consistent. They
+prove NOTHING about who produced it: anyone who can replace an artifact can
+replace SHA256SUMS to match. Do not use this mode to accept a release you
+obtained from anywhere but the official source.
+
+WARN
+    else
+        die "no SHA256SUMS.asc in '$DIR'. An unsigned release is not verified. Pass --allow-unsigned only if you understand that this checks the download against itself."
+    fi
+else
+    command -v gpg >/dev/null 2>&1 || die "gpg is not installed; the signature cannot be checked"
+    [ -s "$SIG" ] || die "SHA256SUMS.asc is empty"
+
+    GPG=(gpg --batch --status-fd 3)
+    if [ -n "$KEYRING" ]; then
+        [ -f "$KEYRING" ] || die "--keyring '$KEYRING' does not exist"
+        # A keyring holding only the expected key, and no access to the user's
+        # own: --no-default-keyring is what makes "trusted by this keyring"
+        # mean something narrower than "in my web of trust".
+        GPG+=(--no-default-keyring --keyring "$KEYRING")
+        say "checking against the keyring $KEYRING"
+    fi
+
+    status="$("${GPG[@]}" --verify "$SIG" "$MANIFEST" 3>&1 1>/dev/null 2>/dev/null)" || true
+    case "$status" in
+        *GOODSIG*) : ;;
+        *) die "the signature on SHA256SUMS is not good$( [ -n "$KEYRING" ] && printf ' for %s' "$KEYRING" ). gpg said: $(printf '%s' "$status" | tr '\n' ' ' | head -c 200)" ;;
+    esac
+    sig_fpr="$(printf '%s\n' "$status" | awk '/VALIDSIG/ {print $3; exit}')"
+    [ -n "$sig_fpr" ] || die "the signature verified but carried no fingerprint; refusing to report success"
+    say "good signature by $sig_fpr"
+
+    if [ -n "$EXPECT_FPR" ]; then
+        # Case-insensitive, and spaces stripped, because a fingerprint is
+        # copied from a web page as often as from a terminal.
+        want="$(printf '%s' "$EXPECT_FPR" | tr -d '[:space:]' | tr 'a-f' 'A-F')"
+        got="$(printf '%s' "$sig_fpr"     | tr -d '[:space:]' | tr 'a-f' 'A-F')"
+        [ "$want" = "$got" ] \
+            || die "the signature is by $got, but $want was expected. This is what a substituted release looks like."
+        say "the signing key is the expected one ($got)"
+    else
+        say "NOTE: no expected fingerprint was given, so any key this keyring trusts would pass. Pass --fingerprint for the stronger check."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 2. the files
+# ---------------------------------------------------------------------------
+# Only now, with the manifest's provenance settled, are the digests worth
+# checking. Every listed file must be present: `sha256sum -c` reports a missing
+# file as a failure, and --quiet keeps the output to what went wrong.
+missing=0
+while read -r _ path; do
+    [ -n "$path" ] || continue
+    [ -e "$DIR/$path" ] || { printf 'verify: MISSING  %s\n' "$path" >&2; missing=$(( missing + 1 )); }
+done <"$MANIFEST"
+[ "$missing" -eq 0 ] || die "$missing file(s) named in SHA256SUMS are not present"
+
+( cd "$DIR" && sha256sum -c --quiet SHA256SUMS ) \
+    || die "at least one file does not match its digest in SHA256SUMS"
+say "all $n_entries file(s) match their digests"
+
+if [ -f "$SIG" ]; then
+    printf '\nVERIFIED  %s\n  %s file(s), signed by %s\n' "$DIR" "$n_entries" "${sig_fpr:-unknown}"
+else
+    printf '\nCHECKED (UNSIGNED)  %s\n  %s file(s) are internally consistent; nothing about their origin was verified\n' "$DIR" "$n_entries"
+fi
