@@ -1,0 +1,103 @@
+# CI-005 — the packaging gate.
+#
+# What this proves, and what it does not
+# --------------------------------------
+# It proves that the packaging tree is internally consistent: the spec's
+# Version: and Rust floor still agree with `desktop/Cargo.toml`, the build-fatal
+# defects B1–B3 are still fixed, the canonical systemd user unit still carries
+# every directive gates S1–S3 were measured against, and the shell in
+# `packaging/` still parses.
+#
+# It does **NOT** build a package. No `mock`, no `rpmbuild`, no `dpkg-buildpackage`
+# and no container — those need a Fedora or Debian buildroot and a vendored
+# source bundle, and they belong to the release pipeline (audit §13, Phase 5).
+# A green tick here means the packaging tree is coherent, not that an artifact
+# was produced.
+#
+# It also does not run gates S1, S2 or S3. Those need a real `systemd --user`
+# manager, a session and a built daemon; a GitHub runner has none of the three.
+# They are measured by `packaging/tests/systemd-unit-gates.sh` on a real host
+# and recorded in docs/audits/packaging/PACKAGING-V1-SYSTEMD-UNIT.md.
+#
+# Why it exists
+# -------------
+# Until this file, a pull request touching only `packaging/**` ran **zero**
+# GitHub checks: all four existing workflows filter to `desktop/**` or
+# `android/**`. The packaging tree is where the systemd sandbox, the offline
+# build and the user-state guarantees live, and none of it was gated. That is
+# the same hole `android-ci.yml` was written to close on the Android side, and
+# it is worth closing before three more packaging branches land in it.
+#
+# `desktop/Cargo.toml` is in the path filter on purpose: two of the assertions
+# below read it. A version bump there with no matching edit to the spec is
+# exactly the drift the version check exists to catch, and it would not
+# otherwise trigger this workflow.
+
+name: Packaging · checks
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'packaging/**'
+      - 'desktop/Cargo.toml'
+      - '.github/workflows/packaging-checks.yml'
+  # Deliberately NOT `feature/**`, matching the discipline in the other four
+  # workflows: a feature branch with an open PR would otherwise run this twice
+  # for one push.
+  push:
+    branches: [main, develop]
+    paths:
+      - 'packaging/**'
+      - 'desktop/Cargo.toml'
+      - '.github/workflows/packaging-checks.yml'
+  workflow_dispatch:
+
+# Read-only. This job asserts; it publishes nothing and needs no token beyond
+# fetching the source.
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Packaging tree assertions
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell parses
+        run: |
+          for f in packaging/tests/*.sh packaging/release/*.sh; do
+              bash -n "$f" && printf '  ok    %s parses\n' "$f"
+          done
+
+      - name: Shellcheck
+        run: |
+          # Pre-installed on the GitHub Ubuntu images. -S warning keeps the
+          # gate on defects rather than on style, which is what stops a
+          # linter from being switched off the first time it is inconvenient.
+          shellcheck --version
+          shellcheck -S warning packaging/tests/*.sh packaging/release/*.sh
+
+      - name: Static packaging checks
+        run: ./packaging/tests/packaging-checks.sh
+
+      # systemd-analyze reads the unit the way systemd will: it catches a
+      # misspelled directive, an unparseable value and a directive in the wrong
+      # section, none of which a grep can see.
+      #
+      # The stub is there because `verify` also checks that ExecStart= points
+      # at something executable, and it is the *directives* this job is asking
+      # about. That the real binary lands at /usr/bin/omnibridged is asserted
+      # separately, by packaging-checks.sh against a built RPM.
+      - name: systemd-analyze verify the canonical unit
+        run: |
+          systemd-analyze --version | head -1
+          sudo install -Dm0755 /bin/true /usr/bin/omnibridged
+          systemd-analyze verify packaging/common/omnibridged.service
+          echo "  ok    the unit verifies clean"
+          sudo rm -f /usr/bin/omnibridged

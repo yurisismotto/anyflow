@@ -85,7 +85,8 @@ omnibridge/
 │   └── gui/                   omnibridge-gui — GTK4 / libadwaita
 ├── android/                   Kotlin + Compose app
 ├── browser-extension/         (placeholder)
-├── packaging/fedora/          systemd user unit, RPM spec
+├── packaging/common/          the systemd user unit — one file, every format
+├── packaging/fedora/          RPM spec, vendor config
 └── docs/                      see docs/README.md for the full taxonomy
     ├── adr/                   ADR-0001 … ADR-0018
     ├── architecture/          OVERVIEW.md, PROTOCOL.md, FILES.md, CLIPBOARD.md, NOTIFICATIONS.md
@@ -199,12 +200,11 @@ cargo test --workspace          # 981 tests
 
 As a service. The unit is a **user** unit — the identity key lives 0600 in
 your `$XDG_DATA_HOME` and the control socket in your `$XDG_RUNTIME_DIR`, so
-nothing here wants root. Its contents are distribution-neutral and it runs
-unchanged on all four targets; only the directory it currently sits in is
-Fedora-named, which is a packaging debt rather than a dependency:
+nothing here wants root. It is distribution-neutral and lives in
+`packaging/common/`, which is the one copy every package format installs:
 
 ```bash
-install -Dm0644 packaging/fedora/omnibridged.service \
+install -Dm0644 packaging/common/omnibridged.service \
     ~/.config/systemd/user/omnibridged.service
 systemctl --user enable --now omnibridged.service
 ```

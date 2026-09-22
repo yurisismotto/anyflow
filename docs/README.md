@@ -49,7 +49,7 @@ docs/
 │   └── notifications-v1/       notifications.v1 specification and its PoCs
 ├── audits/
 │   ├── linux-compat/           Ubuntu / Debian compatibility, U0 → U2 — see its README
-│   ├── packaging/              Linux packaging readiness and build foundation — see its README
+│   ├── packaging/              Linux packaging readiness, build foundation, systemd unit — see its README
 │   └── rebrand/                remaining AnyFlow occurrences after the rename
 ├── certification/
 │   ├── foundation/             Wave 0 / POC-CORE-04 gates — see its README

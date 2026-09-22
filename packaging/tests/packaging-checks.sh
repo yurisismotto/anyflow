@@ -22,6 +22,8 @@ ROOT="$(git -C "$(dirname -- "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 SPEC="$ROOT/packaging/fedora/omnibridge.spec"
 VENDOR_CONFIG="$ROOT/packaging/fedora/cargo-vendor-config.toml"
 
+UNIT="$ROOT/packaging/common/omnibridged.service"
+
 BUNDLE_DIR=""
 RPM_FILE=""
 while [ $# -gt 0 ]; do
@@ -165,6 +167,116 @@ for pkg in omnibridge-daemon omnibridge-cli omnibridge-gui; do
 done
 
 # --------------------------------------------------------------------------
+group "The canonical systemd user unit (audit §7.1; gates S1-S3)"
+# --------------------------------------------------------------------------
+# One unit, every format. The file used to live under packaging/fedora/, which
+# is where a Debian package would have grown a second copy and where a
+# hardening change would have landed on one distribution and missed the other.
+if [ -f "$UNIT" ]; then
+    pass "the unit is at packaging/common/omnibridged.service"
+else
+    fail "packaging/common/omnibridged.service is missing"
+fi
+if [ -e "$ROOT/packaging/fedora/omnibridged.service" ]; then
+    fail "a second copy of the unit survives under packaging/fedora/"
+else
+    pass "no duplicate unit under packaging/fedora/"
+fi
+if grep -qE '^install .*packaging/common/omnibridged\.service' "$SPEC"; then
+    pass "the spec installs the common unit"
+else
+    fail "the spec does not install packaging/common/omnibridged.service"
+fi
+
+if [ -f "$UNIT" ]; then
+    # Directives, not comments: every check below reads the file with comment
+    # and blank lines stripped, so prose describing a directive can never be
+    # mistaken for the directive itself.
+    grep -vE '^[[:space:]]*(#|$)' "$UNIT" > "$SCRATCH/unit.directives"
+
+    # P2, first defect: without this the daemon cannot create
+    # $XDG_RUNTIME_DIR/omnibridge under ProtectSystem=strict and has nowhere
+    # to bind control.sock.
+    if grep -qx 'RuntimeDirectory=omnibridge' "$SCRATCH/unit.directives"; then
+        pass "S2: RuntimeDirectory=omnibridge"
+    else
+        fail "S2: RuntimeDirectory=omnibridge is absent; the control socket has no directory"
+    fi
+    if grep -qx 'RuntimeDirectoryMode=0700' "$SCRATCH/unit.directives"; then
+        pass "S2: RuntimeDirectoryMode=0700"
+    else
+        fail "S2: RuntimeDirectoryMode is not 0700"
+    fi
+
+    # P2, second and third defects. The grant is the PARENT: measured, the
+    # leaf does not exist on a fresh install, and the '-' prefix that would
+    # let the unit start does not then let the daemon create it.
+    if grep -qx 'ReadWritePaths=%h/.local/share' "$SCRATCH/unit.directives"; then
+        pass "S1: ReadWritePaths=%h/.local/share (the parent, so a fresh install can create its data directory)"
+    else
+        fail "S1: ReadWritePaths= is not the settled %h/.local/share"
+    fi
+    if grep -q '^StateDirectory=' "$SCRATCH/unit.directives"; then
+        fail "StateDirectory= is back; in a user unit it creates ~/.local/state, which the daemon never opens"
+    else
+        pass "no StateDirectory= (it would point at ~/.local/state)"
+    fi
+
+    # The sandbox. These are the lines a well-meaning fix for a start-up
+    # failure reaches for first, so each one is named rather than counted.
+    for directive in \
+        'NoNewPrivileges=true' \
+        'PrivateTmp=true' \
+        'ProtectSystem=strict' \
+        'ProtectHome=read-only' \
+        'ProtectKernelTunables=true' \
+        'ProtectKernelModules=true' \
+        'ProtectControlGroups=true' \
+        'RestrictNamespaces=true' \
+        'RestrictRealtime=true' \
+        'RestrictSUIDSGID=true' \
+        'LockPersonality=true' \
+        'MemoryDenyWriteExecute=true' \
+        'SystemCallArchitectures=native' \
+        'SystemCallFilter=@system-service' \
+        'SystemCallFilter=~@privileged @resources @obsolete' \
+        'RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK'
+    do
+        if grep -qxF "$directive" "$SCRATCH/unit.directives"; then
+            pass "hardening kept: $directive"
+        else
+            fail "hardening weakened or removed: $directive"
+        fi
+    done
+
+    # A user unit, and it must stay one. User=/Group= in a user unit is not
+    # even legal, but naming root anywhere is the mistake worth catching.
+    if grep -qE '^(User|Group)=' "$SCRATCH/unit.directives"; then
+        fail "the unit sets User=/Group=; it is a --user unit and must not"
+    else
+        pass "no User=/Group= — it runs as whoever owns the session"
+    fi
+    if grep -qx 'WantedBy=default.target' "$SCRATCH/unit.directives"; then
+        pass "[Install] WantedBy=default.target (a user unit target)"
+    else
+        fail "the unit is not installed into default.target"
+    fi
+    if grep -qx 'ExecStart=/usr/bin/omnibridged' "$SCRATCH/unit.directives"; then
+        pass "ExecStart is the absolute installed path"
+    else
+        fail "ExecStart is not /usr/bin/omnibridged"
+    fi
+    # The trust store is not the unit's to own. ReadWritePaths grants the
+    # parent and stops there; anything that named the leaf as a directory to
+    # create or clean would be creating package-owned user state.
+    if grep -qE '^(RuntimeDirectory|StateDirectory|CacheDirectory|LogsDirectory|ConfigurationDirectory)=.*\.local' "$SCRATCH/unit.directives"; then
+        fail "a *Directory= directive points into the user's data tree"
+    else
+        pass "no *Directory= directive creates or owns user state"
+    fi
+fi
+
+# --------------------------------------------------------------------------
 group "No maintainer script touches user state (audit R6)"
 # --------------------------------------------------------------------------
 # state.json and identity.key are the trust store. A scriptlet that removed
@@ -204,6 +316,7 @@ if [ -n "$src_tarball" ]; then
         desktop/Cargo.toml \
         packaging/fedora/omnibridge.spec \
         packaging/fedora/cargo-vendor-config.toml \
+        packaging/common/omnibridged.service \
         docs/design/assets/omnibridge-app-icon.svg \
         docs/audits/linux-compat/LINUX-UBUNTU-DEBIAN-COMPAT-U2.md
     do

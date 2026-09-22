@@ -1,0 +1,78 @@
+[Unit]
+Description=OmniBridge — local device continuity daemon
+Documentation=https://github.com/yurisismotto/omnibridge
+# Wait for a usable network, but do not fail without one: the daemon retries
+# and mDNS comes and goes with the link.
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omnibridged
+Restart=on-failure
+RestartSec=5
+
+# The daemon never needs privileges. It binds a port above 1024, writes only
+# under $XDG_DATA_HOME, and talks to a socket in $XDG_RUNTIME_DIR.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+# --- the runtime directory -------------------------------------------------
+# $XDG_RUNTIME_DIR/omnibridge holds control.sock. systemd creates it, owns it,
+# and removes it when the unit stops.
+#
+# It is systemd's job and not the daemon's because ProtectSystem=strict IS
+# effective in a user unit on this systemd: a sandboxed daemon cannot mkdir in
+# $XDG_RUNTIME_DIR, so without this the control socket has nowhere to live and
+# the CLI, the GUI and the tray all have nothing to connect to. Measured:
+# docs/audits/packaging/PACKAGING-V1-READINESS-AUDIT.md §4.2 probes B and D,
+# re-measured against this file in PACKAGING-V1-SYSTEMD-UNIT.md gate S2.
+#
+# 0700 is the same mode the daemon applies to the directory itself when it is
+# run outside systemd (platform-linux/src/lib.rs `bind`), so the two paths
+# agree rather than one relaxing what the other tightened.
+RuntimeDirectory=omnibridge
+RuntimeDirectoryMode=0700
+
+# --- the data directory ----------------------------------------------------
+# $XDG_DATA_HOME/omnibridge holds identity.key and state.json — the trust
+# store. It is the one path outside the runtime directory the daemon writes,
+# and it is deliberately NOT package-owned: the package must never create,
+# move or remove it.
+#
+# The grant is the parent, ~/.local/share, and not the leaf. Two measured
+# reasons, both in PACKAGING-V1-SYSTEMD-UNIT.md gate S1:
+#
+#   * ReadWritePaths= without a '-' prefix refuses to start a unit whose path
+#     does not exist, which is every fresh install; and
+#   * the '-' prefix does not then punch the hole either, so the daemon's
+#     first run cannot create its own data directory inside a read-only $HOME.
+#
+# Granting the parent — which exists for every desktop user — is one directory
+# wider than ideal and stays entirely inside ProtectHome=read-only. It is a
+# bounded, reviewable widening and NOT a weakening of ProtectSystem=strict,
+# which is untouched above.
+#
+# StateDirectory= is NOT used. In a *user* unit it maps to $XDG_STATE_HOME
+# (~/.local/state), which the daemon never opens: it would create an empty
+# directory nobody reads and do nothing for the one that matters.
+ReadWritePaths=%h/.local/share
+
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+# LAN only. No other address families are needed, and denying the rest turns a
+# hypothetical bug into a failed syscall.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=default.target
