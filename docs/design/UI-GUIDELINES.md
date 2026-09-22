@@ -12,7 +12,7 @@ it, and each of them changed something the reference showed.
 
 ### 1. Colour never carries meaning alone
 
-Roughly one man in twelve cannot separate the teal of "connected" from the
+Roughly one man in twelve cannot separate the cyan of "connected" from the
 amber of "not responding", and both are claims about whether what is on screen
 is true right now.
 
@@ -24,8 +24,11 @@ else.
 
 ### 2. Text uses the corrected accents, never the brand hues
 
-Brand teal is 2.49 : 1 on white. See [the two-family rule](BRAND.md#the-two-family-rule).
-Tests on both platforms fail if a text accent drops below AA.
+Bridge Cyan is 2.40 : 1 on white. See [the two-family rule](BRAND.md#the-two-family-rule).
+Tests on both platforms fail if a text accent drops below AA — on the
+background as well as on a card, and on the elevated dark surface as well as
+the plain one, because those are the harder of each pair and were the ones
+not previously checked.
 
 ### 3. The fingerprint is never abbreviated for balance
 
@@ -66,15 +69,19 @@ exactly match is how a security claim quietly becomes untrue.
 
 | Status | Meaning | Light | Dark | Icon |
 |---|---|---|---|---|
-| Connected | A live session exists | `#0F766E` | `#2DD4BF` | link |
-| Available | Paired, no session right now | `#3B5BDB` | `#8FA9FF` | device |
-| Connecting | Handshaking or retrying | `#3B5BDB` | `#8FA9FF` | activity |
-| Transferring | Bytes moving | `#3B5BDB` | `#8FA9FF` | send |
-| Success | Finished cleanly | `#0F766E` | `#2DD4BF` | check |
+| Connected | A live session exists | `#10747E` | `#3DC9D7` | link |
+| Available | Paired, no session right now | `#445CDD` | `#90A1FF` | device |
+| Connecting | Handshaking or retrying | `#445CDD` | `#90A1FF` | activity |
+| Transferring | Bytes moving | `#445CDD` | `#90A1FF` | send |
+| Success | Finished cleanly | `#10747E` | `#3DC9D7` | check |
 | Not responding | Session silent long enough to be history | `#B45309` | `#FBBF24` | warning |
 | Failed | Terminal error | `#DC2626` | `#F87171` | warning |
-| Disconnected | Deliberately not connected; also cancelled | `#64748B` | `#7C8CA3` | link-off |
+| Disconnected | Deliberately not connected; also cancelled | `#64718B` | `#7C88A3` | link-off |
 | Revoked | Trust withdrawn | `#DC2626` | `#F87171` | shield-off |
+
+The four brand-derived rows moved with the palette. **Amber and red did
+not**, and that is the rule rather than an oversight: a warning means the
+same thing whatever the identity is.
 
 Two distinctions worth keeping:
 
@@ -111,6 +118,41 @@ Both platforms carry the same vocabulary under the same names.
 | Brand mark | `OmniBridgeGradientMark` / `OmniBridgeBrandMark` | `brand_mark()` / `brand_logo()` |
 | Progress | `OmniBridgeProgressBar` | `progress()` |
 
+### Connection state has one home per screen
+
+**For a given peer or session, one screen shows its connection state and its
+primary Connect/Disconnect actions in exactly one place.** That place is the
+canonical surface for the peer — the device card on Android, the device row
+on the desktop. Nothing else on the same screen repeats the badge, and
+nothing else on the same screen offers a second Connect or Disconnect for the
+same session.
+
+Two controls that appear to drive one session are not a tidiness problem.
+They invite a reading that is simply false — that disconnecting in one place
+might leave the other still connected — and there is no way for a person to
+tell from the screen which of the two is authoritative. The Devices screen
+carried exactly this for a while: the selected device card said `Connected`
+with a `Disconnect`, and a separate "Connection" section underneath said
+`Connected to fedora` with its own `Connect` and `Disconnect`.
+
+**A secondary notice may still appear**, and should, when it carries state the
+canonical surface genuinely cannot express. A status badge has room for a
+word, not a sentence:
+
+- a retry countdown and the reason for it;
+- the text of a terminal connection error;
+- guidance when several peers are paired and none is selected, which is not a
+  property of any single row — the answer is "choose one".
+
+Such a notice carries **words only**. No status badge, no Connect, no
+Disconnect. If a notice would say something the canonical surface already
+says, it should not be shown at all: both front ends decide this in one
+testable place rather than in a composable or a widget tree.
+
+This is a rule about *presentation*, not about state. Every connection state
+the coordinator models stays modelled; what the rule constrains is how many
+places on one screen are allowed to draw it.
+
 ### Cards
 
 One surface, one hairline border, 16 px radius, 16 px padding. Depth comes
@@ -122,6 +164,12 @@ look and gains a hover state.
 - **Primary** — pill, CTA gradient, white label, 48 dp minimum height. Disabled
   is a flat neutral, never a faded gradient: translucent gradient reads as
   "still tappable, just pretty".
+- **A disabled control always says why.** Greying something out states that it
+  cannot be used; it never states what would make it usable, and the person
+  is left guessing at a screen that has the answer. Both front ends now carry
+  the reason next to the control — `UiMapping.sendClipboardUi` on Android,
+  `views::clipboard::send_blocked_reason` on the desktop — and both are unit
+  tested to produce one for every unusable state.
 - **Secondary** — pill, surface fill, hairline border.
 - **Destructive** — pill, **outlined** red, never filled, and never placed
   adjacent to a confirming button. On the desktop it also takes a confirmation
@@ -211,7 +259,28 @@ the row does not reflow every time a session drops.
 **Touch targets** are 48 dp minimum even where the reference draws a control
 smaller: the visual size is the reference's, the target is Android's.
 
-### The clipboard preview
+### The Send clipboard screen
+
+Hero, destination, content, action, security — in that order, because that is
+the order the questions occur in: *what am I doing*, *where is it going*,
+*what exactly is going*, *do it*, *is this safe*.
+
+The destination line under the device name is its **short fingerprint**. It
+is deliberately not a platform description: `DeviceInfo` on the wire carries
+`device_id` and `device_name` and nothing else, so no operating system or
+form factor ever reaches the other side. Three screens used to print a
+literal `"Desktop · Linux"` there, which labelled every paired device Linux
+whether it was or not. What the product does know is the pinned identity, and
+that is worth the line — it tells two computers called `fedora` apart.
+
+The security footer states four facts — *Direct connection · TLS 1.3 ·
+Pinned identity · Local network* — and is announced to a screen reader as one
+sentence rather than four fragments. The desktop does **not** repeat this on
+its Clipboard page: it has a persistent status strip that says the same
+thing, and a per-page footer there would be Android's solution to a problem
+GTK does not have.
+
+#### The preview itself
 
 The Send clipboard screen shows the text about to leave, because seeing it is
 how a person notices they are about to send the wrong thing.
@@ -223,6 +292,24 @@ with. Neither case is logged or persisted — the preview lives in composition
 and dies with the screen.
 
 ---
+
+## Layout and responsiveness
+
+Both platforms cap the content column rather than letting cards grow to the
+width of the window. A card stretched across a tablet or a maximised desktop
+window is not a wide layout — it is a narrow layout that has been pulled, and
+it reads as one: a row with a title at the far left and a switch at the far
+right makes the eye travel the whole width to connect two things that belong
+together.
+
+| | Rule |
+|---|---|
+| **Android** | `Modifier.omniBridgeContentColumn()` — fills below 640 dp, caps and centres above it. A modifier rather than a wrapper, so it applies to a `LazyColumn` without making it eager. |
+| **Desktop** | `AdwBreakpoint` at 700 sp collapses the split view rather than squeezing the content. Minimum window 360 × 420. |
+
+The cap is a layout constraint and nothing else. Neither platform branches on
+width to show *different content*: a tablet and a phone show the same screen,
+and only the margins differ.
 
 ## Motion
 

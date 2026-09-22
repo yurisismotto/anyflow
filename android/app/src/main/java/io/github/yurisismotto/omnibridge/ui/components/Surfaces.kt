@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -29,6 +31,7 @@ import io.github.yurisismotto.omnibridge.R
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeBorder
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeElevation
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeIconSize
+import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeLayout
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeRadius
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeTheme
@@ -160,3 +163,29 @@ fun OmniBridgeFingerprint(
 
 /** Hides purely decorative artwork from assistive technology. */
 fun Modifier.decorative(): Modifier = this.clearAndSetSemantics { }
+
+/**
+ * The content column: fills a phone, stops growing on a tablet.
+ *
+ * On the SM-X620 in landscape the window is roughly 1340dp wide. Every screen
+ * here is a single scrolling column of cards, and a card stretched to that
+ * width is not a tablet layout — it is a phone layout that has been pulled.
+ * A permission row becomes a title at the far left and a switch at the far
+ * right with a metre of nothing between them, and the eye has to travel the
+ * whole width to connect two things that belong together.
+ *
+ * So past [OmniBridgeLayout.contentMax] the column stops growing and centres,
+ * and the extra width becomes margin. Below it nothing changes at all, which
+ * is why this is safe to apply to an existing phone layout.
+ *
+ * A modifier rather than a wrapper composable on purpose: it works the same
+ * on a `Column` and on a `LazyColumn`, so no screen has to be restructured
+ * and a lazy list stays lazy. It is a layout constraint and nothing else —
+ * no branch, no alternate composition, nothing that could make the tablet
+ * show different *content* from the phone.
+ */
+fun Modifier.omniBridgeContentColumn(): Modifier =
+    this
+        .fillMaxWidth()
+        .wrapContentWidth(Alignment.CenterHorizontally)
+        .widthIn(max = OmniBridgeLayout.contentMax)

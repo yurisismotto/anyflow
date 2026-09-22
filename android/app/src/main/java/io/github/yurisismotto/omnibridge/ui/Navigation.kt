@@ -18,6 +18,18 @@ sealed interface Screen {
     val tab: Tab
 
     /**
+     * Whether this destination is an exchange flow: one payload, one named
+     * computer, one send.
+     *
+     * The shell asks, so that the ambient wash behind an exchange screen can
+     * be drawn full-bleed rather than inside the capped content column, where
+     * its own boundary would cut a visible rectangle down both sides of a
+     * tablet. It is a property of the destination rather than a set kept in
+     * the shell, so a new exchange screen cannot be added and forgotten.
+     */
+    val isExchange: Boolean get() = false
+
+    /**
      * Where Back goes, or null at a root.
      *
      * The hierarchy is a tree with one parent per node, so the parent is a
@@ -61,6 +73,7 @@ sealed interface Screen {
     data class SendClipboard(val fingerprintHex: String) : Screen {
         override val tab = Tab.Devices
         override val parent get() = PeerDetail(fingerprintHex)
+        override val isExchange get() = true
     }
 
     /** One computer's notification consent: the three gates, and the policy. */

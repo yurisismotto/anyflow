@@ -53,6 +53,7 @@ import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSectionLabel
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSecurityNotice
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeStatusBadge
 import io.github.yurisismotto.omnibridge.ui.components.NoticeTone
+import io.github.yurisismotto.omnibridge.ui.components.omniBridgeContentColumn
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeIconSize
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeRadius
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
@@ -136,6 +137,7 @@ fun NotificationSettingsScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .omniBridgeContentColumn()
             .padding(horizontal = OmniBridgeSpacing.md),
         verticalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.sm),
     ) {
@@ -247,7 +249,7 @@ fun NotificationSettingsScreen(
                     title = stringResource(R.string.notif_mirror_title),
                     description = stringResource(R.string.notif_mirror_description),
                     icon = R.drawable.ic_send,
-                    accent = colors.accentTeal,
+                    accent = colors.accentCyan,
                     checked = policy.allowMirror,
                     onCheckedChange = {
                         actions.onSetNotificationPolicy(peer, policy.copy(allowMirror = it))

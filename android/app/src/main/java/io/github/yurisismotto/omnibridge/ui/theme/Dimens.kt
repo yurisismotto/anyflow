@@ -71,3 +71,29 @@ object OmniBridgeIconSize {
  * reference shows and this much touch target around it.
  */
 val MinTouchTarget: Dp = 48.dp
+
+/**
+ * The content column.
+ *
+ * A phone card stretched to the full width of a tablet is not a tablet
+ * layout — it is a phone layout that has been pulled, and it reads as one:
+ * a 900dp-wide row with a 20-character label at one end and a switch at the
+ * other makes the eye travel the whole width to connect two things that
+ * belong together.
+ *
+ * So past [contentMax] the column stops growing and centres instead. The
+ * cards keep the proportions they were designed at and the extra width
+ * becomes margin, which is what every well-behaved tablet layout does.
+ */
+object OmniBridgeLayout {
+    /** The widest the content column ever gets, however wide the window is. */
+    val contentMax: Dp = 640.dp
+
+    /**
+     * The largest width still treated as a phone.
+     *
+     * Material's own compact/medium boundary. Below this the column simply
+     * fills the window; above it, [contentMax] starts to bite.
+     */
+    val compactMax: Dp = 600.dp
+}

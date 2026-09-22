@@ -20,6 +20,7 @@ import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeEmptyState
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSectionLabel
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeTextButton
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeTransferCard
+import io.github.yurisismotto.omnibridge.ui.components.omniBridgeContentColumn
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeStatus
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeTheme
@@ -83,6 +84,12 @@ fun FilesScreen(
             modifier = modifier.fillMaxSize(),
             title = stringResource(R.string.files_empty_title),
             subtitle = stringResource(R.string.files_empty_subtitle),
+            // A files mark, not the connection ribbon. The ribbon read as a
+            // stray tricolour underline floating above the heading and said
+            // nothing about this screen; the glyph names what the list is for.
+            icon = R.drawable.ic_files,
+            accent = colors.accentBlue,
+            fillsContentArea = true,
         )
         return
     }
@@ -90,6 +97,7 @@ fun FilesScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
+            .omniBridgeContentColumn()
             .padding(horizontal = OmniBridgeSpacing.md),
         verticalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.sm),
         contentPadding = PaddingValues(bottom = OmniBridgeSpacing.xxl),

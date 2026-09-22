@@ -6,16 +6,24 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,10 +34,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.lifecycleScope
 import io.github.yurisismotto.omnibridge.OmniBridgeApp
+import io.github.yurisismotto.omnibridge.R
 import io.github.yurisismotto.omnibridge.capability.ClipboardCapability
 import io.github.yurisismotto.omnibridge.clipboard.ClipboardLimits
 import io.github.yurisismotto.omnibridge.clipboard.ClipboardText
@@ -37,6 +47,22 @@ import io.github.yurisismotto.omnibridge.files.SharedFile
 import io.github.yurisismotto.omnibridge.service.ConnectionService
 import io.github.yurisismotto.omnibridge.store.PeerTarget
 import io.github.yurisismotto.omnibridge.store.TrustStore
+import io.github.yurisismotto.omnibridge.ui.components.ExchangeHero
+import io.github.yurisismotto.omnibridge.ui.components.ExchangePayloadCard
+import io.github.yurisismotto.omnibridge.ui.components.ExchangePayloadEmpty
+import io.github.yurisismotto.omnibridge.ui.components.ExchangePeerStatus
+import io.github.yurisismotto.omnibridge.ui.components.ExchangeSecurityFooter
+import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeIconTile
+import io.github.yurisismotto.omnibridge.ui.components.OmniBridgePrimaryButton
+import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeTextButton
+import io.github.yurisismotto.omnibridge.ui.components.deviceKindIcon
+import io.github.yurisismotto.omnibridge.ui.components.exchangeAmbient
+import io.github.yurisismotto.omnibridge.ui.components.omniBridgeContentColumn
+import io.github.yurisismotto.omnibridge.ui.theme.MinTouchTarget
+import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
+import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeStatus
+import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeTheme
+import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeType
 import kotlinx.coroutines.launch
 
 /**
@@ -101,8 +127,14 @@ class SendActivity : ComponentActivity() {
         val sharedText = extractSharedText(intent)
 
         setContent {
-            MaterialTheme {
-                Surface {
+            // The app's own theme, not a bare MaterialTheme. This screen is a
+            // modal over somebody else's app and it used to look like one:
+            // default Material colours, default Material cards, none of the
+            // tokens the rest of OmniBridge is built from. It is an exchange
+            // flow — the same act as Send clipboard with a different payload —
+            // so it wears the same visual language and the same dark theme.
+            OmniBridgeTheme {
+                Surface(color = OmniBridgeTheme.colors.background) {
                     // Observed, not read once in `onCreate`. Choosing a
                     // destination below writes through the trust store, so a
                     // snapshot taken before the choice would leave this screen
@@ -111,6 +143,7 @@ class SendActivity : ComponentActivity() {
                     val selectedHex by app.trustStore.selectedPeerFlow.collectAsState()
                     if (sharedText != null && uri == null) {
                         SendTextScreen(
+                            app = app,
                             text = sharedText,
                             peers = peers,
                             selectedHex = selectedHex,
@@ -286,6 +319,136 @@ class SendActivity : ComponentActivity() {
         }
 }
 
+
+/**
+ * What the exchange hero and the peer pill need to know about the
+ * destination, gathered once.
+ *
+ * Null where no destination is resolved yet — nothing paired, nothing
+ * permitted, or several candidates and none chosen. The pill is then simply
+ * absent rather than filled with a placeholder: a screen that says
+ * "Connected to …" over no computer at all is the kind of decoration this
+ * sprint is removing.
+ */
+private data class Destination(
+    val peer: TrustStore.TrustedPeer,
+    val status: OmniBridgeStatus,
+    val identity: String,
+    val kind: UiMapping.DeviceKind,
+)
+
+/**
+ * The destination as the live session describes it right now.
+ *
+ * Every field comes from state: the name from the trust store, the status
+ * from the same [UiMapping.statusFor] the Devices screen uses, and the
+ * identity line and device glyph from the session that authenticated *this*
+ * peer — never from a session with a different computer, and never from a
+ * stored platform. See [UiMapping.peerDeviceKind].
+ */
+@Composable
+private fun rememberDestination(
+    peer: TrustStore.TrustedPeer?,
+    session: OmniBridgeApp.LiveSession?,
+    connection: OmniBridgeApp.ConnectionState,
+): Destination? {
+    if (peer == null) return null
+    val connected = session?.peerHex == peer.fingerprint.toHex()
+    return Destination(
+        peer = peer,
+        status = UiMapping.statusFor(connection, connected = connected),
+        identity = UiMapping.peerIdentityLine(peer, session),
+        kind = UiMapping.peerDeviceKind(peer, session),
+    )
+}
+
+/**
+ * The exchange-flow composition, as a Sharesheet modal.
+ *
+ * Title, hero, destination, payload, action, close, security — the same
+ * order and the same pieces as [SendClipboardScreen], because it is the same
+ * act. The shared pieces live in `components/Exchange.kt`; what is local here
+ * is only the arrangement, and it is local to the two screens in this file
+ * rather than promoted into a framework.
+ *
+ * The content column cap is applied here too. This screen is outside the app
+ * shell, so it does not inherit the shell's cap, and without it the card
+ * would stretch the full width of a tablet.
+ */
+@Composable
+private fun SendExchangeScreen(
+    title: String,
+    @DrawableRes sourceIcon: Int,
+    destination: Destination?,
+    onClose: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val colors = OmniBridgeTheme.colors
+    // The wash goes on the window-width node and the column inside it, so the
+    // ambient fades out by distance rather than being clipped to the column.
+    Box(Modifier.fillMaxSize().exchangeAmbient()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .omniBridgeContentColumn()
+                .padding(horizontal = OmniBridgeSpacing.md, vertical = OmniBridgeSpacing.lg),
+        ) {
+            Text(title, style = OmniBridgeType.heading, color = colors.textPrimary)
+
+            ExchangeHero(
+                sourceIcon = sourceIcon,
+                // A neutral device until something has actually said otherwise.
+                destinationIcon = deviceKindIcon(destination?.kind ?: UiMapping.DeviceKind.Unknown),
+            )
+
+            if (destination != null) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    ExchangePeerStatus(
+                        status = destination.status,
+                        label = if (destination.status == OmniBridgeStatus.Connected) {
+                            "Connected to ${destination.peer.deviceName}"
+                        } else {
+                            destination.peer.deviceName
+                        },
+                        identity = destination.identity,
+                    )
+                }
+                Spacer(Modifier.height(OmniBridgeSpacing.lg))
+            }
+
+            content()
+
+            Spacer(Modifier.height(OmniBridgeSpacing.xs))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                // "Close", not "Cancel". This screen can be left while an offer is
+                // already travelling, and closing it cancels nothing — a button
+                // that said otherwise would be claiming to stop a transfer it has
+                // no way to stop.
+                OmniBridgeTextButton("Close", onClose)
+            }
+
+            Spacer(Modifier.height(OmniBridgeSpacing.lg))
+            ExchangeSecurityFooter()
+            Spacer(Modifier.height(OmniBridgeSpacing.xxl))
+        }
+    }
+}
+
+/** A payload card holding nothing but a reason it is empty. */
+@Composable
+private fun EmptyPayload(
+    title: String,
+    @DrawableRes icon: Int,
+    headline: String,
+    body: String,
+    accent: Color? = null,
+) {
+    ExchangePayloadCard(title = title) {
+        ExchangePayloadEmpty(icon = icon, title = headline, subtitle = body, accent = accent)
+    }
+}
+
 @Composable
 private fun SendScreen(
     app: OmniBridgeApp,
@@ -296,7 +459,10 @@ private fun SendScreen(
     onSend: (TrustStore.TrustedPeer, Uri, (UiMapping.SendAttempt) -> Unit) -> Unit,
     onClose: () -> Unit,
 ) {
+    val colors = OmniBridgeTheme.colors
     val transfers by app.files.visible.collectAsState()
+    val session by app.liveSession.collectAsState()
+    val connection by app.connectionState.collectAsState()
     var attempt by remember { mutableStateOf<UiMapping.SendAttempt>(UiMapping.SendAttempt.Idle) }
 
     // Read once, off the composition's hot path: a display name query is
@@ -313,64 +479,91 @@ private fun SendScreen(
     // a grant withdrawn since the attempt it is retrying: the destination is
     // recomputed at the moment of the tap, never carried over.
     val eligible = UiMapping.fileDestinations(peers)
-    val destination = PeerTarget.resolve(eligible, selectedHex)
-    val peer = destination.peerOrNull()
+    val resolved = PeerTarget.resolve(eligible, selectedHex)
+    val peer = resolved.peerOrNull()
 
-    Column(
-        modifier = Modifier.padding(16.dp).fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    SendExchangeScreen(
+        title = "Send files",
+        sourceIcon = R.drawable.ic_files,
+        destination = rememberDestination(peer, session, connection),
+        onClose = onClose,
     ) {
-        Text("Send with OmniBridge", style = MaterialTheme.typography.headlineSmall)
-
         when {
             uri == null ->
-                Text("Nothing to send: that share did not include a file.")
+                EmptyPayload(
+                    title = "Files",
+                    icon = R.drawable.ic_files,
+                    headline = "Nothing to send",
+                    body = "That share did not include a file.",
+                )
 
             name == null ->
                 // The sanitizer refused it. Saying so is better than inventing
                 // a name for a file whose own name was unusable.
-                Text("That file's name cannot be sent safely. Rename it and try again.")
+                EmptyPayload(
+                    title = "Files",
+                    icon = R.drawable.ic_warning,
+                    headline = "That file's name cannot be sent safely",
+                    body = "Rename it and try again.",
+                    accent = colors.accentAmber,
+                )
 
             peers.isEmpty() ->
-                Text("No computer paired yet. Open OmniBridge and scan the pairing code first.")
+                EmptyPayload(
+                    title = "Files",
+                    icon = R.drawable.ic_device_generic,
+                    headline = "No computer paired yet",
+                    body = "Open OmniBridge and scan the pairing code first.",
+                )
 
             eligible.isEmpty() ->
                 // Paired but not permitted, which is a different sentence and a
                 // different fix. Saying "nothing is paired" here would send
                 // someone to the QR scanner for a grant they already own.
-                Text(
-                    "No paired computer is allowed to receive files. Turn on " +
-                        "\"Receive files\" for one of them in OmniBridge first.",
+                EmptyPayload(
+                    title = "Files",
+                    icon = R.drawable.ic_shield_off,
+                    headline = "No paired computer may receive files",
+                    body = "Turn on \"Receive files\" for one of them in OmniBridge first.",
+                    accent = colors.accentAmber,
                 )
 
             peer == null -> {
                 // Several eligible computers and none chosen — the case the
                 // old code answered with `first()`, silently. There is no Send
                 // button until the person names a destination.
-                Text("Which computer should receive ${'$'}name?")
-                DestinationPicker(eligible, selectedHex, onChoose)
+                ExchangePayloadCard(title = "Files") {
+                    FileLine(name)
+                    Spacer(Modifier.height(OmniBridgeSpacing.xs))
+                    Text(
+                        "Which computer should receive $name?",
+                        style = OmniBridgeType.body,
+                        color = colors.textPrimary,
+                    )
+                    DestinationPicker(eligible, selectedHex, onChoose)
+                }
             }
 
             else -> {
-                Card {
-                    Column(Modifier.padding(12.dp), Arrangement.spacedBy(4.dp)) {
-                        Text(name, style = MaterialTheme.typography.titleMedium)
-                        Text("to ${peer.deviceName}")
+                ExchangePayloadCard(title = "Files") {
+                    FileLine(name)
+
+                    // Still offered when there is more than one candidate, even
+                    // though one is already chosen: a preselected destination is a
+                    // convenience, and it must stay visibly changeable rather than
+                    // become the same silent routing under a nicer name.
+                    if (eligible.size > 1) {
+                        Spacer(Modifier.height(OmniBridgeSpacing.xs))
                         Text(
-                            "Fingerprint ${peer.fingerprint.toDisplayShort()}",
-                            style = MaterialTheme.typography.bodySmall,
+                            "Send to",
+                            style = OmniBridgeType.label,
+                            color = colors.textSecondary,
                         )
+                        DestinationPicker(eligible, peer.fingerprint.toHex(), onChoose)
                     }
                 }
 
-                // Still offered when there is more than one candidate, even
-                // though one is already chosen: a preselected destination is a
-                // convenience, and it must stay visibly changeable rather than
-                // become the same silent routing under a nicer name.
-                if (eligible.size > 1) {
-                    Text("Send to", style = MaterialTheme.typography.bodySmall)
-                    DestinationPicker(eligible, peer.fingerprint.toHex(), onChoose)
-                }
+                Spacer(Modifier.height(OmniBridgeSpacing.lg))
 
                 // UX-DEBT-01: this screen follows the transfer *it* started,
                 // by the id `offer` returned, and never a transfer that
@@ -395,12 +588,22 @@ private fun SendScreen(
                         // the person has finished reading it, and the button
                         // beneath it is the retry.
                         (attempt as? UiMapping.SendAttempt.Failed)?.let {
-                            Text(it.message, color = MaterialTheme.colorScheme.error)
+                            Text(
+                                it.message,
+                                style = OmniBridgeType.caption,
+                                color = colors.accentRed,
+                                modifier = Modifier.padding(bottom = OmniBridgeSpacing.xs),
+                            )
                         }
-                        Button(
+                        OmniBridgePrimaryButton(
+                            text = UiMapping.sendButtonLabel(
+                                attempt,
+                                idleLabel = "Send file to ${peer.deviceName}",
+                            ),
+                            icon = R.drawable.ic_send,
                             enabled = UiMapping.canStartSend(attempt, surface),
                             onClick = start,
-                        ) { Text(UiMapping.sendButtonLabel(attempt)) }
+                        )
                     }
 
                     is UiMapping.SendSurface.InFlight ->
@@ -411,20 +614,40 @@ private fun SendScreen(
 
                     is UiMapping.SendSurface.Ended -> {
                         TransferRow(surface.transfer)
+                        Spacer(Modifier.height(OmniBridgeSpacing.sm))
                         // The whole of UX-DEBT-01. A declined, failed,
                         // cancelled or completed attempt is history; this
                         // starts a *new* one, with a new transfer id, through
                         // the same path the first attempt took. Never
                         // automatic, and never in the background.
-                        Button(onClick = start) {
-                            Text(UiMapping.retryButtonLabel(surface.transfer.state))
-                        }
+                        OmniBridgePrimaryButton(
+                            text = UiMapping.retryButtonLabel(surface.transfer.state),
+                            icon = R.drawable.ic_send,
+                            onClick = start,
+                        )
                     }
                 }
             }
         }
+    }
+}
 
-        Button(onClick = onClose) { Text("Close") }
+/** The one file this share carries, as a tile and a name. */
+@Composable
+private fun FileLine(name: String) {
+    val colors = OmniBridgeTheme.colors
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OmniBridgeIconTile(icon = R.drawable.ic_file, accent = colors.accentBlue)
+        Spacer(Modifier.width(OmniBridgeSpacing.sm))
+        // Already through the sanitizer: a display name from another app is
+        // attacker-influenced and is treated exactly like a name off the wire.
+        Text(
+            name,
+            style = OmniBridgeType.subtitle,
+            color = colors.textPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -447,12 +670,14 @@ private fun DestinationPicker(
     chosenHex: String?,
     onChoose: (TrustStore.TrustedPeer) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val colors = OmniBridgeTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.xxs)) {
         for (candidate in candidates) {
             val chosen = candidate.fingerprint.toHex() == chosenHex
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = MinTouchTarget)
                     // One selectable row, so a screen reader announces the
                     // name, the fingerprint and the selected state together
                     // rather than reading a bare radio button.
@@ -461,16 +686,25 @@ private fun DestinationPicker(
                         role = Role.RadioButton,
                         onClick = { onChoose(candidate) },
                     )
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = OmniBridgeSpacing.xxs),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.xs),
             ) {
-                RadioButton(selected = chosen, onClick = null)
+                RadioButton(
+                    selected = chosen,
+                    onClick = null,
+                    colors = RadioButtonDefaults.colors(selectedColor = colors.accentBlue),
+                )
                 Column {
-                    Text(candidate.deviceName, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        candidate.deviceName,
+                        style = OmniBridgeType.body,
+                        color = colors.textPrimary,
+                    )
                     Text(
                         candidate.fingerprint.toDisplayShort(),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = OmniBridgeType.mono,
+                        color = colors.textMuted,
                     )
                 }
             }
@@ -489,6 +723,7 @@ private fun DestinationPicker(
  */
 @Composable
 private fun SendTextScreen(
+    app: OmniBridgeApp,
     text: ClipboardText,
     peers: List<TrustStore.TrustedPeer>,
     selectedHex: String?,
@@ -496,6 +731,9 @@ private fun SendTextScreen(
     onSend: (TrustStore.TrustedPeer, ClipboardText, (UiMapping.SendAttempt) -> Unit) -> Unit,
     onClose: () -> Unit,
 ) {
+    val colors = OmniBridgeTheme.colors
+    val session by app.liveSession.collectAsState()
+    val connection by app.connectionState.collectAsState()
     var attempt by remember { mutableStateOf<UiMapping.SendAttempt>(UiMapping.SendAttempt.Idle) }
 
     // Both gates, not one: the grant says this computer may speak clipboard at
@@ -505,61 +743,87 @@ private fun SendTextScreen(
     val eligible = peers.filter {
         it.allows(ClipboardCapability.ID) && it.clipboardPolicy.allowSend
     }
-    val destination = PeerTarget.resolve(eligible, selectedHex)
-    val peer = destination.peerOrNull()
+    val resolved = PeerTarget.resolve(eligible, selectedHex)
+    val peer = resolved.peerOrNull()
 
-    Column(
-        modifier = Modifier.padding(16.dp).fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    SendExchangeScreen(
+        title = "Send text",
+        sourceIcon = R.drawable.ic_clipboard,
+        destination = rememberDestination(peer, session, connection),
+        onClose = onClose,
     ) {
-        Text("Send text with OmniBridge", style = MaterialTheme.typography.headlineSmall)
-
         when {
             peers.isEmpty() ->
-                Text("No computer paired yet. Open OmniBridge and scan the pairing code first.")
-
-            eligible.isEmpty() ->
-                Text(
-                    "No paired computer is set up to receive your clipboard. Turn on " +
-                        "\"Share clipboard with this computer\" in OmniBridge first.",
+                EmptyPayload(
+                    title = "Text",
+                    icon = R.drawable.ic_device_generic,
+                    headline = "No computer paired yet",
+                    body = "Open OmniBridge and scan the pairing code first.",
                 )
 
-            peer == null -> {
-                Text("Which computer should receive this text?")
-                DestinationPicker(eligible, selectedHex, onChoose)
-            }
+            eligible.isEmpty() ->
+                EmptyPayload(
+                    title = "Text",
+                    icon = R.drawable.ic_shield_off,
+                    headline = "No paired computer is set up to receive your clipboard",
+                    body = "Turn on \"Share clipboard with this computer\" in OmniBridge first.",
+                    accent = colors.accentAmber,
+                )
+
+            peer == null ->
+                ExchangePayloadCard(title = "Text", trailing = "${text.byteLength} bytes") {
+                    Text(
+                        "Which computer should receive this text?",
+                        style = OmniBridgeType.body,
+                        color = colors.textPrimary,
+                    )
+                    DestinationPicker(eligible, selectedHex, onChoose)
+                }
 
             else -> {
-                if (eligible.size > 1) {
-                    Text("Send to", style = MaterialTheme.typography.bodySmall)
-                    DestinationPicker(eligible, peer.fingerprint.toHex(), onChoose)
-                }
-                Card {
-                    Column(Modifier.padding(12.dp), Arrangement.spacedBy(4.dp)) {
+                ExchangePayloadCard(title = "Text", trailing = "${text.byteLength} bytes") {
+                    // Deliberately not a preview. See this function's note.
+                    Text(
+                        "The text is not shown here: you just selected it, and " +
+                            "a preview on this screen would be readable over " +
+                            "your shoulder.",
+                        style = OmniBridgeType.caption,
+                        color = colors.textSecondary,
+                    )
+                    if (eligible.size > 1) {
+                        Spacer(Modifier.height(OmniBridgeSpacing.xs))
                         Text(
-                            "${'$'}{text.byteLength} bytes of text",
-                            style = MaterialTheme.typography.titleMedium,
+                            "Send to",
+                            style = OmniBridgeType.label,
+                            color = colors.textSecondary,
                         )
-                        Text("to ${'$'}{peer.deviceName}")
-                        Text(
-                            "Fingerprint ${'$'}{peer.fingerprint.toDisplayShort()}",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        DestinationPicker(eligible, peer.fingerprint.toHex(), onChoose)
                     }
                 }
+
+                Spacer(Modifier.height(OmniBridgeSpacing.lg))
+
                 (attempt as? UiMapping.SendAttempt.Failed)?.let {
-                    Text(it.message, color = MaterialTheme.colorScheme.error)
+                    Text(
+                        it.message,
+                        style = OmniBridgeType.caption,
+                        color = colors.accentRed,
+                        modifier = Modifier.padding(bottom = OmniBridgeSpacing.xs),
+                    )
                 }
-                Button(
+                OmniBridgePrimaryButton(
+                    text = UiMapping.sendButtonLabel(
+                        attempt,
+                        idleLabel = "Send text to ${peer.deviceName}",
+                    ),
+                    icon = R.drawable.ic_send,
                     enabled = attempt.canSend,
                     onClick = {
                         attempt = UiMapping.SendAttempt.Sending
                         onSend(peer, text) { outcome -> attempt = outcome }
                     },
-                ) { Text(UiMapping.sendButtonLabel(attempt)) }
+                )
             }
         }
-
-        Button(onClick = onClose) { Text("Close") }
     }
 }

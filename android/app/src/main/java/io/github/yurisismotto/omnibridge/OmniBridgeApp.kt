@@ -10,6 +10,7 @@ import io.github.yurisismotto.omnibridge.capability.NotificationsCapability
 import io.github.yurisismotto.omnibridge.capability.SensitiveCapabilities
 import io.github.yurisismotto.omnibridge.clipboard.ClipboardNotifications
 import io.github.yurisismotto.omnibridge.clipboard.ClipboardSync
+import io.github.yurisismotto.omnibridge.proto.Platform
 import io.github.yurisismotto.omnibridge.clipboard.SystemClipboard
 import io.github.yurisismotto.omnibridge.files.FileTransferManager
 import io.github.yurisismotto.omnibridge.identity.DeviceIdentity
@@ -129,6 +130,19 @@ class OmniBridgeApp : Application() {
         val peerHex: String,
         /** Capability ids this session negotiated. Not grants. */
         val negotiated: Set<String>,
+        /**
+         * What the peer said it runs, from the HELLO this session ran.
+         *
+         * `DeviceInfo.platform` on the wire, carried here rather than into
+         * the trust store on purpose: a stored platform would be a claim
+         * about a machine that is not talking to us, made by a message that
+         * arrived days ago. Held for the life of the session, it is a fact
+         * about the device on the other end right now.
+         *
+         * `PLATFORM_UNSPECIFIED` from an implementation that does not set it
+         * stays unspecified. Nothing guesses.
+         */
+        val platform: Platform = Platform.PLATFORM_UNSPECIFIED,
     )
 
     private val _liveSession = MutableStateFlow<LiveSession?>(null)

@@ -52,6 +52,7 @@ import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSectionLabel
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSecurityNotice
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeStatusBadge
 import io.github.yurisismotto.omnibridge.ui.components.NoticeTone
+import io.github.yurisismotto.omnibridge.ui.components.omniBridgeContentColumn
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeIconSize
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeRadius
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
@@ -109,6 +110,7 @@ fun PeerDetailScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .omniBridgeContentColumn()
             .padding(horizontal = OmniBridgeSpacing.md),
         verticalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.sm),
     ) {
@@ -133,7 +135,13 @@ fun PeerDetailScreen(
             }
             Text(peer.deviceName, style = OmniBridgeType.title, color = colors.textPrimary)
             OmniBridgeStatusBadge(state.statusFor(peer))
-            Text("Desktop · Linux", style = OmniBridgeType.body, color = colors.textSecondary)
+            // The pinned identity, not an invented platform: the wire carries
+            // no operating system. See UiMapping.peerIdentityLine.
+            Text(
+                UiMapping.peerIdentityLine(peer, state.liveSession),
+                style = OmniBridgeType.mono,
+                color = colors.textMuted,
+            )
         }
 
         // --- permissions --------------------------------------------------
@@ -149,7 +157,7 @@ fun PeerDetailScreen(
                 title = "Clipboard",
                 description = "Send and receive clipboard text",
                 icon = R.drawable.ic_clipboard,
-                accent = colors.accentTeal,
+                accent = colors.accentCyan,
                 checked = clipboardGranted,
                 onCheckedChange = { actions.onSetClipboardGrant(peer, it) },
             )
@@ -197,7 +205,7 @@ fun PeerDetailScreen(
                     title = "Receive clipboard",
                     description = "Accept clipboard text from ${peer.deviceName}",
                     icon = R.drawable.ic_receive,
-                    accent = colors.accentTeal,
+                    accent = colors.accentCyan,
                     checked = policy.allowReceive,
                     onCheckedChange = {
                         actions.onSetClipboardPolicy(peer, policy.copy(allowReceive = it))
@@ -211,7 +219,7 @@ fun PeerDetailScreen(
                         "Received text waits in a notification until you tap Copy"
                     },
                     icon = R.drawable.ic_download,
-                    accent = colors.accentTeal,
+                    accent = colors.accentCyan,
                     checked = policy.autoReceive,
                     enabled = policy.allowReceive,
                     onCheckedChange = {

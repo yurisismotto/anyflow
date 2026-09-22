@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -25,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -77,7 +79,14 @@ fun OmniBridgeIconTile(
 @Composable
 fun OmniBridgeDeviceCard(
     name: String,
-    platform: String,
+    /**
+     * The line under the name: the peer's platform while a session is up,
+     * and its short fingerprint otherwise.
+     *
+     * Was `platform`, and was a literal `"Desktop · Linux"` at every call
+     * site — including for a phone. See [UiMapping.peerIdentityLine].
+     */
+    subtitle: String,
     status: OmniBridgeStatus,
     modifier: Modifier = Modifier,
     deviceIcon: Int = R.drawable.ic_device_desktop,
@@ -89,7 +98,7 @@ fun OmniBridgeDeviceCard(
      * A state announced alongside the card's own text, never instead of it.
      *
      * `stateDescription` rather than `contentDescription` on purpose: the
-     * second would *replace* the name, the platform and the badge with one
+     * second would *replace* the name, the subtitle and the badge with one
      * string, and a card whose children had stopped speaking is the N3
      * regression this project already paid for once. This is additive — the
      * row still reads its name and its badge, and gains a state.
@@ -118,19 +127,14 @@ fun OmniBridgeDeviceCard(
         ),
         contentPadding = 0.dp,
     ) {
+        // No decorative wave behind the card any more.
+        //
+        // It was a thin cyan-to-violet stroke in the upper right, drawn only
+        // for a connected device — and it said nothing the badge, the name,
+        // the subtitle and the battery pill were not already saying, while
+        // running a gradient behind the very corner the device glyph sits in.
+        // A card does not need artwork to fill space it is not short of.
         Box {
-            // Only a live device gets the flourish; a disconnected card stays
-            // plain, so the artwork tracks reality instead of decorating it.
-            if (status.isPositive) {
-                // A corner accent, not a band: constrained to the upper right
-                // so it never runs through the name or the capability chips.
-                OmniBridgeRibbonFlourish(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .fillMaxWidth(0.55f)
-                        .height(72.dp),
-                )
-            }
             Column(
                 Modifier.padding(OmniBridgeSpacing.md),
                 verticalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.xs),
@@ -152,7 +156,15 @@ fun OmniBridgeDeviceCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(platform, style = OmniBridgeType.body, color = colors.textSecondary)
+                // Monospace: this is a fingerprint, and a fingerprint is
+                // compared character by character against another screen.
+                Text(
+                    subtitle,
+                    style = OmniBridgeType.mono,
+                    color = colors.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 if (batteryPercent != null) {
                     OmniBridgeBatteryPill(
                         percentage = batteryPercent,
@@ -223,9 +235,9 @@ fun OmniBridgeCapabilityRow(
             // switch announce a second, contextless label would double it up.
             modifier = Modifier.semantics { contentDescription = title },
             colors = SwitchDefaults.colors(
-                checkedTrackColor = colors.accentTeal,
+                checkedTrackColor = colors.accentCyan,
                 checkedThumbColor = Color.White,
-                checkedBorderColor = colors.accentTeal,
+                checkedBorderColor = colors.accentCyan,
             ),
         )
     }
@@ -307,7 +319,7 @@ fun OmniBridgeTransferCard(
                 Icon(
                     painter = painterResource(R.drawable.ic_check),
                     contentDescription = status.label,
-                    tint = colors.accentTeal,
+                    tint = colors.accentCyan,
                     modifier = Modifier.size(OmniBridgeIconSize.large),
                 )
             }
@@ -346,19 +358,73 @@ fun OmniBridgeTransferCard(
 }
 
 /**
+ * A semantic glyph on a soft disc of its own accent: the empty-state mark.
+ *
+ * Shared by the Files list and by the exchange flows' payload cards, so the
+ * app has one way of saying "there is nothing here" rather than one per
+ * screen. The glyph names the thing that is missing — a file, a clipboard —
+ * because an abstract flourish tells a person nothing about *which* of the
+ * app's empty states they are looking at.
+ */
+@Composable
+fun OmniBridgeEmptyArt(
+    icon: Int,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    size: Dp = 88.dp,
+) {
+    val tint = accent.copy(alpha = if (OmniBridgeTheme.colors.isDark) 0.16f else 0.08f)
+    Box(
+        modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(tint)
+            .clearAndSetSemantics { },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = painterResource(icon),
+            contentDescription = null,
+            tint = accent,
+            modifier = Modifier.size(OmniBridgeIconSize.hero),
+        )
+    }
+}
+
+/**
  * Nothing here yet.
  *
- * Uses the connection ribbon rather than a stock illustration: the mark
- * already means "two devices, one flow", which is exactly what the person is
- * being invited to create.
+ * @param icon the semantic mark for what is missing, drawn by
+ *   [OmniBridgeEmptyArt]. The Files list passes one: its empty state used to
+ *   be the connection ribbon, a thin tricolour stroke that read as a stray
+ *   underline above the text and said nothing about files.
+ *
+ *   Null keeps the ribbon, and exactly one caller wants it — the "connect
+ *   your first device" state, where "two devices, one flow" is not decoration
+ *   but literally the thing the person is being invited to create.
  */
 @Composable
 fun OmniBridgeEmptyState(
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
+    icon: Int? = null,
+    accent: Color? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    /**
+     * Whether this empty state owns the whole content area.
+     *
+     * When it does — a Files tab with no transfers, say — it is placed into
+     * that area rather than left against the top edge. On an 1440dp-tall
+     * tablet the difference is the whole point: the same block that looks
+     * deliberate on a phone looks abandoned under the app bar of a tablet.
+     *
+     * Off by default because the other caller puts this inside a
+     * `LazyColumn` item, where the height is **unbounded** and a weighted
+     * spacer would not merely look wrong, it would fail to measure.
+     */
+    fillsContentArea: Boolean = false,
 ) {
     val colors = OmniBridgeTheme.colors
     Column(
@@ -368,14 +434,24 @@ fun OmniBridgeEmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.sm),
     ) {
-        Icon(
-            painter = painterResource(R.drawable.ribbon_connection),
-            contentDescription = null,
-            tint = Color.Unspecified,
-            modifier = Modifier
-                .width(160.dp)
-                .height(58.dp),
-        )
+        // Optical placement, not arithmetic centring: the leading space is
+        // the smaller of the two, so the block settles a little above the
+        // true middle. Centred exactly, a short block under a top app bar
+        // reads as sitting low.
+        if (fillsContentArea) Spacer(Modifier.weight(0.62f))
+        if (icon != null) {
+            OmniBridgeEmptyArt(icon = icon, accent = accent ?: colors.accentBlue)
+            Spacer(Modifier.height(OmniBridgeSpacing.xxs))
+        } else {
+            Icon(
+                painter = painterResource(R.drawable.ribbon_connection),
+                contentDescription = null,
+                tint = Color.Unspecified,
+                modifier = Modifier
+                    .width(160.dp)
+                    .height(58.dp),
+            )
+        }
         Text(
             title,
             style = OmniBridgeType.heading,
@@ -397,5 +473,6 @@ fun OmniBridgeEmptyState(
                 modifier = Modifier.width(240.dp),
             )
         }
+        if (fillsContentArea) Spacer(Modifier.weight(1f))
     }
 }

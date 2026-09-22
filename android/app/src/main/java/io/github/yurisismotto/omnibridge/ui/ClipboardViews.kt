@@ -90,7 +90,7 @@ fun PendingClipCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             OmniBridgeIconTile(
                 icon = if (clip.sensitive) R.drawable.ic_shield else R.drawable.ic_clipboard,
-                accent = if (clip.sensitive) colors.accentAmber else colors.accentTeal,
+                accent = if (clip.sensitive) colors.accentAmber else colors.accentCyan,
             )
             Spacer(Modifier.width(OmniBridgeSpacing.sm))
             Column {

@@ -255,6 +255,9 @@ class ConnectionService : LifecycleService() {
                     OmniBridgeApp.LiveSession(
                         peerHex = peer.fingerprint.toHex(),
                         negotiated = connection.negotiatedCapabilities.toSet(),
+                        // Straight off the HELLO this session ran, never a
+                        // guess and never remembered past the session.
+                        platform = connection.peerDevice.platform,
                     ),
                 )
                 updateNotification(getString(R.string.notif_connected, peer.deviceName))

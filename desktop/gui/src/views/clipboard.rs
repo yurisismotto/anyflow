@@ -44,12 +44,25 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
     let backend = widgets::card();
     backend.append(&widgets::section_label("This computer"));
     let row = widgets::row(SPACING_SM);
-    row.append(&widgets::icon_tile("edit-paste-symbolic", "af-tile-teal"));
+    row.append(&widgets::icon_tile("edit-paste-symbolic", "ob-tile-cyan"));
     let text = widgets::column(2);
-    text.append(&widgets::subtitle(&report.backend));
-    text.append(&widgets::caption(&report.backend_detail));
+    // `report.backend` and `report.backend_detail` are diagnostics —
+    // "wl-clipboard", "watch: XFIXES on the Xwayland CLIPBOARD selection".
+    // True, useful when something is wrong, and not what a clipboard
+    // settings page should open with. The headline is derived from exactly
+    // the same bit the raw strings describe; nothing new is claimed.
+    let summary = BackendSummary::of(report);
+    text.append(&widgets::subtitle(summary.title()));
+    text.append(&widgets::caption(summary.detail()));
     text.set_hexpand(true);
     row.append(&text);
+    // The diagnostics are not deleted, just demoted: they stay on the wire,
+    // in `omnibridge status`, and here on hover for anyone debugging a
+    // clipboard that is misbehaving.
+    row.set_tooltip_text(Some(&format!(
+        "{} — {}",
+        report.backend, report.backend_detail
+    )));
     backend.append(&row);
 
     // Whether clipboard *changes* can be observed here is what decides
@@ -61,10 +74,11 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
         Status::Warning
     }));
     backend.append(&widgets::caption(if report.watch_available {
-        "Clipboard changes can be observed here, so automatic sending is available."
+        "Clipboard changes can be detected on this computer, so automatic sending \
+         is available."
     } else {
-        "This session cannot report clipboard changes, so automatic sending is \
-         unavailable. Sending by hand still works."
+        "Clipboard changes cannot be detected on this computer, so automatic \
+         sending is unavailable. Sending by hand still works."
     }));
 
     // Sensitive marking is its own row, and it is here rather than only in a
@@ -118,9 +132,9 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
                     "edit-paste-symbolic"
                 },
                 if clip.sensitive {
-                    "af-tile-amber"
+                    "ob-tile-amber"
                 } else {
-                    "af-tile-teal"
+                    "ob-tile-cyan"
                 },
             ));
             let text = widgets::column(2);
@@ -171,6 +185,59 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
          about it reaches a log or a file.",
         false,
     ));
+}
+
+/// What this computer's clipboard can do, in the product's own words.
+///
+/// The control socket reports the backend as `wl-clipboard` and its detail as
+/// `wl-clipboard; watch: XFIXES on the Xwayland CLIPBOARD selection; sensitive
+/// marking: yes`. Both are true and both are diagnostics: they name a helper
+/// binary, an X11 extension and a selection, none of which a person changing
+/// a clipboard setting has any use for.
+///
+/// This is the same fact — [`ClipboardStatusReport::backend_available`], the
+/// bit those strings describe — said in language the page can lead with. It
+/// derives nothing and claims nothing the report did not already state, which
+/// is the difference between rewording and inventing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BackendSummary {
+    /// The ordinary clipboard works here.
+    Ready,
+    /// There is no usable clipboard on this session.
+    Unavailable,
+}
+
+impl BackendSummary {
+    pub(super) fn of(report: &ClipboardStatusReport) -> Self {
+        if report.backend_available {
+            Self::Ready
+        } else {
+            Self::Unavailable
+        }
+    }
+
+    pub(super) fn title(self) -> &'static str {
+        match self {
+            Self::Ready => "Clipboard ready",
+            Self::Unavailable => "Clipboard unavailable",
+        }
+    }
+
+    pub(super) fn detail(self) -> &'static str {
+        match self {
+            Self::Ready => {
+                "Text you copy here can be sent to your devices, and text they send \
+                 can be copied here."
+            }
+            // No package name and no command: which helper is missing is a
+            // per-distribution answer, and the tooltip above already carries
+            // the exact one for anyone diagnosing it.
+            Self::Unavailable => {
+                "This desktop session has no clipboard OmniBridge can use, so \
+                 clipboard text cannot be sent or received."
+            }
+        }
+    }
 }
 
 /// Whether this desktop can mark a clip *sensitive*, as one named state.
@@ -249,15 +316,36 @@ impl SensitiveState {
     }
 }
 
+/// Why "Send clipboard" cannot be pressed for this device, or `None`.
+///
+/// Both conditions had to be named. The button was gated on
+/// `connected && allow_send` while only the *disconnected* case printed a
+/// note beside it, so a device that was connected with sending turned off
+/// got a greyed-out button and no explanation at all — the dead control the
+/// guidelines forbid, in the one place where the fix is a switch three rows
+/// further up the same card.
+///
+/// Order matters: sending being off is the more specific fact and the one
+/// the person can act on without leaving the page.
+pub(super) fn send_blocked_reason(peer: &ClipboardPeerReport) -> Option<&'static str> {
+    if !peer.allow_send {
+        Some("Sending is turned off for this device. Turn on \u{201c}Allow sending\u{201d} above.")
+    } else if !peer.connected {
+        Some("Connect to this device to send your clipboard.")
+    } else {
+        None
+    }
+}
+
 fn peer_card(peer: &ClipboardPeerReport, watch_available: bool, pages: &Pages) -> gtk::Box {
     let card = widgets::card();
 
     let head = widgets::row(SPACING_SM);
-    head.append(&widgets::icon_tile("phone-symbolic", "af-tile-blue"));
+    head.append(&widgets::icon_tile("phone-symbolic", "ob-tile-blue"));
     let text = widgets::column(2);
     text.append(&widgets::subtitle(&peer.device_name));
     let fp = widgets::caption(&peer.fingerprint_short);
-    fp.add_css_class("af-mono");
+    fp.add_css_class("ob-mono");
     text.append(&fp);
     text.set_hexpand(true);
     head.append(&text);
@@ -327,7 +415,8 @@ fn peer_card(peer: &ClipboardPeerReport, watch_available: bool, pages: &Pages) -
 
     let actions = widgets::row(SPACING_XS);
     let send = widgets::cta_button("Send clipboard", Some("document-send-symbolic"));
-    send.set_sensitive(peer.connected && peer.allow_send);
+    let blocked = send_blocked_reason(peer);
+    send.set_sensitive(blocked.is_none());
     {
         let device = device.clone();
         let pages = pages.clone();
@@ -351,9 +440,13 @@ fn peer_card(peer: &ClipboardPeerReport, watch_available: bool, pages: &Pages) -
         });
     }
     actions.append(&send);
-    if !peer.connected {
-        let note = widgets::caption("Connect to this device to send your clipboard.");
+    if let Some(reason) = blocked {
+        let note = widgets::caption(reason);
         note.set_valign(gtk::Align::Center);
+        note.set_wrap(true);
+        // The reason is part of what the button means, so it is announced
+        // with it rather than as a stray sentence further down the card.
+        send.update_property(&[gtk::accessible::Property::Description(reason)]);
         actions.append(&note);
     }
     card.append(&actions);
@@ -562,6 +655,181 @@ pub(in crate::views) mod tests {
         }
     }
 
+    // ---- the primary UI speaks the product's language --------------------
+
+    #[test]
+    fn a_working_clipboard_leads_with_plain_language() {
+        let summary = super::BackendSummary::of(&report());
+        assert_eq!(summary, super::BackendSummary::Ready);
+        assert_eq!(summary.title(), "Clipboard ready");
+    }
+
+    #[test]
+    fn no_usable_clipboard_says_so_without_naming_a_helper() {
+        let none = ClipboardStatusReport {
+            backend_available: false,
+            ..report()
+        };
+        let summary = super::BackendSummary::of(&none);
+        assert_eq!(summary, super::BackendSummary::Unavailable);
+        assert!(summary.title().contains("unavailable"));
+    }
+
+    /// The headline is a rewording of an existing bit, not a new claim.
+    ///
+    /// `backend_available` is the whole input. If these ever disagree, the
+    /// page has started asserting something the daemon did not report.
+    #[test]
+    fn the_summary_tracks_backend_available_and_nothing_else() {
+        for available in [true, false] {
+            let r = ClipboardStatusReport {
+                backend_available: available,
+                // Deliberately varied: neither of these may move the answer.
+                watch_available: !available,
+                sensitive_available: !available,
+                ..report()
+            };
+            let expected = if available {
+                super::BackendSummary::Ready
+            } else {
+                super::BackendSummary::Unavailable
+            };
+            assert_eq!(super::BackendSummary::of(&r), expected);
+        }
+    }
+
+    /// No implementation detail reaches the primary UI strings.
+    ///
+    /// The control socket reports `wl-clipboard` and `watch: XFIXES on the
+    /// Xwayland CLIPBOARD selection`. Both are true, both are diagnostics,
+    /// and neither belongs in the first line of a settings page.
+    #[test]
+    fn the_primary_strings_carry_no_implementation_jargon() {
+        let jargon = [
+            "wl-clipboard",
+            "wl-copy",
+            "XFIXES",
+            "Xwayland",
+            "CLIPBOARD selection",
+            "data-control",
+            "gsettings",
+        ];
+        let mut strings: Vec<&str> = Vec::new();
+        for s in [
+            super::BackendSummary::Ready,
+            super::BackendSummary::Unavailable,
+        ] {
+            strings.push(s.title());
+            strings.push(s.detail());
+        }
+        for text in strings {
+            for term in jargon {
+                assert!(
+                    !text.contains(term),
+                    "the primary clipboard UI says {term:?}: {text}"
+                );
+            }
+        }
+    }
+
+    /// The truthful capability state is still represented, just reworded.
+    #[test]
+    fn every_summary_state_explains_what_it_means_for_the_user() {
+        for s in [
+            super::BackendSummary::Ready,
+            super::BackendSummary::Unavailable,
+        ] {
+            assert!(!s.title().is_empty());
+            assert!(s.detail().len() > 40, "{s:?} explains nothing");
+        }
+        assert!(super::BackendSummary::Ready.detail().contains("sent"));
+        assert!(super::BackendSummary::Unavailable
+            .detail()
+            .contains("cannot"));
+    }
+
+    /// Sensitive marking keeps its own words, untouched by the rewording.
+    #[test]
+    fn the_sensitive_state_is_still_reported_separately() {
+        let r = wl_clipboard_2_2_1();
+        // Ordinary clipboard fine, sensitive marking not — the two questions
+        // stay independent after the rewrite.
+        assert_eq!(super::BackendSummary::of(&r), super::BackendSummary::Ready);
+        assert_eq!(SensitiveState::of(&r), SensitiveState::NotMarkable);
+    }
+
+    // ---- the send button's reason ----------------------------------------
+
+    fn peer(connected: bool, allow_send: bool) -> omnibridge_control::ClipboardPeerReport {
+        omnibridge_control::ClipboardPeerReport {
+            device_id: "d0".into(),
+            device_name: "Pixel".into(),
+            fingerprint_short: "A1B2 C3D4".into(),
+            granted: true,
+            revoked: false,
+            connected,
+            allow_send,
+            allow_receive: true,
+            auto_send: false,
+            auto_receive: false,
+            last_outcome: None,
+        }
+    }
+
+    #[test]
+    fn a_ready_peer_has_no_blocked_reason() {
+        assert_eq!(super::send_blocked_reason(&peer(true, true)), None);
+    }
+
+    /// The regression this function exists for.
+    ///
+    /// A connected device with sending switched off used to get a greyed-out
+    /// button and nothing else — a dead control, in the one place where the
+    /// fix is a switch three rows further up the same card.
+    #[test]
+    fn sending_turned_off_is_explained_rather_than_left_dead() {
+        let reason =
+            super::send_blocked_reason(&peer(true, false)).expect("a disabled send must say why");
+        assert!(
+            reason.contains("Allow sending"),
+            "the reason should point at the switch that fixes it: {reason}"
+        );
+    }
+
+    #[test]
+    fn a_disconnected_peer_is_told_to_connect() {
+        let reason =
+            super::send_blocked_reason(&peer(false, true)).expect("a disabled send must say why");
+        assert!(reason.contains("Connect"), "{reason}");
+    }
+
+    /// Every disabled state carries a reason. Never a dead control.
+    #[test]
+    fn every_unsendable_combination_carries_a_reason() {
+        for connected in [true, false] {
+            for allow_send in [true, false] {
+                let p = peer(connected, allow_send);
+                let reason = super::send_blocked_reason(&p);
+                if connected && allow_send {
+                    assert!(reason.is_none());
+                } else {
+                    assert!(
+                        reason.is_some_and(|r| !r.is_empty()),
+                        "connected={connected} allow_send={allow_send} has no reason"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Sending-off outranks disconnected: it is the more specific fact and
+    /// the one that can be acted on without leaving the page.
+    #[test]
+    fn the_more_specific_reason_wins_when_both_apply() {
+        let reason = super::send_blocked_reason(&peer(false, false)).expect("a reason");
+        assert!(reason.contains("Allow sending"), "{reason}");
+    }
+
     // -----------------------------------------------------------------------
     // The page itself, built from a fabricated report
     // -----------------------------------------------------------------------
@@ -618,6 +886,33 @@ pub(in crate::views) mod tests {
         the_gap_is_stated_on_the_page_before_any_clip_fails();
         an_ordinary_desktop_does_not_warn_about_sensitive_clips();
         the_state_is_readable_by_an_assistive_technology();
+        the_rendered_page_speaks_the_products_language();
+    }
+
+    /// The jargon check, against the real widget tree rather than the strings.
+    ///
+    /// The constants test covers what `BackendSummary` returns; this covers
+    /// what actually reaches a label, which is the thing a reviewer sees.
+    fn the_rendered_page_speaks_the_products_language() {
+        let page = page(report());
+        let text = labels(&page).join("\n");
+
+        assert!(
+            text.contains("Clipboard ready"),
+            "the page must lead with plain language, got:\n{text}"
+        );
+        for term in ["wl-clipboard", "XFIXES", "Xwayland", "CLIPBOARD selection"] {
+            assert!(
+                !text.contains(term),
+                "{term:?} reached a label on the clipboard page:\n{text}"
+            );
+        }
+        // The truthful capability statement survives the rewording.
+        assert!(
+            text.contains("automatic sending is available"),
+            "the watch state must still be stated:\n{text}"
+        );
+        assert!(text.contains("Sensitive clipboard: available"), "{text}");
     }
 
     fn the_gap_is_stated_on_the_page_before_any_clip_fails() {
