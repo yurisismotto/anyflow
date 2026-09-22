@@ -85,8 +85,9 @@ omnibridge/
 │   └── gui/                   omnibridge-gui — GTK4 / libadwaita
 ├── android/                   Kotlin + Compose app
 ├── browser-extension/         (placeholder)
-├── packaging/common/          the systemd user unit — one file, every format
-├── packaging/fedora/          RPM spec, vendor config
+├── packaging/common/          the systemd user unit and the cargo vendor config
+├── packaging/fedora/          RPM spec, firewalld service
+├── packaging/debian/          debhelper packaging for Debian and Ubuntu
 └── docs/                      see docs/README.md for the full taxonomy
     ├── adr/                   ADR-0001 … ADR-0018
     ├── architecture/          OVERVIEW.md, PROTOCOL.md, FILES.md, CLIPBOARD.md, NOTIFICATIONS.md

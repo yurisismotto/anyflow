@@ -1,0 +1,82 @@
+Source: omnibridge
+Section: net
+Priority: optional
+Maintainer: Yuri Converso Sismotto <yuri.sismotto@gmail.com>
+# The Rust floor is 1.88, measured from the committed lockfile rather than
+# chosen: `time` 0.3.55 demands it and cargo's resolver refuses before
+# compiling a line. desktop/Cargo.toml carries the derivation.
+#
+# The alternation is not decoration. MEASURED on each target's own archive:
+#
+#   Ubuntu 24.04 LTS   stock rustc 1.75      -> rustc-1.91 1.91.1  (alternative)
+#   Ubuntu 26.04 LTS   stock rustc 1.93.1    -> satisfies (>= 1.88)
+#   Debian 13 trixie   stock rustc 1.85.1    -> NEITHER. See README.source.
+#
+# So this line is satisfiable on both Ubuntu targets from their own archives,
+# and **not** on stock trixie. That is stated here and in README.source rather
+# than papered over with a lower floor that the code does not actually build
+# against.
+Build-Depends: debhelper-compat (= 13),
+               rustc (>= 1.88) | rustc-1.91,
+               cargo (>= 1.88) | cargo-1.91,
+               pkg-config,
+# The GUI is a workspace member and is always built. Each of these is here
+# because something asks for it by name: the -sys crates resolve their C
+# libraries through pkg-config, and desktop/gui/build.rs runs
+# glib-compile-resources out of libglib2.0-dev.
+               libgtk-4-dev (>= 4.12),
+               libadwaita-1-dev (>= 1.5),
+               libglib2.0-dev,
+# override_dh_auto_test runs the full suite, and platform-linux's tray suites
+# raise a real dbus-daemon rather than mocking the bus.
+               dbus-daemon,
+# install-desktop-metadata.sh validates the desktop entry and the AppStream
+# metadata before installing them, and skips the check when the validator is
+# absent. Declaring these makes that a build gate instead of a courtesy.
+               desktop-file-utils,
+               appstream-util
+Standards-Version: 4.7.0
+Homepage: https://github.com/yurisismotto/omnibridge
+Vcs-Browser: https://github.com/yurisismotto/omnibridge
+Vcs-Git: https://github.com/yurisismotto/omnibridge.git
+Rules-Requires-Root: no
+
+Package: omnibridge
+Architecture: any
+# No Rust at runtime. rustc and cargo are build dependencies only; the
+# installed binaries need libc and, for the GUI, GTK — all resolved by
+# ${shlibs:Depends} from the actual ELF headers.
+Depends: ${shlibs:Depends}, ${misc:Depends}
+# Without UPower the daemon simply does not report this machine's own battery,
+# which is the normal case on a desktop tower.
+Recommends: upower
+# Wayland clipboard. Suggests, and deliberately unversioned: `wl-copy
+# --sensitive` is absent from wl-clipboard 2.2.1 on Debian and Ubuntu but
+# present in Fedora's 2.2.1^git build — the same version string, different
+# code. A versioned relation would be false on one distribution or the other
+# whichever number was picked. The daemon reports honestly what its backend
+# can do and works without it. Audit R5.
+Suggests: wl-clipboard
+Description: local-first device continuity between Android and Linux
+ OmniBridge connects an Android phone to this computer over the local network.
+ It is local-first: there is no cloud service, no account and no telemetry.
+ Devices authenticate each other with pinned public keys over TLS 1.3 after an
+ explicit, human-confirmed pairing.
+ .
+ This package provides the user-session daemon and the omnibridge command-line
+ tool. The daemon runs unprivileged under systemd --user and never requires
+ root. The desktop application ships separately, as omnibridge-gui.
+
+Package: omnibridge-gui
+Architecture: any
+# The exact build. The GUI speaks the daemon's control socket, so a version
+# skew between the two is a protocol skew.
+Depends: omnibridge (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Description: desktop application for OmniBridge
+ The OmniBridge desktop application: pairing, the device list, transfers, the
+ Quick Panel and per-capability grants.
+ .
+ It is not a resident process. It is started when a window is wanted - from the
+ application menu, from the tray item the daemon publishes, or by the session
+ bus through D-Bus activation - and it exits when the window is closed. The
+ daemon remains the only long-lived OmniBridge process.

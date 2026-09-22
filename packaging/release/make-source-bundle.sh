@@ -102,7 +102,7 @@ command -v xz >/dev/null || die "xz is required"
 
 ROOT="$(git -C "$(dirname -- "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 SPEC="$ROOT/packaging/fedora/omnibridge.spec"
-VENDOR_CONFIG="$ROOT/packaging/fedora/cargo-vendor-config.toml"
+VENDOR_CONFIG="$ROOT/packaging/common/cargo-vendor-config.toml"
 OUTPUT="${OUTPUT:-$ROOT/dist}"
 
 # --------------------------------------------------------------------------
@@ -237,7 +237,7 @@ for required in \
     desktop/Cargo.lock \
     packaging/fedora/omnibridge.spec \
     packaging/common/omnibridged.service \
-    packaging/fedora/cargo-vendor-config.toml \
+    packaging/common/cargo-vendor-config.toml \
     packaging/fedora/omnibridge-firewalld.xml \
     protocol/proto \
     docs/design/assets/omnibridge-app-icon.svg \
@@ -271,7 +271,7 @@ note "vendored $crate_count crates"
 
 # `cargo vendor` writes the absolute path it was given. Normalise it to the
 # relative form the committed config uses, then insist the rest matches
-# exactly — see the header of packaging/fedora/cargo-vendor-config.toml for
+# exactly — see the header of packaging/common/cargo-vendor-config.toml for
 # why this comparison is the guard and not a formality.
 NORMALISED="$SCRATCH/config.normalised.toml"
 sed "s|^directory = \".*\"$|directory = \"vendor\"|" "$EMITTED" > "$NORMALISED"
@@ -282,11 +282,11 @@ grep -v '^[[:space:]]*$' "$NORMALISED" > "$NORMALISED.trimmed"
 if ! diff -u "$COMMITTED_BODY" "$NORMALISED.trimmed" >"$SCRATCH/config.diff" 2>&1; then
     sed 's/^/    /' "$SCRATCH/config.diff" >&2
     die "cargo vendor emitted a source configuration that \
-packaging/fedora/cargo-vendor-config.toml does not describe. A dependency \
+packaging/common/cargo-vendor-config.toml does not describe. A dependency \
 outside crates.io (a git or path source) was probably added — the offline \
 build cannot resolve it. Update the committed config deliberately."
 fi
-note "emitted source config matches packaging/fedora/cargo-vendor-config.toml"
+note "emitted source config matches packaging/common/cargo-vendor-config.toml"
 
 # --------------------------------------------------------------------------
 # 7. Write the tarballs.
