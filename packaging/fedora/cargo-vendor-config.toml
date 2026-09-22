@@ -1,0 +1,34 @@
+# Cargo source replacement for an offline package build.
+#
+# `%prep` copies this file to `desktop/.cargo/config.toml` after unpacking the
+# vendor tarball into `desktop/vendor`. From that point `cargo --offline`
+# resolves every one of the 270 locked crates out of the tree instead of
+# reaching for crates.io — which is the whole point, because `mock`, `koji`
+# and Debian `buildd` all build with networking switched off.
+#
+# ---------------------------------------------------------------------------
+# Why this is committed instead of generated
+# ---------------------------------------------------------------------------
+#
+# `cargo vendor` prints a config block on stdout and the obvious thing to do
+# is pipe it into the bundle. We do not, because that block is *derived from
+# the dependency graph*: add one `git = "..."` dependency and cargo emits an
+# extra `[source."git+https://..."]` stanza, silently, and the package would
+# start needing a network fetch again with nothing in review to show for it.
+#
+# So the config is committed, and `packaging/release/make-source-bundle.sh`
+# diffs what `cargo vendor` actually emitted against this file and refuses to
+# produce a bundle if the two disagree. The drift shows up as a failed release
+# build and a diff, at the moment the dependency is added.
+#
+# The `directory` is relative on purpose: cargo resolves it against the
+# directory holding `.cargo/`, which is `desktop/`, so the same file works in
+# a buildroot, in a container and in a developer's checkout. `cargo vendor`
+# itself emits an absolute path; the script normalises that away before
+# comparing.
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
