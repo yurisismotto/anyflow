@@ -2,6 +2,11 @@
 /desktop/target/
 **/*.rs.bk
 
+# Release artifacts — packaging/release/make-source-bundle.sh writes here.
+# The vendored crate tree it produces is 343 MB and is generated from the
+# committed Cargo.lock, which is the thing that is actually authoritative.
+/dist/
+
 # Android / Gradle
 /android/.gradle/
 /android/.kotlin/
