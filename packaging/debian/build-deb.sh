@@ -58,6 +58,12 @@ ROOT="$(git -C "$(dirname -- "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 BUNDLE="$(cd -- "$BUNDLE" && pwd)"
 OUTPUT="${OUTPUT:-$ROOT/dist-deb}"
 mkdir -p "$OUTPUT"
+# Resolved to an absolute path, and that is not tidiness. `podman -v` treats a
+# NON-ABSOLUTE source as a named volume rather than a bind mount, so
+# `--output out` silently wrote every artifact into a podman volume and left
+# the directory empty. The build reported success, the container listed the
+# files it had just written, and the host had nothing.
+OUTPUT="$(cd -- "$OUTPUT" && pwd)"
 
 SRC_TARBALL="$(find "$BUNDLE" -maxdepth 1 -name 'omnibridge-*.tar.gz' ! -name '*vendor*' | head -1)"
 VENDOR_TARBALL="$(find "$BUNDLE" -maxdepth 1 -name 'omnibridge-*-vendor.tar.xz' | head -1)"
@@ -194,4 +200,8 @@ podman run --rm \
     -v "$OUTPUT:/out:z" \
     "$IMAGE" bash /in/build.sh "$VERSION" "$SKIP_TESTS"
 
-printf '\nPackages in %s\n' "$OUTPUT"
+produced="$(find "$OUTPUT" -maxdepth 1 -name '*.deb' | wc -l)"
+if [ "$produced" -eq 0 ]; then
+    die "the build reported success but no .deb reached $OUTPUT"
+fi
+printf '\n%s package(s) in %s\n' "$produced" "$OUTPUT"
