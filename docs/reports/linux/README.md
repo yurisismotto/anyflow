@@ -3,6 +3,7 @@
 | Doc | What it is | Outcome |
 | --- | --- | --- |
 | [KDE StatusNotifier v1](KDE-STATUSNOTIFIER-V1.md) | the native Plasma tray implementation — `org.kde.StatusNotifierItem` and `com.canonical.dbusmenu` spoken directly to the session bus | implemented; physical KDE certification blocked at the time, closed later |
+| [systemd user unit capabilities fix](SYSTEMD-USER-UNIT-CAPABILITIES-FIX.md) | `ProtectKernelModules=` made the user unit unstartable on both Ubuntu LTS targets — `218/CAPABILITIES` before `ExecStart` | fixed; found by the first real execution of lifecycle gate L1 |
 
 ## U2 post-certification hardening
 
