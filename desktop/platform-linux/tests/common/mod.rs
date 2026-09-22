@@ -23,6 +23,17 @@ pub struct TestBus {
     child: Child,
     address: String,
     _dir: tempfile::TempDir,
+    service_dir: Option<std::path::PathBuf>,
+}
+
+/// Whether this bus gets a service directory, and whether it is there yet.
+enum ServiceDir {
+    /// No `<servicedir>` at all — the tray suites' bus.
+    None,
+    /// Configured, but not created. Neither implementation can watch it.
+    Missing,
+    /// Configured and created, so an inotify implementation watches it.
+    Present,
 }
 
 impl TestBus {
@@ -36,25 +47,119 @@ impl TestBus {
     /// * nothing is activatable, so a test that expected D-Bus activation to
     ///   rescue it fails rather than quietly succeeding for the wrong reason.
     pub fn start() -> TestBus {
+        TestBus::start_inner(ServiceDir::None)
+    }
+
+    /// The same bus, plus a `<servicedir>` this fixture owns which **does not
+    /// exist** when the bus starts.
+    ///
+    /// **Only `dbus_activation.rs` may use this.** The tray suites depend on
+    /// nothing being activatable — see the note on [`TestBus::start`] — and a
+    /// bus with a service directory could, in principle, start something.
+    ///
+    /// It is still not the developer's session: the directory is a fresh
+    /// temporary one and the only file that ever lands in it is written by
+    /// [`TestBus::install_service_file`] with `Exec=/bin/true`. The activation
+    /// suite never activates anything in any case — `ListActivatableNames`
+    /// reports names and starts no process — but the `Exec` is `/bin/true` so
+    /// that a future test which did would start nothing that matters.
+    ///
+    /// # Why the directory is missing at start, and why that is not a trick
+    ///
+    /// MEASURED on Fedora 44, and it changed how this suite is written.
+    ///
+    /// `dbus-daemon` — the reference implementation, and what this fixture
+    /// spawns — **watches its service directories with inotify**. A file
+    /// written into a directory that existed when it started becomes
+    /// activatable on its own, with no `ReloadConfig`. `dbus-broker`, which is
+    /// what actually runs a Fedora 44 session (`dbus-broker-37-8.fc44`), does
+    /// not: that is the behaviour the readiness audit measured and the reason
+    /// the self-heal exists.
+    ///
+    /// A directory that does not exist cannot be watched by either of them, so
+    /// with one missing at start-up the two implementations agree — absent,
+    /// then present after exactly one `ReloadConfig`. That is what makes this
+    /// suite deterministic on both, rather than passing on Fedora and
+    /// vacuously succeeding on a Debian runner.
+    ///
+    /// It is also a real case and not a contrivance: `/usr/share/dbus-1/services`
+    /// does not exist on a machine where nothing has ever shipped a D-Bus
+    /// service, and the OmniBridge package is then the thing that creates it.
+    ///
+    /// [`TestBus::start_with_watched_service_dir`] is the other half, for the
+    /// one test that pins the difference down.
+    pub fn start_with_service_dir() -> TestBus {
+        TestBus::start_inner(ServiceDir::Missing)
+    }
+
+    /// A `<servicedir>` that **exists** when the bus starts, so an inotify
+    /// implementation can watch it.
+    ///
+    /// Used by exactly one test, which records what this bus implementation
+    /// does. See [`TestBus::start_with_service_dir`] for why the distinction
+    /// matters.
+    pub fn start_with_watched_service_dir() -> TestBus {
+        TestBus::start_inner(ServiceDir::Present)
+    }
+
+    /// The directory the bus was told to scan. It may not exist yet.
+    pub fn service_dir(&self) -> &std::path::Path {
+        self.service_dir
+            .as_deref()
+            .expect("this bus was started without a service directory")
+    }
+
+    /// Writes a `.service` file for `name` into the bus's service directory,
+    /// creating the directory if this is the first one.
+    ///
+    /// Returns without telling the bus. That is the point: the file is on
+    /// disk and the running bus has not been asked to look.
+    pub fn install_service_file(&self, name: &str) {
+        let dir = self.service_dir();
+        std::fs::create_dir_all(dir).expect("the service directory");
+        let path = dir.join(format!("{name}.service"));
+        std::fs::write(
+            &path,
+            format!("[D-BUS Service]\nName={name}\nExec=/bin/true\n"),
+        )
+        .expect("writing the service file");
+    }
+
+    fn start_inner(service: ServiceDir) -> TestBus {
         let dir = tempfile::tempdir().expect("a temporary directory for the bus");
         let config = dir.path().join("bus.conf");
         // `<listen>` uses a short path under /tmp because a Unix socket
         // address is bounded by `sun_path`, and a temporary directory deep
         // under a home directory will exceed it.
+        let service_dir = match service {
+            ServiceDir::None => None,
+            ServiceDir::Missing => Some(dir.path().join("services")),
+            ServiceDir::Present => {
+                let d = dir.path().join("services");
+                std::fs::create_dir(&d).expect("the service directory");
+                Some(d)
+            }
+        };
+        let servicedir_element = match &service_dir {
+            Some(d) => format!("  <servicedir>{}</servicedir>\n", d.display()),
+            None => String::new(),
+        };
         std::fs::write(
             &config,
-            r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+            format!(
+                r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
   <type>session</type>
   <listen>unix:tmpdir=/tmp</listen>
-  <policy context="default">
+{servicedir_element}  <policy context="default">
     <allow send_destination="*" eavesdrop="true"/>
     <allow eavesdrop="true"/>
     <allow own="*"/>
   </policy>
 </busconfig>
-"#,
+"#
+            ),
         )
         .expect("writing the bus configuration");
 
@@ -80,6 +185,7 @@ impl TestBus {
             child,
             address,
             _dir: dir,
+            service_dir,
         }
     }
 

@@ -30,10 +30,21 @@ unwrap_used = "warn"
 # workspace build still compiles this code once, with the feature on, and links
 # it into all three — that is how unification works and it is not what the
 # declaration is for.
-default = ["tray"]
+default = ["tray", "desktop-activation"]
 # `tokio/rt` is already on for the crate. Nothing else is added: the tray
 # spawns tasks and awaits a stream, and it deliberately owns no timer.
 tray = ["dep:zbus", "dep:futures-lite"]
+# Repairing the desktop application's D-Bus activation in a session that is
+# already running — see `activation.rs`. Same owner as the tray (the agent,
+# never the GUI or the CLI), so it is default-on beside it and off for both.
+#
+# It implies `tray` rather than standing alone because it needs exactly one
+# thing from it: `DESKTOP_APP_ID`, the single definition of the application's
+# identity on the session bus. A second copy of that string is the one thing
+# the identity discipline in `tray/model.rs` exists to prevent, and no
+# consumer wants this without the tray anyway — both are the agent's
+# session-bus integration.
+desktop-activation = ["dep:zbus", "tray"]
 
 [dependencies]
 omnibridge-core = { version = "0.1.0", path = "../core", features = ["unix-fs"] }
