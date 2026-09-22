@@ -1,0 +1,425 @@
+# CI-007 — the release artifact pipeline.
+#
+# What this produces, and from what
+# ---------------------------------
+# Every Linux artifact OmniBridge ships, built from **one immutable git
+# revision**, in network-isolated builds, by a machine that is not a
+# developer's workstation:
+#
+#   omnibridge-<V>.tar.gz              the upstream source
+#   omnibridge-<V>-vendor.tar.xz       every crate in desktop/Cargo.lock
+#   omnibridge-<V>-*.src.rpm           the source package
+#   omnibridge-<V>-*.x86_64.rpm        Fedora 44, core + gui
+#   omnibridge_<V>-*_amd64.deb         Ubuntu 24.04, Ubuntu 26.04, Debian 13
+#   omnibridge-<V>-sbom.cdx.json       CycloneDX SBOM from the locked graph
+#   SHA256SUMS                         over all of the above
+#   (attestation)                      GitHub build provenance, Sigstore-backed
+#
+# The immutable input is the point
+# --------------------------------
+# `make-source-bundle.sh` has two modes and only one of them is a release
+# path. `--worktree` bundles whatever is lying in a checkout, including
+# uncommitted and untracked files; it exists to validate a packaging change
+# before it is committed and its own output says so. This workflow always
+# passes `--rev`, and always a resolved **commit SHA** rather than a branch
+# name, because a branch moves and a SHA does not.
+#
+# No tag is required for that and none is created here. `v0.1.0` does not
+# exist yet, and publishing a release is a deliberate act that belongs to a
+# human — this pipeline proves the artifacts can be produced, not that they
+# should be published.
+#
+# What is NOT signed, and why that is recorded rather than faked
+# --------------------------------------------------------------
+# `SHA256SUMS` is **not** GPG-signed. Signing needs a private key, this
+# repository has none, and inventing one for a CI run would produce an
+# artifact whose signature means nothing. That is carried as a release gate in
+# docs/audits/packaging/PACKAGING-V1-RELEASE-CI.md, not quietly skipped.
+#
+# What IS attested: `actions/attest-build-provenance` records what was built,
+# from which commit, by which workflow, backed by Sigstore and GitHub's OIDC
+# identity. It needs no secret of ours — that is precisely why it is usable
+# here and why it is not a substitute for a maintainer's own signature.
+
+name: Release · Linux artifacts
+
+on:
+  # The normal way to run this before a release exists.
+  workflow_dispatch:
+    inputs:
+      rev:
+        description: 'Commit SHA or tag to build from (default: the checked-out SHA)'
+        required: false
+        type: string
+  # The release path, for when a tag eventually exists. Building on the tag is
+  # what makes the artifacts correspond to something immutable and public.
+  push:
+    tags:
+      - 'v*'
+  # And the pipeline exercises itself whenever its own tooling changes. Not on
+  # every packaging PR: this runs four container builds each executing the full
+  # test suite, and spending forty minutes of CI to re-prove an unchanged
+  # pipeline is how a useful gate becomes one people route around. It runs when
+  # the thing that could break it is what moved.
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'packaging/release/**'
+      - 'packaging/fedora/build-rpm.sh'
+      - 'packaging/fedora/omnibridge.spec'
+      - 'packaging/debian/build-deb.sh'
+      - 'packaging/debian/rules'
+      - 'packaging/debian/control'
+      - '.github/workflows/release-artifacts.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------- 1 -----
+  # The bundle every other job consumes. Built once, so all six package
+  # artifacts are demonstrably from the same source bytes.
+  bundle:
+    name: Source bundle · from an immutable rev
+    runs-on: ubuntu-24.04
+    outputs:
+      rev: ${{ steps.resolve.outputs.rev }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      # Full history: `--rev` has to be able to resolve a SHA that is not HEAD.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the revision, and refuse a moving one
+        id: resolve
+        run: |
+          requested="${{ inputs.rev }}"
+          [ -n "$requested" ] || requested="${{ github.sha }}"
+          rev="$(git rev-parse --verify "${requested}^{commit}")"
+          echo "rev=$rev" >> "$GITHUB_OUTPUT"
+
+          version="$(awk '
+            /^\[workspace\.package\]/ { s=1; next } /^\[/ { s=0 }
+            s && /^[[:space:]]*version[[:space:]]*=/ { gsub(/.*=[[:space:]]*"|".*/,""); print; exit }
+          ' desktop/Cargo.toml)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          echo "requested : $requested"
+          echo "resolved  : $rev"
+          echo "version   : $version"
+          # A SHA is immutable; a branch name is not. Everything downstream is
+          # built from the resolved value, never from what was typed.
+          case "$rev" in
+            [0-9a-f]*) ;;
+            *) echo "::error::'$requested' did not resolve to a commit SHA"; exit 1 ;;
+          esac
+
+      - name: Rust toolchain, pinned to the MSRV
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --no-self-update
+          rustup default 1.88.0
+          rustc --version
+
+      # The bundle script checks the lockfile with `cargo metadata --locked
+      # --offline` before it does anything else, which needs the crates to be
+      # in the local cargo cache already. On a developer's machine they are; on
+      # a fresh runner they are not, and the check fails with "no matching
+      # package named `prost`" — a confusing way to say "nothing is cached".
+      #
+      # Fetching first is the right fix rather than dropping `--offline` from
+      # the script: that flag is what makes the check prove the vendored build
+      # will resolve, and weakening it to make CI green would remove the
+      # guarantee the check exists for.
+      - name: Populate the cargo cache
+        working-directory: desktop
+        run: cargo fetch --locked
+
+      # `cargo vendor` needs the network; nothing after this job does.
+      - name: Build the bundle
+        run: |
+          ./packaging/release/make-source-bundle.sh \
+            --rev "${{ steps.resolve.outputs.rev }}" \
+            --output dist
+
+      - name: The bundle is what the packaging expects
+        run: ./packaging/tests/packaging-checks.sh --bundle dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-bundle
+          path: dist/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- 2 -----
+  rpm:
+    name: Fedora 44 · RPM
+    needs: bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-bundle
+          path: dist
+
+      # The build itself runs with --network=none inside the script; podman is
+      # preinstalled on the GitHub Ubuntu images.
+      - name: Build
+        run: ./packaging/fedora/build-rpm.sh dist --output out
+
+      - name: Inspect the built packages
+        run: |
+          # Named precisely rather than globbed: `omnibridge-*.x86_64.rpm`
+          # matches the gui package too, and the second path would arrive as an
+          # unrecognised argument.
+          core="$(find out -name 'omnibridge-[0-9]*.x86_64.rpm')"
+          gui="$(find out -name 'omnibridge-gui-*.x86_64.rpm')"
+          test -n "$core" || { echo "::error::no core RPM was produced"; exit 1; }
+          test -n "$gui"  || { echo "::error::no gui RPM was produced";  exit 1; }
+          ./packaging/tests/packaging-checks.sh --rpm "$core" --rpm "$gui"
+          echo '--- rpmlint ---'; cat out/rpmlint.txt || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-fedora44
+          path: out/*.rpm
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- 3 -----
+  deb:
+    name: ${{ matrix.label }} · DEB
+    needs: bundle
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: docker.io/library/ubuntu:24.04
+            label: Ubuntu 24.04 LTS
+            slug: ubuntu2404
+          - image: docker.io/library/ubuntu:26.04
+            label: Ubuntu 26.04 LTS
+            slug: ubuntu2604
+          - image: docker.io/library/debian:trixie
+            label: Debian 13 trixie
+            slug: debian13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-bundle
+          path: dist
+
+      - name: Build
+        run: ./packaging/debian/build-deb.sh --image ${{ matrix.image }} dist --output out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.slug }}
+          path: |
+            out/*.deb
+            out/lintian.txt
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- 4 -----
+  sbom:
+    name: SBOM · CycloneDX
+    needs: bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bundle.outputs.rev }}
+
+      - name: Rust toolchain, pinned to the MSRV
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --no-self-update
+          rustup default 1.88.0
+
+      - name: cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      # One SBOM per shipped binary rather than a single roll-up. That is what
+      # `--describe binaries` produces, and it is the more useful shape: a
+      # consumer asking "what is in omnibridged" gets the daemon's closure
+      # without the GUI's GTK stack in it.
+      #
+      # MEASURED locally before this was written: `cargo cyclonedx` rejects
+      # `--locked` — the flag does not exist on it. The lockfile is still what
+      # is described, because the checkout is at the release revision and
+      # cargo-cyclonedx reads the resolved graph from `Cargo.lock`.
+      - name: Generate
+        run: |
+          mkdir -p out
+          ( cd desktop && cargo cyclonedx --format json --describe binaries )
+          found=$(find desktop -name '*.cdx.json' -not -path 'desktop/target/*' | wc -l)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::cargo-cyclonedx produced no SBOM"
+            exit 1
+          fi
+          echo "cargo-cyclonedx wrote $found SBOM(s)"
+          for f in $(find desktop -name '*.cdx.json' -not -path 'desktop/target/*'); do
+            base="$(basename "$f" .cdx.json)"
+            cp "$f" "out/omnibridge-${{ needs.bundle.outputs.version }}-$base.cdx.json"
+          done
+          ls -l out/
+
+      # An SBOM that parses and names the dependency the security
+      # certification fixed. A file of the right shape containing nothing is
+      # the failure mode worth guarding here.
+      - name: The SBOM describes the graph that actually shipped
+        run: |
+          python3 - <<'PY'
+          import glob, json, sys
+          files = sorted(glob.glob('out/*.cdx.json'))
+          assert files, "no SBOM to check"
+          ok = False
+          for f in files:
+              d = json.load(open(f))
+              comps = d.get('components', [])
+              assert d.get('bomFormat') == 'CycloneDX', f"{f}: not CycloneDX"
+              assert len(comps) > 50, f"{f}: only {len(comps)} components"
+              print(f"{f}: {d['bomFormat']} {d.get('specVersion')}, {len(comps)} components")
+              for c in comps:
+                  if c['name'] == 'rustls':
+                      print(f"   rustls {c.get('version')}")
+                      assert c.get('version', '0') >= '0.23.45', \
+                          f"{f}: rustls {c.get('version')} is below the RUSTSEC-2026-0285 fix"
+                      ok = True
+          assert ok, "no SBOM named rustls; the graph described is not OmniBridge's"
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: out/*.cdx.json
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- 5 -----
+  collect:
+    name: SHA256SUMS + provenance
+    needs: [bundle, rpm, deb, sbom]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Both are needed by attest-build-provenance, and neither is a secret of
+      # ours: the identity is GitHub's OIDC token and the transparency log is
+      # Sigstore's.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+
+      # Per-distribution subdirectories, and that is not cosmetic. All three
+      # targets build `omnibridge_0.1.0-1_amd64.deb` — the same filename, three
+      # different binaries. MEASURED on the first green run: flattening them
+      # into one directory kept whichever was copied last and silently dropped
+      # the other two, and SHA256SUMS listed 10 files where 14 were built.
+      #
+      # The canonical filename is preserved rather than mangled, because that
+      # is what `dpkg -i` and an apt repository expect; the directory carries
+      # the distinction instead.
+      - name: Gather every artifact, keeping the distributions apart
+        run: |
+          mkdir -p release/fedora44 release/ubuntu2404 release/ubuntu2604 \
+                   release/debian13 release/sbom
+          cp staged/source-bundle/*.tar.* release/
+          cp staged/rpm-fedora44/*.rpm    release/fedora44/
+          cp staged/deb-ubuntu2404/*.deb  release/ubuntu2404/
+          cp staged/deb-ubuntu2604/*.deb  release/ubuntu2604/
+          cp staged/deb-debian13/*.deb    release/debian13/
+          cp staged/sbom/*.cdx.json       release/sbom/
+          find release -type f | sort
+
+      # A release that quietly ships less than it built is the failure this
+      # whole job exists to prevent, so the count is asserted rather than
+      # eyeballed.
+      - name: Every artifact that was built is present
+        run: |
+          fail=0
+          check() {
+            n=$(find "$1" -maxdepth 1 -type f -name "$2" | wc -l)
+            if [ "$n" -ne "$3" ]; then
+              echo "::error::expected $3 file(s) matching $2 in $1, found $n"
+              fail=1
+            else
+              echo "ok  $1/$2 -> $n"
+            fi
+          }
+          check release            '*.tar.*'    2
+          check release/fedora44   '*.rpm'      3
+          check release/ubuntu2404 '*.deb'      2
+          check release/ubuntu2604 '*.deb'      2
+          check release/debian13   '*.deb'      2
+          check release/sbom       '*.cdx.json' 3
+          # And the three same-named .deb sets must genuinely differ: identical
+          # bytes would mean one distribution's build was reused for another.
+          a=$(sha256sum release/ubuntu2404/omnibridge_*.deb | cut -d' ' -f1)
+          b=$(sha256sum release/ubuntu2604/omnibridge_*.deb | cut -d' ' -f1)
+          c=$(sha256sum release/debian13/omnibridge_*.deb   | cut -d' ' -f1)
+          if [ "$a" = "$b" ] || [ "$a" = "$c" ] || [ "$b" = "$c" ]; then
+            echo "::error::two distributions produced byte-identical packages"
+            fail=1
+          else
+            echo "ok  the three distributions produced three distinct packages"
+          fi
+          exit "$fail"
+
+      - name: SHA256SUMS
+        working-directory: release
+        run: |
+          # Paths, not bare names, because the same filename occurs in three
+          # directories. Sorted, so two runs over the same inputs agree.
+          find . -type f ! -name 'SHA256SUMS' -printf '%P\n' | sort \
+            | xargs sha256sum > SHA256SUMS
+          wc -l < SHA256SUMS
+          cat SHA256SUMS
+
+      - name: What is deliberately missing
+        run: |
+          echo "SHA256SUMS is NOT signed. Signing needs a private key this"
+          echo "repository does not have, and a signature produced with an"
+          echo "invented key would mean nothing. Recorded as a release gate in"
+          echo "docs/audits/packaging/PACKAGING-V1-RELEASE-CI.md."
+
+      # Sigstore-backed, using GitHub's own OIDC identity. It records what was
+      # built and from which commit; it is not, and does not pretend to be, a
+      # maintainer's signature over the release.
+      - name: Build provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          # The files, not the directories. `release/*` now matches the
+          # per-distribution subdirectories rather than the artifacts inside
+          # them, which would attest nothing useful.
+          subject-path: |
+            release/*.tar.gz
+            release/*.tar.xz
+            release/SHA256SUMS
+            release/*/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ needs.bundle.outputs.version }}
+          path: release/
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          {
+            echo "## OmniBridge ${{ needs.bundle.outputs.version }}"
+            echo
+            echo "Built from \`${{ needs.bundle.outputs.rev }}\` — an immutable commit."
+            echo
+            echo '```'
+            cat release/SHA256SUMS
+            echo '```'
+            echo
+            echo "SHA256SUMS is unsigned; see the release-CI audit for why."
+          } >> "$GITHUB_STEP_SUMMARY"
