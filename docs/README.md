@@ -55,6 +55,7 @@ docs/
 │   ├── foundation/             Wave 0 / POC-CORE-04 gates — see its README
 │   ├── clipboard/              clipboard.v1 hardware certification
 │   ├── notifications/          notifications.v1 N6 final certification
+│   ├── security/               Security Certification v1 — the SEC gates
 │   └── linux/                  real-host desktop certification, gnome/ and kde/ — see its README
 ├── reports/
 │   ├── android/                Android sprint reports
