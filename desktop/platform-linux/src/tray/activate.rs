@@ -166,7 +166,7 @@ fn usable_token(token: &str) -> bool {
 /// The error *name* and nothing else. A zbus error's `Display` includes the
 /// message the far end wrote, and the far end here is another process on the
 /// session bus.
-pub(super) fn describe_bus_error(error: &zbus::Error) -> String {
+pub(crate) fn describe_bus_error(error: &zbus::Error) -> String {
     match error {
         zbus::Error::MethodError(name, _, _) => name.as_str().to_string(),
         zbus::Error::NameTaken => "name taken".into(),

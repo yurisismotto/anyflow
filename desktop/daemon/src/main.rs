@@ -369,6 +369,24 @@ async fn main() -> anyhow::Result<()> {
     // polls.
     let _tray = omnibridge_linux::tray::spawn(omnibridge_linux::tray::ActivatorChoice::SessionBus);
 
+    // ---- D-Bus activation self-heal ---------------------------------------
+    //
+    // A package installs the GUI's D-Bus service file as root, and the user's
+    // *already running* session bus does not read it until something says so.
+    // Until then the tray item above activates nothing: clicking OmniBridge on
+    // a correctly installed machine returns ServiceUnknown. Root cannot fix
+    // that — it has no route to a user's session bus — but this process runs
+    // as the user, in the session, and can. Audit §8.2.
+    //
+    // At most one ReloadConfig, on the session bus only, and the outcome is a
+    // log line whatever it is. Spawned rather than awaited because a bus that
+    // is slow to answer is not a reason for the listener below to start late,
+    // and because there is nothing downstream that depends on the answer.
+    tokio::spawn(async {
+        let outcome = omnibridge_linux::activation::self_heal_desktop_activation().await;
+        omnibridge_linux::activation::log(&outcome);
+    });
+
     let net = tokio::spawn(listener::run(bound.listeners, acceptor, Arc::clone(&state)));
     let ctl = tokio::spawn(server::run(control_listener, Arc::clone(&state)));
 

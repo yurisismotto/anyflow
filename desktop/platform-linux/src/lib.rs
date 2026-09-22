@@ -59,6 +59,12 @@ pub use omnibridge_core::platform::unix_fs::{
 #[cfg(feature = "tray")]
 pub mod tray;
 
+/// Repairing the desktop application's D-Bus activation after an install into
+/// a live session. Best effort, user session bus only, at most one
+/// `ReloadConfig`.
+#[cfg(feature = "desktop-activation")]
+pub mod activation;
+
 /// Opens the store at `dir` using this platform's storage and identity
 /// backing.
 ///
