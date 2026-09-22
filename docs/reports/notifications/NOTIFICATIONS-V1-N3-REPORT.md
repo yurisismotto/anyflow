@@ -33,7 +33,7 @@ things.
 | | |
 | --- | --- |
 | Base | `4d33205`, N2 merged and certified (**NOTIFICATIONS.V1 N2 PASS**) |
-| Canonical design | ADR-0015, ADR-0016, ADR-0017, `docs/architecture/NOTIFICATIONS.md`, `docs/research/notifications-v1/**` (especially [01 §5, §7, §8](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md)), the three previous wave reports |
+| Canonical design | ADR-0015, ADR-0016, ADR-0017, `docs/architecture/NOTIFICATIONS.md`, `docs/research/notifications-v1/**` (especially [01 §5, §7, §8](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md)), the three previous wave reports |
 | Desktop under test | Fedora 44, GNOME Shell **50.4** (spec 1.2), Wayland, `anyflow-daemon` `DF65 D3E4 BA28 EDF9` |
 | Phone under test | Samsung **SM-X620**, Android **16** / API 36, One UI **8.0** |
 | Commits made | **none** — nothing committed, nothing pushed, no PR |
@@ -136,7 +136,7 @@ are one decision each. This one is three — Android's own notification access,
 this computer's grant, and which applications — and they are held by different
 parties and lost independently. A switch on that card would have to claim one
 of them stood for all three, which is the specific failure
-[01 §7](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md) says most
+[01 §7](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md) says most
 products get wrong. So the row shows the **resolved state** — `Off`,
 `Needs Android access`, `No apps chosen`, `Ready` — and leads to the screen
 where the three are separate.
@@ -285,7 +285,7 @@ no longer see or switch off.
 
 ### 6.1 "N new apps are not being shared"
 
-[01 §5.2](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md) asks
+[01 §5.2](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md) asks
 for a passive affordance rather than a prompt, and this implements it with a
 new persisted field, `NotificationPolicy.knownApps`: every package the picker
 has *shown* this person, recorded when the list is actually displayed.
@@ -666,7 +666,7 @@ This is a **change of practice for the Compose surface**, and it is deliberate.
 The project had a string-resource mechanism and used it for every platform
 surface (notification channels, the share target, the listener label) while
 every Compose string was inlined — there were zero `stringResource` calls in
-the app. [01 §10](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md)
+the app. [01 §10](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md)
 names `strings.xml` as the home for exactly this copy, and permission copy is a
 security control that has to be reviewable and translatable as one. Existing
 screens were left alone; nothing was regressed, and there is now a precedent.

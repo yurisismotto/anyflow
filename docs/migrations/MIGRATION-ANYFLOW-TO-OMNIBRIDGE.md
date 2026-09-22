@@ -10,7 +10,7 @@ Same product, same protocol design, same security model, new name:
 
 There was no public v1, so the rename was taken as a clean break with no
 compatibility aliases. The decision and the full identifier table are in
-[ADR-0018](adr/ADR-0018-rename-to-omnibridge.md).
+[ADR-0018](../adr/ADR-0018-rename-to-omnibridge.md).
 
 This note is for **developers with an existing AnyFlow checkout or an AnyFlow
 build installed on test hardware**. Nothing here runs automatically, and

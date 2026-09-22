@@ -10,7 +10,7 @@
 | **Branch** | `research/platform-expansion-v1`, then `research/platform-expansion-verification-v1` (docs 26–28) |
 | **Scope** | Linux (generic, Fedora, Debian, Ubuntu, GNOME, KDE Plasma, Wayland, X11), Windows 10/11, macOS, Android, iOS/iPadOS |
 | **Decision status** | **Nothing here is Approved.** The strongest status assigned is **READY FOR RFC** — see [27](27-ARCHITECTURE-DECISION-CLOSEOUT.md) |
-| **Wave 0** | **IMPLEMENTED AND CERTIFIED — 2026-09-01**, commit `cfd33f6` — spec in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md); outcome in [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
+| **Wave 0** | **IMPLEMENTED AND CERTIFIED — 2026-09-01**, commit `cfd33f6` — spec in [28](28-WAVE-0-IMPLEMENTATION-SPEC.md); outcome in [the sprint report](../../reports/foundation/wave-0-platform-abstraction.md) |
 
 ---
 
@@ -30,7 +30,7 @@ PoC was implemented.
 > [28](28-WAVE-0-IMPLEMENTATION-SPEC.md) on `feature/core-platform-abstraction-v1`, and **certified
 > on 2026-09-01** (commit `cfd33f6`). All four P0 PoCs ran and passed. Where this research and the
 > implementation disagree, the
-> **[sprint report](../../sprints/wave-0-platform-abstraction.md)** is the record of what was
+> **[sprint report](../../reports/foundation/wave-0-platform-abstraction.md)** is the record of what was
 > actually built; [28's implementation outcome](28-WAVE-0-IMPLEMENTATION-SPEC.md) lists the three
 > amendments the code forced on the specification.
 
@@ -59,7 +59,7 @@ repository was re-audited against the report, and the result is a Wave 0 specifi
 | **Packaging** | **RESEARCHED** | System packages first, Flatpak experimental. **Do not gate on `wl-clipboard >= 2.3`** — Fedora's `2.2.1^git` has the features |
 | **Security** | **VERIFIED** | The model survives intact. **Three defects, one of them present-tense on Linux today** (silent trust-store destruction) |
 | **PoCs** | **POC REQUIRED** | 37 specified. Four are P0, and **all four now PASS**: POC-CORE-01/02/03, and POC-CORE-04 on a GitHub-hosted Windows MSVC runner ([run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649)) |
-| **Wave 0** | **CERTIFIED** | Commit `cfd33f6` on `feature/core-platform-abstraction-v1`. 375 Rust + 232 Android JVM + 21 instrumented tests green; 12/12 official gates; the six portable crates compile for `x86_64-pc-windows-msvc` on a Windows runner. **Certified means the boundary holds and behaviour is unchanged — not that OmniBridge runs on Windows** ([report](../../sprints/wave-0-platform-abstraction.md)) |
+| **Wave 0** | **CERTIFIED** | Commit `cfd33f6` on `feature/core-platform-abstraction-v1`. 375 Rust + 232 Android JVM + 21 instrumented tests green; 12/12 official gates; the six portable crates compile for `x86_64-pc-windows-msvc` on a Windows runner. **Certified means the boundary holds and behaviour is unchanged — not that OmniBridge runs on Windows** ([report](../../reports/foundation/wave-0-platform-abstraction.md)) |
 
 Status vocabulary: **VERIFIED** (closed against a primary source in [26](26-EXTERNAL-VERIFICATION-CLOSEOUT.md)) ·
 **READY FOR RFC** (evidence sufficient to write the ADR) · **RESEARCHED** (analysis complete, some

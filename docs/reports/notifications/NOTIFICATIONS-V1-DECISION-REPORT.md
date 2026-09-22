@@ -19,7 +19,7 @@
 
 ## 1. ADR-0015
 
-**[`docs/adr/ADR-0015-notification-access.md`](docs/adr/ADR-0015-notification-access.md) —
+**[`docs/adr/ADR-0015-notification-access.md`](../../../docs/adr/ADR-0015-notification-access.md) —
 "Android notification access and the `notifications.v1` security boundary".
 Status: Accepted · 2026-09-08.** Written to the repository's existing ADR
 convention (Context / Decision / Alternatives / Consequences, `**Status:**`
@@ -87,7 +87,7 @@ disabled · `VISIBILITY_SECRET` is never mirrored under any setting · **no
 banking, password-manager or 2FA heuristic is treated as a security boundary**.
 
 Why the two permissions are separate concepts is documented in ADR-0015 §5 and
-[01 §7](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md): the OS
+[01 §7](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md): the OS
 grant answers *"may this app read notifications on this phone?"*; the peer grant
 answers *"may this specific computer, identified by a pinned key, be sent
 them?"*. Different scopes, different revocation surfaces, different blast
@@ -97,7 +97,7 @@ had silently authorised a network destination.
 ## 4. OQ-03 — dismiss-sync default · **RESOLVED**
 
 **Supported, default OFF**, opt-in per peer. **This reverses the research
-recommendation**, and [01 §3.1](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md)
+recommendation**, and [01 §3.1](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md)
 was rewritten to keep the original argument visible rather than quietly
 replacing it.
 
@@ -134,8 +134,8 @@ listener trust. On the certification device the trusted-listener set is
 non-empty (`mTrustedListenerUids={1000, 10064, 10135}`) while the CDM
 association table is **empty**. CDM confers trust — that claim is unaffected —
 but it is not the only route, and the inverse must not be stated. Corrected in
-[03 §T-N03](docs/research/notifications-v1/03-PRIVACY-SECURITY-THREAT-MODEL.md)
-and in [POC-NOTIF-01 §2](docs/research/notifications-v1/poc/POC-NOTIF-01.md).
+[03 §T-N03](../../../docs/research/notifications-v1/03-PRIVACY-SECURITY-THREAT-MODEL.md)
+and in [POC-NOTIF-01 §2](../../../docs/research/notifications-v1/poc/POC-NOTIF-01.md).
 
 ## 6. Notification identity · **APPROVED**, with three documentation corrections
 
@@ -160,7 +160,7 @@ Three minimum documentation-level corrections were made. No production code was
 touched.
 
 * **(a) Secret lifecycle** — new
-  [02 §5.5](docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md). The
+  [02 §5.5](../../../docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md). The
   secret survives process restart and reboot; is regenerated if lost (fail
   forward — it is not a credential); and is **destroyed and regenerated on
   device identity reset or re-pair**. Without that rule a peer that recorded ids
@@ -169,7 +169,7 @@ touched.
   reset**, reconciled by the ordinary `SyncMarker` snapshot, never by retaining
   state across the event meant to clear it. Tracked as **OQ-15, resolved**.
 * **(b) What the id hides, stated exactly** — new
-  [02 §5.6](docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md). The
+  [02 §5.6](../../../docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md). The
   HMAC removes `userId` (profile), `uid`, `id` and `tag`. It does **not** hide
   the package name, which travels in `app_id` **by design**, because the sink
   must show which app sent a notification. The id must never be described as
@@ -184,16 +184,16 @@ touched.
 | Property required | Verdict |
 | --- | --- |
 | Snapshot contains only currently-active notifications | ✅ built from `getActiveNotifications()` |
-| It is not history | ✅ [02 §7.3](docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md) tabulates the distinction rather than asserting it |
+| It is not history | ✅ [02 §7.3](../../../docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md) tabulates the distinction rather than asserting it |
 | Removed-before-completion cannot reappear permanently | ✅ now *proved* rather than assumed — correction (b) |
 | Start/end explicit | ✅ `SyncMarker{sync_id, BEGIN}` … `{END}` |
 | Missing entries removed after completion | ✅ at `{END}`, the sink removes every mirror for that peer not named |
 | Reconnect does not duplicate | ✅ derived ids + `replaces_id` + `MirrorTable` retained through the grace |
-| A malicious/stale snapshot cannot retain old notifications for ever | ✅ new [02 §7.7](docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md) |
+| A malicious/stale snapshot cannot retain old notifications for ever | ✅ new [02 §7.7](../../../docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md) |
 | Content is not persisted merely to implement the grace | ✅ during the grace the content lives in gnome-shell, where it was already visible; AnyFlow holds ids and a `content_hash` digest, nothing else, nowhere |
 
 * **(a) The 60 s is reclassified, not justified.** New
-  [02 §7.5](docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md) is a
+  [02 §7.5](../../../docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md) is a
   table of which constants are protocol and which are not. `RECONNECT_GRACE`
   (60 s), `SYNC_TIMEOUT` (30 s), `MAX_SNAPSHOT_ENTRIES` (100) and
   `MAX_MIRRORS_PER_PEER` (200) are **sink- or source-local implementation
@@ -203,9 +203,9 @@ touched.
   about the grace is its bound — greater than zero (or a Wi-Fi blip clears and
   re-posts the desktop) and finite (or a departed phone leaves notifications on
   a screen that can no longer update them). **No arbitrary wall-clock value is
-  frozen into protocol compatibility.** [OQ-06 resolved.](docs/research/notifications-v1/06-OPEN-QUESTIONS-AND-POCS.md)
+  frozen into protocol compatibility.** [OQ-06 resolved.](../../../docs/research/notifications-v1/06-OPEN-QUESTIONS-AND-POCS.md)
 * **(b) The ordering guarantee is written down.** New
-  [02 §7.6](docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md): the
+  [02 §7.6](../../../docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md): the
   snapshot is not atomic, and it does not need to be, because every message for
   a peer travels one ordered TLS control session — so a removal that happens
   mid-snapshot is always applied *after* the upsert that carried it. The one
@@ -217,9 +217,9 @@ touched.
 
 ## 8. POC-NOTIF-01 — OTP redaction on the certification hardware
 
-Full evidence: **[`docs/research/notifications-v1/poc/POC-NOTIF-01.md`](docs/research/notifications-v1/poc/POC-NOTIF-01.md)**.
+Full evidence: **[`docs/research/notifications-v1/poc/POC-NOTIF-01.md`](../../../docs/research/notifications-v1/poc/POC-NOTIF-01.md)**.
 Criteria were taken verbatim from
-[06 §3](docs/research/notifications-v1/06-OPEN-QUESTIONS-AND-POCS.md) and not
+[06 §3](../../../docs/research/notifications-v1/06-OPEN-QUESTIONS-AND-POCS.md) and not
 redefined.
 
 **Device.** SM-X620 · Android **16** · API **36** · One UI **8.0** (`80500`) ·
@@ -270,7 +270,7 @@ absent) was correct and load-bearing."*
 **Consequences, all applied:** T-N02's residual risk moves from *"high, and
 presence unknown"* to *"high, and absence measured"* · product copy may not
 offer platform redaction as reassurance on any device
-([01 §8.1](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md), new
+([01 §8.1](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md), new
 "the permission copy is a security control" subsection) · the per-app allow-list
 is the **only** effective control, which argues **for** OQ-02's deny-by-default
 · **nothing in the protocol, identity, filter or lock design changes**.
@@ -282,7 +282,7 @@ N1, not for N0.
 
 ## 9. POC-NOTIF-02 — GNOME lock detection
 
-Full evidence: **[`docs/research/notifications-v1/poc/POC-NOTIF-02.md`](docs/research/notifications-v1/poc/POC-NOTIF-02.md)**.
+Full evidence: **[`docs/research/notifications-v1/poc/POC-NOTIF-02.md`](../../../docs/research/notifications-v1/poc/POC-NOTIF-02.md)**.
 
 **Environment.** Fedora 44 · GNOME Shell **50.4** · session type **Wayland** ·
 seat0, `Active=yes` · logind session object `/org/freedesktop/login1/session/_32`
@@ -321,7 +321,7 @@ available and effective.
 `org.gnome.ScreenSaver.ActiveChanged` is **not** a lock signal and fails in
 *both* directions: it lagged a real lock by **665 ms** (a **fail-open** window
 in which a locked screen would still be shown full notification bodies — exactly
-the failure [01 §6.2](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md)
+the failure [01 §6.2](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md)
 exists to prevent), and it fired for a blank without a lock (fail-closed false
 positive). The research treated the two sources as interchangeable. They are
 not.
@@ -330,8 +330,8 @@ not.
 > `ActiveChanged` may be subscribed only as a wake-up to re-read it, and its
 > boolean is discarded. Unreadable lock state is treated as **locked**.
 
-Applied to [01 §6.2](docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md),
-[ADR-0015 §7](docs/adr/ADR-0015-notification-access.md) and recorded as
+Applied to [01 §6.2](../../../docs/research/notifications-v1/01-FUNCTIONAL-SPECIFICATION.md),
+[ADR-0015 §7](../../../docs/adr/ADR-0015-notification-access.md) and recorded as
 **OQ-14, resolved**.
 
 **PoC hygiene (both PoCs).** Only synthetic, non-sensitive text was used — no
@@ -462,7 +462,7 @@ with content intact.
 That branch is a finding about **Android**, not a defect in `notifications.v1`,
 and the PoC's own text says so: the Fail branch reads *"the protection is absent
 on this device and the design's assumption … was correct and load-bearing."* The
-design never depended on redaction — [03 assumption 3](docs/research/notifications-v1/03-PRIVACY-SECURITY-THREAT-MODEL.md)
+design never depended on redaction — [03 assumption 3](../../../docs/research/notifications-v1/03-PRIVACY-SECURITY-THREAT-MODEL.md)
 already stated *"the design assumes it is absent"* — so the result **confirms**
 the architecture instead of invalidating it. The PoC's stated purpose was to
 change *product copy* and *residual risk*, and both changes have been made.
@@ -484,7 +484,7 @@ remedy would not be an engineering change, because there is none available.
 or N2 in the same sprint.**
 
 N0 scope, unchanged from
-[05](docs/research/notifications-v1/05-IMPLEMENTATION-PLAN.md) minus the ADR
+[05](../../../docs/research/notifications-v1/05-IMPLEMENTATION-PLAN.md) minus the ADR
 already written:
 
 1. `protocol/proto/anyflow/v1/capabilities/notifications_v1.proto` — the six
@@ -494,7 +494,7 @@ already written:
    capable of carrying a `PendingIntent`, an action or a `RemoteViews` can be
    added without a failing test.
 2. **ADR-0016** — notification identity and update semantics, folding in
-   [02 §5.5 / §5.6](docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md).
+   [02 §5.5 / §5.6](../../../docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md).
 3. **ADR-0017** — capability roles negotiated *inside* a capability. Worth its
    own record because it is a pattern, not a feature.
 4. `docs/architecture/NOTIFICATIONS.md`, linked from `OVERVIEW.md`; a

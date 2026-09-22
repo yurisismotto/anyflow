@@ -53,7 +53,7 @@ Faithful to the reference in composition, spacing, hierarchy, cards, borders,
 iconography and general feel — with five deliberate departures, each because
 the reference showed something the product does not do or must not do. They
 are listed in §30 and documented in
-[`docs/design/UI-GUIDELINES.md`](docs/design/UI-GUIDELINES.md).
+[`docs/design/UI-GUIDELINES.md`](../../../docs/design/UI-GUIDELINES.md).
 
 The interface stays quiet: white or Ink surfaces, hairline borders, low
 elevation, one accent at a time. Colour is spent on meaning — connected,
@@ -118,7 +118,7 @@ screen.
 
 ## 7. Tokens
 
-[`docs/design/tokens.json`](docs/design/tokens.json) is the single source of
+[`docs/design/tokens.json`](../../../docs/design/tokens.json) is the single source of
 truth for colours, gradients, spacing (4 px base), radius, borders, elevation,
 icon sizes, motion, status colours and typography.
 
@@ -317,15 +317,15 @@ was removed.
 
 ## 25. Documentation
 
-- [`docs/design/BRAND.md`](docs/design/BRAND.md) — brand idea, tagline, the two
+- [`docs/design/BRAND.md`](../../../docs/design/BRAND.md) — brand idea, tagline, the two
   logo roles and their hierarchy, palette with measured contrast ratios, the
   two-family rule, gradients, typography, spacing, radius, iconography,
   light/dark, asset inventory, misuse.
-- [`docs/design/UI-GUIDELINES.md`](docs/design/UI-GUIDELINES.md) — the five
+- [`docs/design/UI-GUIDELINES.md`](../../../docs/design/UI-GUIDELINES.md) — the five
   rules that outrank the mockups, status language, component vocabulary and
   cross-platform mapping, desktop patterns, Android patterns, motion,
   accessibility, and what must never be traded for UX.
-- [`docs/design/tokens.json`](docs/design/tokens.json) — the cross-platform
+- [`docs/design/tokens.json`](../../../docs/design/tokens.json) — the cross-platform
   contract.
 - `desktop/gui/README.md` — rewritten from placeholder to real documentation.
 

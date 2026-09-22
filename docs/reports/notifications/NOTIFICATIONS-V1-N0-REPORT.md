@@ -264,7 +264,7 @@ string appears.
 reconnect grace (60 s), the snapshot abandon timeout (30 s),
 `MAX_SNAPSHOT_ENTRIES` (100) and `MAX_MIRRORS_PER_PEER` (200) are sink- or
 source-local tunables for later waves, per the approved reclassification
-([02 §7.5](docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md)). Only
+([02 §7.5](../../../docs/research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md)). Only
 the bracketing and the remove-what-is-not-named rule are on the wire.
 
 Reconnect needs no history: a snapshot is just upserts, and derived ids let the
@@ -521,7 +521,7 @@ plan — which the brief itself names as the authority — places it explicitly 
 the first Linux implementation:
 
 > **N2** — *Backend seam* | `desktop/capabilities/notifications/src/backend/mod.rs` — `NotificationSink` trait, mirroring `ClipboardBackend`
-> — [05-IMPLEMENTATION-PLAN.md](docs/research/notifications-v1/05-IMPLEMENTATION-PLAN.md)
+> — [05-IMPLEMENTATION-PLAN.md](../../../docs/research/notifications-v1/05-IMPLEMENTATION-PLAN.md)
 
 N0's own deliverable table in the same plan lists the schema, three ADRs, the
 architecture document and the doc updates, and nothing else. An abstraction with

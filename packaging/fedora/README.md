@@ -34,7 +34,8 @@ after logout should be something the user opts into.
 ### The unit still has open defects, and they are fixed in a different branch
 
 `omnibridged.service` as shipped here does **not** yet start on a fresh
-install. `PACKAGING-V1-READINESS-AUDIT.md` §4.2 measured three things about
+install. `docs/audits/packaging/PACKAGING-V1-READINESS-AUDIT.md` §4.2
+measured three things about
 it: there is no `RuntimeDirectory=`, so under `ProtectSystem=strict` the
 daemon cannot create `$XDG_RUNTIME_DIR/omnibridge` and has nowhere to bind
 its control socket; `ReadWritePaths=` names a path that does not exist yet
@@ -80,7 +81,7 @@ The second one exists because `mock`, `koji` and Debian `buildd` all build
 with networking switched off, and `cargo build --locked` reads the committed
 lockfile but still *downloads* all 270 crates. Without a vendored tarball no
 official package can be produced at all — that was defect B3 of
-`PACKAGING-V1-READINESS-AUDIT.md` §5.1.
+`docs/audits/packaging/PACKAGING-V1-READINESS-AUDIT.md` §5.1.
 
 `%prep` unpacks the vendor tarball into `desktop/vendor` and copies
 `cargo-vendor-config.toml` to `desktop/.cargo/config.toml`, which replaces

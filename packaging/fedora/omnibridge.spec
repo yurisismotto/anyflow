@@ -1,5 +1,6 @@
 # No -debuginfo / -debugsource subpackage for v1. Recorded as a deliberate
-# choice, not an oversight: PACKAGING-V1-READINESS-AUDIT.md §19 Q2.
+# choice, not an oversight:
+# docs/audits/packaging/PACKAGING-V1-READINESS-AUDIT.md §19 Q2.
 %global debug_package %{nil}
 
 Name:           omnibridge

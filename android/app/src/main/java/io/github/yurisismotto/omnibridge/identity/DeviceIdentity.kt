@@ -69,7 +69,7 @@ class DeviceIdentity private constructor(
          * key, and the old app keeps its own until it is uninstalled.
          *
          * The consequence is a one-time re-pair for development devices; see
-         * docs/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md.
+         * docs/migrations/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md.
          */
         private const val KEY_ALIAS = "omnibridge-identity-v1"
         private const val KEYSTORE = "AndroidKeyStore"

@@ -70,7 +70,7 @@ on the adapters and binaries — because `forbid` cannot be relaxed locally, and
 an adapter that one day needs FFI must not be able to weaken the core to get
 it. No crate uses `unsafe` today, and a test asserts it.
 
-See [the Wave 0 sprint report](../sprints/wave-0-platform-abstraction.md).
+See [the Wave 0 sprint report](../reports/foundation/wave-0-platform-abstraction.md).
 
 ## Where trust is decided
 

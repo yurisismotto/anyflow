@@ -132,7 +132,7 @@ itself did not move.
   one speaking `omnibridge/1` fail during the TLS handshake, which is the
   intended failure mode: loud, immediate and unambiguous. Both ends must be
   rebuilt from this commit and re-paired. See
-  [the migration note](../MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md).
+  [the migration note](../migrations/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md).
 * **Android treats this as a different app.** A new `applicationId` means a
   new install, a new keystore, a new identity, and notification-listener
   access granted again by hand. The old app is not uninstalled by anything

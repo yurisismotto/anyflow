@@ -199,8 +199,8 @@ unsafe policy intact: forbid in the portable/security crates, deny in the adapte
 
 ## 9. POC-CORE-04 verdict
 
-Against the official criteria — [21 §POC-CORE-04](docs/research/platform-expansion/21-POC-MASTER-PLAN.md)
-and [28 §10.3](docs/research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md), **not redefined**:
+Against the official criteria — [21 §POC-CORE-04](../../../docs/research/platform-expansion/21-POC-MASTER-PLAN.md)
+and [28 §10.3](../../../docs/research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md), **not redefined**:
 
 | Official criterion | Evidence |
 | --- | --- |
@@ -216,7 +216,7 @@ and [28 §10.3](docs/research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.m
 
 ## 10. Wave 0 gate table — final
 
-Official gates, [28 §12](docs/research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md):
+Official gates, [28 §12](../../../docs/research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md):
 
 | # | Gate | Result | Evidence |
 | --- | --- | --- | --- |

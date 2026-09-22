@@ -13,7 +13,7 @@
 | **Positioning** | A single bridge between devices and platforms. |
 | **Identity direction** | **Platform-neutral.** Not an Android product, not a Linux product: Android and Linux are its first two implementations. Nothing in the name, the mark or the copy may imply otherwise. |
 | **Translated?** | The name is **not** translated. The tagline is not currently localised (the app ships one locale); if it is localised later, it is translated as one whole sentence pair, never assembled from parts. |
-| **Previous name** | AnyFlow (*One flow. Any device.*), renamed before the public v1.0.0 release — see [ADR-0018](../adr/ADR-0018-rename-to-omnibridge.md) and [the migration note](../MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md). |
+| **Previous name** | AnyFlow (*One flow. Any device.*), renamed before the public v1.0.0 release — see [ADR-0018](../adr/ADR-0018-rename-to-omnibridge.md) and [the migration note](../migrations/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md). |
 
 ### Reserved naming family
 

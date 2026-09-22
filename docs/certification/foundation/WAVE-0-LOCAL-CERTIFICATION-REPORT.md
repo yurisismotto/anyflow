@@ -682,7 +682,7 @@ as they were.
 | — | Security audit | ✅ Every control unchanged; export surface shrank |
 | — | Protocol | ✅ Unchanged |
 | **PLAT-DEC-013** | Fail-closed sensitive behaviour | ✅ Not exercised as a refusal — this backend **supports** `--sensitive`, so the supported path ran. Ordinary writes functional throughout |
-| **POC-CORE-04** | Windows MSVC runner | ✅ **PASS — 2026-09-01**, on a GitHub-hosted `windows-2025-vs2026` runner, `host: x86_64-pc-windows-msvc` ([run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649)). Evidence: [sprint report §17](docs/sprints/wave-0-platform-abstraction.md) |
+| **POC-CORE-04** | Windows MSVC runner | ✅ **PASS — 2026-09-01**, on a GitHub-hosted `windows-2025-vs2026` runner, `host: x86_64-pc-windows-msvc` ([run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649)). Evidence: [sprint report §17](../../reports/foundation/wave-0-platform-abstraction.md) |
 
 ---
 
@@ -693,5 +693,5 @@ real hardware evidence, and every local regression passes.
 
 > **Superseded on 2026-09-01.** The one item this report left open, `POC-CORE-04`, has since
 > passed on a real Windows MSVC runner. **Wave 0 is now CERTIFIED** — see
-> [the sprint report](docs/sprints/wave-0-platform-abstraction.md) §§17, 24, 26, which is the
+> [the sprint report](../../reports/foundation/wave-0-platform-abstraction.md) §§17, 24, 26, which is the
 > authoritative gate record. This document remains the evidence for **G6** and **G10**.

@@ -193,12 +193,19 @@ else fail "no vendor tarball in $BUNDLE_DIR"; fi
 if [ -n "$src_tarball" ]; then
     tar -tzf "$src_tarball" > "$SCRATCH/src.list"
 
+    # The first four are build inputs and the icon is read by
+    # `desktop/gui/build.rs`. U2 is neither: it is here because
+    # `make-source-bundle.sh` used to carry a special-case exclusion for it,
+    # from when it was an untracked file at the repository root. It is now a
+    # tracked document under `docs/`, and asserting that the bundle ships it
+    # is what would catch that exclusion being reintroduced.
     for required in \
         desktop/Cargo.lock \
         desktop/Cargo.toml \
         packaging/fedora/omnibridge.spec \
         packaging/fedora/cargo-vendor-config.toml \
-        docs/design/assets/omnibridge-app-icon.svg
+        docs/design/assets/omnibridge-app-icon.svg \
+        docs/audits/linux-compat/LINUX-UBUNTU-DEBIAN-COMPAT-U2.md
     do
         if grep -qE "^omnibridge-[^/]+/$required$" "$SCRATCH/src.list"; then
             pass "bundle carries $required"
@@ -212,8 +219,7 @@ if [ -n "$src_tarball" ]; then
     for forbidden in \
         '\.git/' 'desktop/target/' 'android/build/' 'android/[^/]*/build/' \
         '\.apk$' '\.aab$' '\.key$' '\.pem$' '\.jks$' '\.keystore$' \
-        'state\.json$' 'trust-store\.json$' 'local\.properties$' \
-        'LINUX-UBUNTU-DEBIAN-COMPAT-U2\.md$'
+        'state\.json$' 'trust-store\.json$' 'local\.properties$'
     do
         if grep -qE "$forbidden" "$SCRATCH/src.list"; then
             fail "bundle contains a forbidden path matching /$forbidden/"
