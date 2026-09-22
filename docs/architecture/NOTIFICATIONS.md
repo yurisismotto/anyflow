@@ -25,7 +25,7 @@ access contract [ADR-0015](../adr/ADR-0015-notification-access.md), for naming
 | Dismissal synchronisation and echo suppression | **Exists**, opt-in per peer | N4 |
 | Reconnect grace, snapshot resync, queue and mirror ceilings | **Exists** | N2, N5 |
 | Mid-session grant convergence | **Exists** — see *Grant convergence* below | N5 |
-| Hardware certification | **Done** — see [the N6 report](../../NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md) | N6 |
+| Hardware certification | **Done** — see [the N6 report](../certification/notifications/NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md) | N6 |
 
 ## The shape, end to end
 

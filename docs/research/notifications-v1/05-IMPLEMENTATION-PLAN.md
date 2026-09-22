@@ -19,7 +19,7 @@
 > the certification hardware, and left **no BLOCKER and no open P0 architecture
 > or security question**. See
 > [ADR-0015](../../adr/ADR-0015-notification-access.md) and
-> [the decision report](../../../NOTIFICATIONS-V1-DECISION-REPORT.md).
+> [the decision report](../../reports/notifications/NOTIFICATIONS-V1-DECISION-REPORT.md).
 
 The two questions that gated N0 itself, and how they closed:
 

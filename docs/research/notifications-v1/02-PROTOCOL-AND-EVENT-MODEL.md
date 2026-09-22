@@ -369,7 +369,7 @@ deliver stale content late.
 > **Status: APPROVED** (decision sprint, 2026-09-08), with the lifecycle rules
 > in §5.5 added. The derivation, the truncation width and the composite sink
 > key are accepted as specified. See the review record in
-> [the decision report](../../../NOTIFICATIONS-V1-DECISION-REPORT.md).
+> [the decision report](../../reports/notifications/NOTIFICATIONS-V1-DECISION-REPORT.md).
 
 The requirement list from the brief, in full: updates replace, duplicates are
 suppressed, reconnect does not explode, removal targets the right mirror,

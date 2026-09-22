@@ -12,7 +12,7 @@ Open-source, local-first device continuity.
 > compatible with. **An existing AnyFlow build cannot talk to an OmniBridge
 > build and a development pairing must be redone once.**
 > See [ADR-0018](docs/adr/ADR-0018-rename-to-omnibridge.md) for the decision
-> and [the migration note](docs/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md) for what
+> and [the migration note](docs/migrations/MIGRATION-ANYFLOW-TO-OMNIBRIDGE.md) for what
 > to do about an existing checkout or test device.
 >
 > The repository has since been renamed too, and now lives at
@@ -43,7 +43,7 @@ keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 > [ADR-0017](docs/adr/ADR-0017-capability-roles.md); it is specified in
 > [docs/research/notifications-v1/](docs/research/notifications-v1/) and
 > certified in
-> [NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md](NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md).
+> [NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md](docs/certification/notifications/NOTIFICATIONS-V1-N6-FINAL-CERTIFICATION.md).
 >
 > Clipboard sharing is, precisely: **automatic desktop → Android sync**
 > (opt-in, per device) and **manual Android → desktop send**. It is not
@@ -86,12 +86,21 @@ omnibridge/
 ├── android/                   Kotlin + Compose app
 ├── browser-extension/         (placeholder)
 ├── packaging/fedora/          systemd user unit, RPM spec
-└── docs/
-    ├── architecture/          OVERVIEW.md, PROTOCOL.md, FILES.md
+└── docs/                      see docs/README.md for the full taxonomy
+    ├── adr/                   ADR-0001 … ADR-0018
+    ├── architecture/          OVERVIEW.md, PROTOCOL.md, FILES.md, CLIPBOARD.md, NOTIFICATIONS.md
+    ├── design/                BRAND.md, UI-GUIDELINES.md, tokens.json, assets/
     ├── security/              THREAT_MODEL.md
     ├── research/              cross-platform expansion, notifications.v1
-    └── adr/                   ADR-0001 … ADR-0018
+    ├── audits/                readiness and gap analyses, by area
+    ├── certification/         PASS/FAIL gates and their evidence, by area
+    ├── reports/               sprint and hardening reports, by area
+    └── migrations/            AnyFlow → OmniBridge
 ```
+
+Root Markdown is limited to this file and
+[AGENTS.md](AGENTS.md); every other document lives under
+[docs/](docs/README.md), which explains where a new one belongs.
 
 ## Running on Linux
 

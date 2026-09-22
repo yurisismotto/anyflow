@@ -12,7 +12,7 @@
 # lockfile but still *downloads* all 270 crates from crates.io — and `mock`,
 # `koji` and Debian `buildd` all build with networking switched off. No
 # official package could be produced at all. That is defect B3 of
-# PACKAGING-V1-READINESS-AUDIT.md §5.1.
+# docs/audits/packaging/PACKAGING-V1-READINESS-AUDIT.md §5.1.
 #
 # This script closes it by emitting the two tarballs the spec now consumes:
 #
@@ -42,15 +42,23 @@ set -euo pipefail
 # --------------------------------------------------------------------------
 # Paths the bundle must never contain.
 #
-# Build outputs, local user state, private key material, the repository's own
-# history and the U2 compatibility working document. Matched against the path
-# relative to the bundle root, so `desktop/target` matches the tree and not a
-# crate called `target`.
+# Build outputs, local user state, private key material and the repository's
+# own history. Matched against the path relative to the bundle root, so
+# `desktop/target` matches the tree and not a crate called `target`.
 #
-# `protocol/testdata/*.der` is deliberately NOT here. Those two files are X.509
-# *certificates* — public, no private half — used as cross-language test
-# vectors by both `desktop/core/tests/identity_and_store.rs` and the Android
-# unit tests. `%check` fails without them.
+# `LINUX-UBUNTU-DEBIAN-COMPAT-U2.md` used to be listed here. That entry was
+# never about the document's contents: U2 was an *untracked* file lying at the
+# repository root, and `--worktree` mode would have swept it into a bundle. It
+# is now committed as
+# `docs/audits/linux-compat/LINUX-UBUNTU-DEBIAN-COMPAT-U2.md`, so it ships like
+# every other versioned report and the special case is obsolete. Do not re-add
+# it under the new path: that would drop a tracked file out of the release
+# tarball, which is the opposite of what this list is for.
+#
+# `protocol/testdata/*.der` is deliberately NOT here either. Those two files
+# are X.509 *certificates* — public, no private half — used as cross-language
+# test vectors by both `desktop/core/tests/identity_and_store.rs` and the
+# Android unit tests. `%check` fails without them.
 # --------------------------------------------------------------------------
 readonly -a FORBIDDEN_GLOBS=(
     '.git' '.git/*'
@@ -64,7 +72,6 @@ readonly -a FORBIDDEN_GLOBS=(
     '*.key' '*.pem' '*.p12' '*.pfx' '*.jks' '*.keystore'
     'id_rsa*' 'id_ed25519*'
     'state.json' 'trust-store.json'
-    'LINUX-UBUNTU-DEBIAN-COMPAT-U2.md'
     '.vscode' '.vscode/*' '*.swp' '*.rs.bk'
 )
 

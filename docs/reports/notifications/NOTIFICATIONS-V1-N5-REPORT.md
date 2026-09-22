@@ -359,7 +359,7 @@ step skipped is turning pixels into that string.** No camera scan is claimed.
 
 `android/fixture/` — a separate Gradle module, `applicationId
 io.github.yurisismotto.anyflow.fixture`, documented in
-[`android/fixture/README.md`](android/fixture/README.md).
+[`android/fixture/README.md`](../../../android/fixture/README.md).
 
 **It cannot reach the AnyFlow APK**, and that is structural rather than a
 convention: nothing depends on it. Verified:

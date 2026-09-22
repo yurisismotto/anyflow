@@ -8,7 +8,7 @@
 > [run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649) on
 > `cfd33f6`, `host: x86_64-pc-windows-msvc`, 12/12 steps green. This file is retained as the
 > pre-push readiness record; the result lives in
-> [the sprint report](docs/sprints/wave-0-platform-abstraction.md) §17.
+> [the sprint report](../../reports/foundation/wave-0-platform-abstraction.md) §17.
 
 ---
 

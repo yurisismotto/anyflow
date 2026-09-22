@@ -46,7 +46,7 @@ The reason the delta is small is visible in three measurements:
 | # | Finding | Class | Blocking? |
 | --- | --- | --- | --- |
 | **U-1** | `wl-copy --sensitive` does not exist on Ubuntu 24.04, Ubuntu 26.04 **or** Debian 13 — all three ship wl-clipboard 2.2.1, the flag landed in 2.3.0. Every clip Android marks `sensitive_hint` is therefore **refused** on all three targets. Fedora works only because its build is a post-2.2.1 git snapshot that carries the flag. | Distro capability gap; the refusal is deliberate and fail-closed | **No** — but it is the one user-visible functional difference and needs a decision |
-| **U-2** | The only string in the product that names a distribution tells the user to run `sudo dnf install wl-clipboard` ([wayland.rs:133](desktop/capabilities/clipboard/src/backend/wayland.rs#L133)) — wrong on both new targets | UX correctness | No |
+| **U-2** | The only string in the product that names a distribution tells the user to run `sudo dnf install wl-clipboard` ([wayland.rs:133](../../../desktop/capabilities/clipboard/src/backend/wayland.rs#L133)) — wrong on both new targets | UX correctness | No |
 | **U-3** | Ubuntu 24.04 LTS ships libadwaita **exactly 1.5.0** against a declared floor of **1.5**. Zero margin, and nothing in the repo guards it | Regression risk | No |
 | **U-4** | **The declared MSRV is false.** `desktop/Cargo.toml` says `rust-version = "1.82"`; the committed `Cargo.lock` actually requires **rustc 1.88** (`time`, `rcgen` at 1.88; `zbus`/`zvariant` at 1.87 — 34 locked crates demand more than 1.82). **Debian Stable's stock `rustc` 1.85.1 therefore cannot build AnyFlow**, and neither can Ubuntu 24.04's `rustc-1.82`. Found by compiling, not by reading archives (§20.3) | Build correctness | **No** — every target has a toolchain that works; the *claim* is what is broken |
 | **U-5** | There is **no Linux CI job at all**. `.github/workflows/` contains only the Windows MSVC portability job | Process gap | No |
@@ -154,24 +154,24 @@ where a measurement was taken, or explaining why a rule exists.
 
 | # | Location | What it is |
 | --- | --- | --- |
-| **U-2** | [wayland.rs:130-135](desktop/capabilities/clipboard/src/backend/wayland.rs#L130-L135) | The remediation text shown when `wl-copy`/`wl-paste` are missing: *"Install the wl-clipboard package (Fedora: `sudo dnf install wl-clipboard`)."* |
+| **U-2** | [wayland.rs:130-135](../../../desktop/capabilities/clipboard/src/backend/wayland.rs#L130-L135) | The remediation text shown when `wl-copy`/`wl-paste` are missing: *"Install the wl-clipboard package (Fedora: `sudo dnf install wl-clipboard`)."* |
 
 A multiline-tolerant sweep for `dnf install`, `apt install`, `apt-get install`,
 `systemctl --user` and `loginctl` inside string literals across the whole product returns
 **three** hits in total: the one above, a `systemctl --user start anyflowd.service`
-suggestion in the CLI's daemon-unreachable error ([main.rs:238](desktop/cli/src/main.rs#L238)),
+suggestion in the CLI's daemon-unreachable error ([main.rs:238](../../../desktop/cli/src/main.rs#L238)),
 and one line of module prose. The CLI string assumes systemd, which is true on Fedora,
 Ubuntu and Debian alike, so it is correct on every V1 target.
 
 **Two things that look Fedora-specific and are not:**
 
-* `default_device_name()` ([unix_fs.rs:231-246](desktop/core/src/platform/unix_fs.rs#L231-L246))
+* `default_device_name()` ([unix_fs.rs:231-246](../../../desktop/core/src/platform/unix_fs.rs#L231-L246))
   reads `/etc/hostname` then `/proc/sys/kernel/hostname`, with `"AnyFlow Desktop"` as the
   fallback. The comment records that the fallback *used* to be a distribution name and was
   removed precisely because *"a user who sees 'Fedora' on their phone while pairing a
   Debian laptop is being told something false."* Both sources exist identically on Ubuntu
   and Debian.
-* `probe_sensitive()` ([wayland.rs:472-496](desktop/capabilities/clipboard/src/backend/wayland.rs#L472-L496))
+* `probe_sensitive()` ([wayland.rs:472-496](../../../desktop/capabilities/clipboard/src/backend/wayland.rs#L472-L496))
   refuses to parse `wl-copy --version` and parses `--help` instead, because *"Fedora's
   `2.2.1^git20251124` has the flag and Debian's `2.2.1` does not."* That is a
   **capability** probe rather than a version check, and it is the right shape for exactly
@@ -189,13 +189,13 @@ identically on Ubuntu and Debian:
 
 | Assumption | Where | Ubuntu / Debian |
 | --- | --- | --- |
-| `/proc/self/status` for the uid | [platform-linux/src/lib.rs:83](desktop/platform-linux/src/lib.rs#L83), [logind.rs:292](desktop/capabilities/notifications/src/backend/logind.rs#L292) | identical |
-| `/etc/hostname`, `/proc/sys/kernel/hostname` | [unix_fs.rs:236](desktop/core/src/platform/unix_fs.rs#L236) | identical |
-| Unix domain socket in `$XDG_RUNTIME_DIR` | [platform-linux/src/lib.rs:72-76](desktop/platform-linux/src/lib.rs#L72-L76) | identical (`/run/user/$UID`) |
-| `O_EXCL` + mode 0600 + same-directory `rename(2)` | [destination.rs:87-165](desktop/capabilities/files/src/destination.rs#L87-L165) | identical |
-| 0700 directories, 0600 key files, mode verification on load | [unix_fs.rs](desktop/core/src/platform/unix_fs.rs), [store.rs](desktop/core/src/store.rs) | identical |
-| TCP 55432, unprivileged | [core/src/lib.rs:39](desktop/core/src/lib.rs#L39) | identical; no capability or privileged port needed |
-| `_anyflow._tcp.local.` over its own multicast socket | [runtime/src/mdns.rs](desktop/runtime/src/mdns.rs) | identical |
+| `/proc/self/status` for the uid | [platform-linux/src/lib.rs:83](../../../desktop/platform-linux/src/lib.rs#L83), [logind.rs:292](../../../desktop/capabilities/notifications/src/backend/logind.rs#L292) | identical |
+| `/etc/hostname`, `/proc/sys/kernel/hostname` | [unix_fs.rs:236](../../../desktop/core/src/platform/unix_fs.rs#L236) | identical |
+| Unix domain socket in `$XDG_RUNTIME_DIR` | [platform-linux/src/lib.rs:72-76](../../../desktop/platform-linux/src/lib.rs#L72-L76) | identical (`/run/user/$UID`) |
+| `O_EXCL` + mode 0600 + same-directory `rename(2)` | [destination.rs:87-165](../../../desktop/capabilities/files/src/destination.rs#L87-L165) | identical |
+| 0700 directories, 0600 key files, mode verification on load | [unix_fs.rs](../../../desktop/core/src/platform/unix_fs.rs), [store.rs](../../../desktop/core/src/store.rs) | identical |
+| TCP 55432, unprivileged | [core/src/lib.rs:39](../../../desktop/core/src/lib.rs#L39) | identical; no capability or privileged port needed |
+| `_anyflow._tcp.local.` over its own multicast socket | [runtime/src/mdns.rs](../../../desktop/runtime/src/mdns.rs) | identical |
 
 **AnyFlow's own source contains no raw `libc`, no `nix`, no `syscall()` and no `ioctl`.**
 The only occurrence of the word `libc` in production source is a comment explaining why it
@@ -241,12 +241,12 @@ This is stronger than it looks, and it is worth naming why:
 * **`x11rb` 0.14 with `default-features = false`** uses its own `RustConnection`. The
   Xwayland XFIXES clipboard watch needs **no `libX11`, no `libxcb`** at build or run time.
 * **`mdns-sd` is a pure-Rust mDNS responder.** **Avahi is not a build or link dependency.**
-* **`protox` + `prost_build::skip_protoc_run()`** ([proto/build.rs](desktop/proto/build.rs))
+* **`protox` + `prost_build::skip_protoc_run()`** ([proto/build.rs](../../../desktop/proto/build.rs))
   means **no system `protoc`**. Confirmed in every container probe.
 * A **C compiler is still required**, because `ring` compiles C and assembly. That is the
   one thing `BuildRequires: gcc` in the Fedora spec is actually for.
 * `anyflow-gui`'s build script runs **`glib-compile-resources`**
-  ([gui/build.rs](desktop/gui/build.rs)) — a build-time *binary*, not a library.
+  ([gui/build.rs](../../../desktop/gui/build.rs)) — a build-time *binary*, not a library.
 
 ### Package names per distribution
 
@@ -295,7 +295,7 @@ Ubuntu 24.04, Ubuntu 26.04 and Debian 13 — all three are merged-`/usr` systems
 
 ### What the backend actually does
 
-`detect_linux()` ([backend/mod.rs:220-240](desktop/capabilities/clipboard/src/backend/mod.rs#L220-L240))
+`detect_linux()` ([backend/mod.rs:220-240](../../../desktop/capabilities/clipboard/src/backend/mod.rs#L220-L240))
 branches on `WAYLAND_DISPLAY`. On a Wayland session it builds `WaylandBackend`, which
 probes three things once, at construction:
 
@@ -335,7 +335,7 @@ rather than parsing `--version`, and it is a small piece of design that this aud
 confirm was correct for the right reason.
 
 What happens then is deliberate and documented at the call site
-([wayland.rs:315-341](desktop/capabilities/clipboard/src/backend/wayland.rs#L315-L341)):
+([wayland.rs:315-341](../../../desktop/capabilities/clipboard/src/backend/wayland.rs#L315-L341)):
 the write is **refused**, with
 
 > *"this clip is marked sensitive and … It was NOT written to the clipboard: writing it
@@ -418,7 +418,7 @@ where a `.deb` will want both files anyway.
 
 ## 10. Lock detection
 
-`LogindLock` ([backend/logind.rs](desktop/capabilities/notifications/src/backend/logind.rs))
+`LogindLock` ([backend/logind.rs](../../../desktop/capabilities/notifications/src/backend/logind.rs))
 reads `org.freedesktop.login1.Session.LockedHint` on the **system** bus.
 
 `resolve_session()` tries three candidates in order:
@@ -460,7 +460,7 @@ identical) could in principle produce a different `Display` answer.
 
 ## 11. Discovery / mDNS
 
-`Advertisement::publish` ([runtime/src/mdns.rs](desktop/runtime/src/mdns.rs)) uses
+`Advertisement::publish` ([runtime/src/mdns.rs](../../../desktop/runtime/src/mdns.rs)) uses
 `mdns-sd` 0.15, a **pure-Rust mDNS responder**. The daemon only advertises; Android is
 always the initiator.
 
@@ -469,10 +469,10 @@ always the initiator.
 | Does it work without Avahi? | **Yes.** `mdns-sd` opens its own multicast socket and speaks mDNS itself | no `avahi` or `dbus` name appears in the discovery path; `mdns-sd` is the only dependency |
 | Is Avahi required indirectly? | **No** — not as a library, not over D-Bus | the resolved graph contains no Avahi binding |
 | Does Avahi being present break it? | **No** — and Fedora already proves it: Fedora Workstation runs `avahi-daemon` by default and AnyFlow has been certified on it through six waves. `mdns-sd` sets both `SO_REUSEADDR` and `SO_REUSEPORT` (`service_daemon.rs:688-691`, verified in the vendored crate), so two responders coexist on 5353 | Fedora certification history; **still a VM gate on Ubuntu/Debian (G-MDNS)** |
-| Interface enumeration | delegated to `mdns-sd` via `.enable_addr_auto()`, so the record follows Wi-Fi/dock changes without a restart | [mdns.rs:66-68](desktop/runtime/src/mdns.rs#L66-L68) |
-| IPv4 / IPv6 | the record is restricted to the families the TCP listener actually **bound**, via `daemon.disable_interface(IfKind::IPv6/IPv4)`. Advertising an address the daemon cannot accept on is explicitly treated as worse than advertising nothing | [mdns.rs:41-47](desktop/runtime/src/mdns.rs#L41-L47), [listener.rs](desktop/runtime/src/listener.rs) |
+| Interface enumeration | delegated to `mdns-sd` via `.enable_addr_auto()`, so the record follows Wi-Fi/dock changes without a restart | [mdns.rs:66-68](../../../desktop/runtime/src/mdns.rs#L66-L68) |
+| IPv4 / IPv6 | the record is restricted to the families the TCP listener actually **bound**, via `daemon.disable_interface(IfKind::IPv6/IPv4)`. Advertising an address the daemon cannot accept on is explicitly treated as worse than advertising nothing | [mdns.rs:41-47](../../../desktop/runtime/src/mdns.rs#L41-L47), [listener.rs](../../../desktop/runtime/src/listener.rs) |
 | NetworkManager assumptions | **none** — NetworkManager is never consulted | no `nmcli`, no `org.freedesktop.NetworkManager` |
-| Instance naming | the **device id**, not the hostname, because *"two machines called 'fedora' is the common case"* | [mdns.rs:52-55](desktop/runtime/src/mdns.rs#L52-L55) |
+| Instance naming | the **device id**, not the hostname, because *"two machines called 'fedora' is the common case"* | [mdns.rs:52-55](../../../desktop/runtime/src/mdns.rs#L52-L55) |
 
 Separating the three layers the brief asks about:
 
@@ -516,7 +516,7 @@ that file is absent, and it behaves identically on Fedora.
 ## 13. Battery
 
 `battery.v1`'s Linux backend is **UPower over the system bus, and nothing else**
-([capabilities/battery/src/upower.rs](desktop/capabilities/battery/src/upower.rs)).
+([capabilities/battery/src/upower.rs](../../../desktop/capabilities/battery/src/upower.rs)).
 
 * Object: `/org/freedesktop/UPower/devices/DisplayDevice`, interface
   `org.freedesktop.UPower.Device`, properties `Percentage` and `State`.
@@ -590,12 +590,12 @@ gui/src/views/peers.rs:171:23:  error[E0433]: cannot find `AlertDialog` in `adw`
 
 | Floor | API | Site |
 | --- | --- | --- |
-| **GTK 4.12** | `gtk::CssProvider::load_from_string` | [gui/src/lib.rs:66](desktop/gui/src/lib.rs#L66) — the theme installer, called again on every light/dark switch |
-| **libadwaita 1.5** | `adw::Dialog` | [gui/src/views/pairing.rs:23](desktop/gui/src/views/pairing.rs#L23) — the pairing confirmation |
-| **libadwaita 1.5** | `adw::AlertDialog` | [gui/src/views/peers.rs:171](desktop/gui/src/views/peers.rs#L171) — the forget-device confirmation |
+| **GTK 4.12** | `gtk::CssProvider::load_from_string` | [gui/src/lib.rs:66](../../../desktop/gui/src/lib.rs#L66) — the theme installer, called again on every light/dark switch |
+| **libadwaita 1.5** | `adw::Dialog` | [gui/src/views/pairing.rs:23](../../../desktop/gui/src/views/pairing.rs#L23) — the pairing confirmation |
+| **libadwaita 1.5** | `adw::AlertDialog` | [gui/src/views/peers.rs:171](../../../desktop/gui/src/views/peers.rs#L171) — the forget-device confirmation |
 
 > **U-7 — this corrects the earlier desk research.**
-> [05-DEBIAN-UBUNTU-COMPATIBILITY.md §2.2](docs/research/platform-expansion/05-DEBIAN-UBUNTU-COMPATIBILITY.md)
+> [05-DEBIAN-UBUNTU-COMPATIBILITY.md §2.2](../../../docs/research/platform-expansion/05-DEBIAN-UBUNTU-COMPATIBILITY.md)
 > concluded that *"the GTK gap (4.10 vs 4.12) appears to be a conservative pin rather than a
 > requirement"*, on the basis that the highest-versioned **type** used is `gtk::FileDialog`
 > (4.10). That inventory was correct about types and missed a **method**:
@@ -1191,7 +1191,7 @@ of the others and of each other.
 | | |
 | --- | --- |
 | **Problem** | `rust-version = "1.82"` is not true of the committed tree. The lockfile's real floor is **1.88** (`time`, `rcgen` at 1.88; `zbus`/`zvariant` at 1.87), and 34 locked crates demand more than 1.82. Debian 13's stock `rustc` 1.85.1 and Ubuntu 24.04's `rustc-1.82` both fail before compiling any AnyFlow code (U-4, §20.3) |
-| **Files** | [desktop/Cargo.toml:21](desktop/Cargo.toml#L21) · [packaging/fedora/anyflow.spec:12](packaging/fedora/anyflow.spec#L12) (`BuildRequires: rust >= 1.82`) · [README.md:73-78](README.md#L73-L78) |
+| **Files** | [desktop/Cargo.toml:21](../../../desktop/Cargo.toml#L21) · [packaging/fedora/anyflow.spec:12](packaging/fedora/anyflow.spec#L12) (`BuildRequires: rust >= 1.82`) · [README.md:73-78](../../../README.md#L73-L78) |
 | **Change** | Set `rust-version = "1.88"`. Correct the spec's `BuildRequires`. Replace the README's "Needs a Rust toolchain" with a per-distribution table naming a toolchain that actually works on each target |
 | **Rejected alternative** | Pinning `zbus`, `rcgen` and `time` back to keep a 1.82 floor. That means downgrading the D-Bus client all three platform backends share, and the certificate generator, to support a toolchain **no V1 target needs** — Ubuntu 24.04 carries `rustc-1.91` in its own archive and Debian 13 has backports. Trading current security-relevant dependencies for a synthetic compatibility claim is the wrong direction |
 | **Test** | A CI job running `cargo check --workspace --locked` on **exactly** the declared MSRV toolchain, so the number is enforced rather than asserted. Without this, the next dependency bump re-creates the defect silently — which is how it got here |
@@ -1205,7 +1205,7 @@ of the others and of each other.
 | | |
 | --- | --- |
 | **Problem** | `wl-copy --sensitive` (wl-clipboard ≥ 2.3.0) does not exist on Ubuntu 24.04, Ubuntu 26.04 or Debian 13 — all ship 2.2.1 (measured, §8). Every clip Android marks `EXTRA_IS_SENSITIVE` is therefore refused on all three, and accepted on Fedora. The refusal is correct and fail-closed; what is missing is that a user only discovers it at the moment a password fails to arrive (U-1) |
-| **Files** | [wayland.rs:315-341](desktop/capabilities/clipboard/src/backend/wayland.rs#L315-L341) and [:472-517](desktop/capabilities/clipboard/src/backend/wayland.rs#L472-L517) · the clipboard status renderer in [cli/src/main.rs](desktop/cli/src/main.rs) · [gui/src/views/clipboard.rs](desktop/gui/src/views/clipboard.rs) · [docs/architecture/CLIPBOARD.md](docs/architecture/CLIPBOARD.md) |
+| **Files** | [wayland.rs:315-341](../../../desktop/capabilities/clipboard/src/backend/wayland.rs#L315-L341) and [:472-517](../../../desktop/capabilities/clipboard/src/backend/wayland.rs#L472-L517) · the clipboard status renderer in [cli/src/main.rs](../../../desktop/cli/src/main.rs) · [gui/src/views/clipboard.rs](../../../desktop/gui/src/views/clipboard.rs) · [docs/architecture/CLIPBOARD.md](../../../docs/architecture/CLIPBOARD.md) |
 | **Change** | **Keep the refusal.** Surface the unsupported state **proactively**: `anyflow clipboard status` and the GUI clipboard page should say "sensitive clips: not supported — this system's wl-clipboard is older than 2.3.0" *before* the user tries, rather than only in the failure text. Record it in `CLIPBOARD.md` as a named platform limitation with the exact version requirement |
 | **Rejected alternatives** | (a) Writing the clip unmarked with a warning — already considered and rejected at the call site (PLAT-DEC-013): it converts a visible failure into an invisible privacy regression. (b) Implementing a native Wayland clipboard writer so AnyFlow no longer depends on `wl-copy`'s flag — a genuine solution, and far too large for a compatibility wave. If it is ever wanted it needs its own ADR |
 | **Test** | Unit tests over `probe_sensitive_from_output` with the **real** `wl-copy --help` text from 2.2.1 and from 2.3.0. The function was deliberately split out from the process spawn for exactly this, and the help text can be captured from the containers used in §20 |
@@ -1233,7 +1233,7 @@ of the others and of each other.
 | | |
 | --- | --- |
 | **Problem** | The only user-facing string in the product that names a distribution tells every user to run `sudo dnf install wl-clipboard` (U-2) |
-| **Files** | [wayland.rs:130-135](desktop/capabilities/clipboard/src/backend/wayland.rs#L130-L135) |
+| **Files** | [wayland.rs:130-135](../../../desktop/capabilities/clipboard/src/backend/wayland.rs#L130-L135) |
 | **Change** | Name the **package**, not one package manager. The package is called `wl-clipboard` on Fedora, Ubuntu and Debian alike, which makes this easy to say once and correctly |
 | **Test** | One assertion that the message names the package and no single distribution |
 | **Real-environment gate** | Observed incidentally during G-CLIP if the tools are absent; not worth a gate of its own |
@@ -1246,7 +1246,7 @@ of the others and of each other.
 | | |
 | --- | --- |
 | **Problem** | `README.md` has a section called *"Running on Fedora"* whose build instructions say `sudo dnf install gcc`; `docs/architecture/OVERVIEW.md`'s diagram labels the desktop side "Fedora"; `CLIPBOARD.md` and the README describe the product as "Fedora ↔ Android" (U-6) |
-| **Files** | [README.md](README.md) · [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) · [docs/architecture/CLIPBOARD.md](docs/architecture/CLIPBOARD.md) |
+| **Files** | [README.md](../../../README.md) · [docs/architecture/OVERVIEW.md](../../../docs/architecture/OVERVIEW.md) · [docs/architecture/CLIPBOARD.md](../../../docs/architecture/CLIPBOARD.md) |
 | **Change** | "Running on Linux", with a per-distribution prerequisites table (from §6) and the toolchain guidance from L1. Replace "Fedora" with "Linux" where it names the *platform* |
 | **Explicitly not touched** | **ADRs** — accepted decision records are not rewritten. **Certification reports** (`NOTIFICATIONS-V1-*`, `CLIPBOARD-V1-*`, `WAVE-0-*`) — accepted history, and their "Fedora" references are *true statements about the host the evidence was gathered on*. The distinction to hold onto while editing: *"Fedora was the certification host"* stays; *"Fedora is the platform"* goes |
 | **Test** | None mechanical |

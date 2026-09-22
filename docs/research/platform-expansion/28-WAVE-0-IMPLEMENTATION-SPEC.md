@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | **Title** | Wave 0 — Core platform abstraction: an implementable specification |
-| **Status** | **IMPLEMENTED AND CERTIFIED** — `feature/core-platform-abstraction-v1`, commit `cfd33f6`. **WAVE 0 CERTIFIED 2026-09-01**: all 12 acceptance gates and all four P0 PoCs pass. See [the sprint report](../../sprints/wave-0-platform-abstraction.md) |
+| **Status** | **IMPLEMENTED AND CERTIFIED** — `feature/core-platform-abstraction-v1`, commit `cfd33f6`. **WAVE 0 CERTIFIED 2026-09-01**: all 12 acceptance gates and all four P0 PoCs pass. See [the sprint report](../../reports/foundation/wave-0-platform-abstraction.md) |
 | **Last reviewed** | 2026-08-31 |
 | **Sprint** | `research/platform-expansion-verification-v1` |
 | **Scope** | The refactor that makes OmniBridge's Rust workspace portable, without adding a platform |
@@ -544,7 +544,7 @@ one-line CI change.
 > [run 33465365649](https://github.com/yurisismotto/anyflow/actions/runs/33465365649),
 > commit `cfd33f6`. Evidence — runner, toolchain, exact commands, dependency graph and `ring`'s
 > MSVC objects — is recorded once, in
-> [the sprint report §17](../../sprints/wave-0-platform-abstraction.md).
+> [the sprint report §17](../../reports/foundation/wave-0-platform-abstraction.md).
 
 **Distinguish clearly**, because conflating them is how a project convinces itself a platform works:
 
@@ -750,7 +750,7 @@ and POC-WIN-04 now proves *Windows integration* in Wave 5, where it belongs.
 
 Wave 0 was implemented against this specification on
 `feature/core-platform-abstraction-v1`. Full evidence:
-**[docs/sprints/wave-0-platform-abstraction.md](../../sprints/wave-0-platform-abstraction.md)**.
+**[docs/sprints/wave-0-platform-abstraction.md](../../reports/foundation/wave-0-platform-abstraction.md)**.
 
 | | |
 | --- | --- |

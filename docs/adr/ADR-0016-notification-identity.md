@@ -247,6 +247,6 @@ is only satisfying if someone remembers this file exists.
 * Wire schema and field limits:
   [02 §5](../research/notifications-v1/02-PROTOCOL-AND-EVENT-MODEL.md) and
   `protocol/proto/omnibridge/v1/capabilities/notifications_v1.proto`.
-* Review record: [the decision report](../../NOTIFICATIONS-V1-DECISION-REPORT.md) §6.
+* Review record: [the decision report](../reports/notifications/NOTIFICATIONS-V1-DECISION-REPORT.md) §6.
 * Roles and the runtime narrowing mechanism: [ADR-0017](ADR-0017-capability-roles.md).
 * The access contract this operates under: [ADR-0015](ADR-0015-notification-access.md).

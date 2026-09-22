@@ -233,13 +233,13 @@ below the lockfile's. The two facts stay separate in the documentation, exactly 
 ## 10. GTK and libadwaita floors
 
 Unchanged, and now explained where they are declared
-([gui/Cargo.toml](desktop/gui/Cargo.toml)):
+([gui/Cargo.toml](../../../desktop/gui/Cargo.toml)):
 
 | Floor | The API that sets it | Site |
 | --- | --- | --- |
-| `gtk4` **v4_12** | `gtk::CssProvider::load_from_string` — `#[cfg(feature = "v4_12")]`; at v4_10 the theme installer does not compile | [gui/src/lib.rs](desktop/gui/src/lib.rs) |
-| `libadwaita` **v1_5** | `adw::Dialog` | [views/pairing.rs](desktop/gui/src/views/pairing.rs) |
-| `libadwaita` **v1_5** | `adw::AlertDialog` | [views/peers.rs](desktop/gui/src/views/peers.rs) |
+| `gtk4` **v4_12** | `gtk::CssProvider::load_from_string` — `#[cfg(feature = "v4_12")]`; at v4_10 the theme installer does not compile | [gui/src/lib.rs](../../../desktop/gui/src/lib.rs) |
+| `libadwaita` **v1_5** | `adw::Dialog` | [views/pairing.rs](../../../desktop/gui/src/views/pairing.rs) |
+| `libadwaita` **v1_5** | `adw::AlertDialog` | [views/peers.rs](../../../desktop/gui/src/views/peers.rs) |
 
 Neither was lowered, and no synthetic version checker was added: `system-deps` already
 enforces both against the distribution's pkg-config metadata, and the Ubuntu 24.04 CI row is
@@ -333,19 +333,19 @@ U0's §11 asked for "clipboard backend available" and "sensitive clipboard marki
 to stop being one bit. They now are three separate questions, asked and reported separately,
 through the concepts that already existed — no second policy store was invented.
 
-**Backend seam** ([backend/mod.rs](desktop/capabilities/clipboard/src/backend/mod.rs)) —
+**Backend seam** ([backend/mod.rs](../../../desktop/capabilities/clipboard/src/backend/mod.rs)) —
 `ClipboardBackend` gains `availability()` beside the existing `sensitive_support()` and
 `watch_availability()`. All three are pure predicates answered from the single startup probe;
 none performs I/O, so `status` stays free of side effects. `WaylandBackend::availability()`
 reports the helper binaries only; `Unsupported` reports its reason; `MemoryBackend` gains a
 matching switch for tests.
 
-**Control protocol** ([control/src/lib.rs](desktop/control/src/lib.rs)) —
+**Control protocol** ([control/src/lib.rs](../../../desktop/control/src/lib.rs)) —
 `ClipboardStatusReport` gains `backend_available: bool`, `#[serde(default = "default_true")]`
 like `sensitive_available` beside it, so a version skew between `anyflow` and the agent cannot
 fail to parse a status report over a display field.
 
-**Daemon** ([runtime/src/server.rs](desktop/runtime/src/server.rs)) — asks all three and
+**Daemon** ([runtime/src/server.rs](../../../desktop/runtime/src/server.rs)) — asks all three and
 reports all three.
 
 The reason they must stay apart is concrete rather than theoretical, and the comments say so:
@@ -414,7 +414,7 @@ number unreliable. No package manager is named.
 ## 16. GUI UX
 
 The clipboard page's "This computer" card gains a `SensitiveState` row
-([views/clipboard.rs](desktop/gui/src/views/clipboard.rs)), built from the existing
+([views/clipboard.rs](../../../desktop/gui/src/views/clipboard.rs)), built from the existing
 `widgets::security_notice` — the same component the page already uses. The page was not
 redesigned and no new component was introduced.
 
@@ -446,7 +446,7 @@ Accessibility, per U0 §13:
 
 ## 17. Distro-neutral remediation
 
-**Before** ([wayland.rs](desktop/capabilities/clipboard/src/backend/wayland.rs)):
+**Before** ([wayland.rs](../../../desktop/capabilities/clipboard/src/backend/wayland.rs)):
 
 > `wl-copy/wl-paste not found on PATH. Install the wl-clipboard package (Fedora: `sudo dnf install wl-clipboard`).`
 
@@ -477,7 +477,7 @@ The only matches in the whole sweep are the forbidden-term lists inside the new
 U0 §16 required proof that the content of a refused sensitive clip reaches no process — by
 measuring bytes, not by asserting an error string.
 
-[`tests/sensitive_capability.rs`](desktop/capabilities/clipboard/tests/sensitive_capability.rs)
+[`tests/sensitive_capability.rs`](../../../desktop/capabilities/clipboard/tests/sensitive_capability.rs)
 writes real shell scripts named `wl-copy` and `wl-paste` into a temporary directory, puts that
 directory on `PATH`, and lets `WaylandBackend::detect()` find them exactly as it would find
 the real tools. Every invocation appends its `argv` — and, for a real copy, its stdin between

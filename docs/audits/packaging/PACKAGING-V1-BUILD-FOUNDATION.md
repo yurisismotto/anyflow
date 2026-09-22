@@ -6,7 +6,7 @@
 | **Base commit** | `7caecbe` (merge of PR #47, `feature/linux-packaging-v1`) |
 | **Date** | 2026-09-22 |
 | **Scope** | Audit §18 row 2 — Phase 2, "make the RPM build at all". Closes **B1, B2, B3, P1**. |
-| **Authority** | `PACKAGING-V1-READINESS-AUDIT.md`, plus the resolved S1 decision `ReadWritePaths=%h/.local/share`. |
+| **Authority** | [`PACKAGING-V1-READINESS-AUDIT.md`](PACKAGING-V1-READINESS-AUDIT.md), plus the resolved S1 decision `ReadWritePaths=%h/.local/share`. |
 | **Host** | Fedora 44 Workstation, rustc/cargo 1.98.1, podman 5.x, 16 cores |
 | **Product code changed** | **No.** No `.rs`, `.kt` or `.proto` file was modified. |
 | **Verdict** | **PACKAGING BUILD FOUNDATION: READY FOR COMMIT** |
@@ -302,6 +302,16 @@ and a survivor is a hard failure rather than a warning.
 
 MEASURED on this branch: the only thing removed was the U2 document, which is
 untracked and would otherwise have been swept up by `--worktree`.
+
+> **Superseded 2026-09-22, branch `chore/docs-structure-v1`.** The
+> `LINUX-UBUNTU-DEBIAN-COMPAT-U2.md` entry has since been removed from
+> `FORBIDDEN_GLOBS`. It existed only because U2 was untracked at the repository
+> root, where `--worktree` mode would have swept it into a bundle. U2 is now
+> committed as `docs/audits/linux-compat/LINUX-UBUNTU-DEBIAN-COMPAT-U2.md` and
+> ships like every other versioned report, and
+> `packaging/tests/packaging-checks.sh` asserts its **presence** in the bundle
+> rather than its absence. The two paragraphs above record what was MEASURED at
+> base commit `7caecbe` and are left standing as written.
 
 `protocol/testdata/*.der` is **deliberately not excluded**. Those two files are
 X.509 *certificates* — public, no private half — used as cross-language test

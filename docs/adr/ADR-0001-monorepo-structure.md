@@ -40,7 +40,7 @@ was already there, rather than reshuffling everything under a `crates/`
 directory. The alternative was considered and rejected as churn with no
 functional gain: `desktop/` already contains only Rust, and every path in every
 existing document points at the current layout. See
-[the Wave 0 sprint report](../sprints/wave-0-platform-abstraction.md).
+[the Wave 0 sprint report](../reports/foundation/wave-0-platform-abstraction.md).
 
 `android/app/build.gradle.kts` points its proto source set at
 `../../protocol/proto`, and `desktop/proto/build.rs` compiles the same files.

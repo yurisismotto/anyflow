@@ -4,7 +4,7 @@
 
 > ## Certification: **WAVE 0 CERTIFIED** — 2026-09-01
 >
-> All twelve official gates ([28 §12](../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md))
+> All twelve official gates ([28 §12](../../sprints/../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md))
 > pass, all four P0 PoCs pass, and every code deliverable is complete.
 >
 > The two items that were unexecuted when this report was first written have
@@ -35,7 +35,7 @@
 | New Rust tests | **+63** |
 | Existing tests modified | **2**, both schema fixtures — see §8 |
 | Android tests | **232** JVM + **21** instrumented on the SM-X620, 0 failed |
-| Official gates ([28 §12](../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md)) | **12 / 12 PASS** |
+| Official gates ([28 §12](../../sprints/../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md)) | **12 / 12 PASS** |
 | Gates unexecuted | **0** |
 | P0 PoCs | **4 PASS** (POC-CORE-01/02/03/04) |
 | `.proto` files changed | **0** |
@@ -554,8 +554,8 @@ Wave 0.
 
 ## 17. P0 PoCs and results
 
-The four P0 PoCs, from [21 §4](../research/platform-expansion/21-POC-MASTER-PLAN.md)
-and [27 §7.3](../research/platform-expansion/27-ARCHITECTURE-DECISION-CLOSEOUT.md):
+The four P0 PoCs, from [21 §4](../../sprints/../research/platform-expansion/21-POC-MASTER-PLAN.md)
+and [27 §7.3](../../sprints/../research/platform-expansion/27-ARCHITECTURE-DECISION-CLOSEOUT.md):
 
 ### POC-CORE-01 — cross-compile the portable crates · **PASS**
 
@@ -631,7 +631,7 @@ restating it.
 | Target installed | `x86_64-pc-windows-msvc` |
 | Steps | 12 of 12 `success`; 0 rustc warnings; no `continue-on-error` anywhere |
 
-The gate itself, verbatim from [28 §10.3](../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md),
+The gate itself, verbatim from [28 §10.3](../../sprints/../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md),
 plus `--locked`:
 
 ```
@@ -703,7 +703,7 @@ lock-screen behaviour, not attributable to Wave 0). It was re-run on an
 unlocked seat: the `sensitive_hint` round trip passes in both directions, and
 the 9 previously-ignored `real_backend` tests pass (9/9). That closes **G10**.
 Evidence:
-[`WAVE-0-LOCAL-CERTIFICATION-REPORT.md`](../../WAVE-0-LOCAL-CERTIFICATION-REPORT.md)
+[`WAVE-0-LOCAL-CERTIFICATION-REPORT.md`](../../certification/foundation/WAVE-0-LOCAL-CERTIFICATION-REPORT.md)
 §§10–14.
 
 ### G7 — pre-Wave-0 store upgrades in place — **PASS**
@@ -736,7 +736,7 @@ both directions, `files.v1` both directions (real Sharesheet), and
 `./gradlew :app:connectedDebugAndroidTest` → **21 tests, 0 failures, 0
 skipped**. The Android Keystore identity survived instrumentation with no
 re-pair. Full evidence:
-[`WAVE-0-LOCAL-CERTIFICATION-REPORT.md`](../../WAVE-0-LOCAL-CERTIFICATION-REPORT.md)
+[`WAVE-0-LOCAL-CERTIFICATION-REPORT.md`](../../certification/foundation/WAVE-0-LOCAL-CERTIFICATION-REPORT.md)
 §§4–9, 21–22. That closes **G6**.
 
 ### Everything else
@@ -858,7 +858,7 @@ line.
 
 ## 24. Acceptance gates
 
-### Official Wave 0 gates ([28 §12](../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md))
+### Official Wave 0 gates ([28 §12](../../sprints/../research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md))
 
 | # | Gate | Result |
 | --- | --- | --- |
