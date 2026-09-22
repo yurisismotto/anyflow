@@ -3,6 +3,7 @@
 | Doc | What it is | Verdict |
 | --- | --- | --- |
 | [Security Certification v1](SECURITY-CERTIFICATION-V1.md) | the sixteen SEC gates measured against the real build, plus an external scan from the paired SM-X620 | **13 PASS · 1 PASS WITH FINDING · 2 N/A · 0 FAIL** |
+| [Security evidence closure v1](SECURITY-EVIDENCE-CLOSURE-V1.md) | SEC-LOG-03's deferred `journalctl`/`logcat` rows and L16's privacy half, on real hardware at `TRACE` | **CLOSED on Ubuntu 24.04 and Debian 13 · 0 advisories · one harness defect that could have passed a real leak** |
 
 It found two things worth knowing before reading anything else:
 
@@ -20,6 +21,12 @@ it is not a gate failure, but it is a real inconsistency and §7.4 carries the
 recommendation. A characterisation test stops the behaviour changing in either
 direction without somebody deciding to.
 
+The evidence closure adds two things to that finding, both measured: both
+desktop log sites are on the **receive** path, so a desktop that only sends
+logs no filename at all; and the **Android app makes the same choice**, logging
+`FileTransfer: incoming <name>`. Whatever is decided about F-1 is therefore a
+decision about two implementations.
+
 ## Re-running it
 
 Most of the evidence is automated and is part of `cargo test`:
@@ -31,6 +38,7 @@ Most of the evidence is automated and is part of `cargo test`:
 | SEC-LOG-01/02/03 | `capabilities/{clipboard,notifications}/tests/logging.rs`, `daemon/tests/{notification,file}_log_privacy.rs` |
 | SEC-DEPS-01 | `.github/workflows/security-audit.yml` |
 | SEC-LOCAL-01/02 | `packaging/tests/systemd-unit-gates.sh` |
+| SEC-LOG-03 on hardware, L16 privacy | `packaging/tests/security-log-evidence.sh` — needs a guest, a paired phone and the notification fixture |
 
 The host measurements in §2 and §8, and the external scan from the phone, are
 transcripts rather than scripts: they depend on a LAN, a paired device and a

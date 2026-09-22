@@ -262,7 +262,7 @@ if [ "$old_count" -gt 0 ]; then
     chmod 700 "$UDATA"; chmod 600 "$UDATA/identity.key" "$UDATA/state.json"
     chown -R upgrader:upgrader /home/upgrader/.local
     before_up="$(sha256sum $UDATA/identity.key $UDATA/state.json; stat -c '%a %U %n' $UDATA $UDATA/identity.key $UDATA/state.json)"
-    if printf '%s' "$before_up" | grep -q identity.key; then
+    if grep -q identity.key <<<"$before_up"; then
         pass "L17: trust-store fixture planted before the upgrade"
     else
         fail "L17: the fixture is missing; the comparison below would prove nothing"
@@ -355,7 +355,7 @@ fi
 
 before="$(sha256sum $DATA/identity.key $DATA/state.json; stat -c '%a %U %n' $DATA $DATA/identity.key $DATA/state.json)"
 # And the fingerprint itself must be non-empty, for the same reason.
-if printf '%s' "$before" | grep -q identity.key; then
+if grep -q identity.key <<<"$before"; then
     pass "the before-fingerprint names the trust store"
 else
     fail "the before-fingerprint is empty; nothing below can be compared"

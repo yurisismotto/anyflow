@@ -358,9 +358,16 @@ the product's own message about it is wrong (§4).
 
 ## 7. What remains
 
+> **Update — 2026-09-22, `feature/security-evidence-closure-v1`:** the first
+> row is closed. L16's privacy half was measured at `TRACE` on Ubuntu 24.04 and
+> Debian 13 in
+> [Security evidence closure v1](../security/SECURITY-EVIDENCE-CLOSURE-V1.md),
+> together with SEC-LOG-03's `journalctl` and `logcat` rows. Nothing else in
+> this table changed.
+
 | Item | Phase |
 | --- | --- |
-| **L16's privacy half** — `journalctl`/`logcat` sentinels at `TRACE` | **R2**, unchanged |
+| **L16's privacy half** — `journalctl`/`logcat` sentinels at `TRACE` | **R2**, unchanged — **now closed**, see the note above |
 | **Finding F-2** — now evidenced; classify and decide whether truthful messaging needs a product fix | **R5** |
 | **`omnibridged.service` ordering against `graphical-session.target`** — observed on Debian 13 (§4) | **R5** |
 | **The nineteen harness defects**, nine from the previous phase and ten from this one | **R4** |
