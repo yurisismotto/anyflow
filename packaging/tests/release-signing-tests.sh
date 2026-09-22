@@ -268,6 +268,64 @@ else
     ok "no key-shaped file is committed to the repository"
 fi
 
+# ---------------------------------------------------------------------------
+section "A certify-only master with a signing subkey"
+# ---------------------------------------------------------------------------
+# The structure RELEASE-SIGNING-FOUNDATION-V1.md recommends, and the one that
+# caught a real defect before it shipped: gpg signs with the SUBKEY when asked
+# for the master, so a check that compared only the signing key's fingerprint
+# rejected the recommended layout, and a --fingerprint check against the
+# PUBLISHED primary fingerprint told the user their release was substituted.
+#
+# What a project publishes is the primary fingerprint. What the signature
+# carries is the subkey's. Both must be accepted, and everything else must
+# still be refused.
+SUB_UID="OmniBridge SUBKEY TEST -- DO NOT TRUST <subkey-test@invalid.example>"
+gpg --batch --quiet --passphrase '' --quick-generate-key "$SUB_UID" ed25519 cert never >/dev/null 2>&1     || die "could not generate the certify-only master"
+MFPR="$(gpg --batch --with-colons --list-secret-keys "$SUB_UID" | awk -F: '/^fpr:/ {print $10; exit}')"
+gpg --batch --quiet --passphrase '' --quick-add-key "$MFPR" ed25519 sign 2y >/dev/null 2>&1     || die "could not add the signing subkey"
+SFPR="$(gpg --batch --with-colons --list-keys "$MFPR" | awk -F: '/^sub:/{f=1} /^fpr:/{if(f){print $10; exit}}')"
+[ -n "$MFPR" ] && [ -n "$SFPR" ] && [ "$MFPR" != "$SFPR" ]     || die "the master and subkey fingerprints were not produced distinctly"
+ok "certify-only master $MFPR with signing subkey $SFPR"
+
+# The master must not itself be able to sign data; that is the whole point.
+mcap="$(gpg --batch --with-colons --list-keys "$MFPR" | awk -F: '/^pub:/ {print $12; exit}')"
+case "$mcap" in
+    *c*) ok "the master's own capability is certify (flags: $mcap)" ;;
+    *) notok "the master does not carry a certify capability (flags: $mcap)" ;;
+esac
+case "$mcap" in
+    *s*) notok "the master can sign data itself; it was meant to be certify-only (flags: $mcap)" ;;
+    *) ok "the master cannot sign data itself, so a compromised signing subkey does not imply a compromised identity" ;;
+esac
+
+# GnuPG 2.1+ writes a revocation certificate at key creation. Recommending
+# that file is only honest if it is actually there.
+[ -s "$GNUPGHOME/openpgp-revocs.d/$MFPR.rev" ]     && ok "gpg pre-generated a revocation certificate at openpgp-revocs.d/$MFPR.rev ($(wc -c <"$GNUPGHOME/openpgp-revocs.d/$MFPR.rev") bytes)"     || notok "no pre-generated revocation certificate for $MFPR; the documented backup step would point at nothing"
+
+SR="$WORK/subkey-release"
+mkrelease "$SR"
+gpg --batch --export "$MFPR" > "$WORK/subkey-pub.gpg"
+
+"$SIGN" --dir "$SR" --key "$MFPR" >"$WORK/sign-sub.log" 2>&1     && ok "sign-release.sh signs when given the MASTER fingerprint"     || notok "sign-release.sh failed on a master+subkey key: $(tail -1 "$WORK/sign-sub.log")"
+grep -q 'by subkey' "$WORK/sign-sub.log"     && ok "sign-release.sh reports that a subkey made the signature"     || notok "sign-release.sh did not report the subkey relationship"
+
+if "$VERIFY" --dir "$SR" --keyring "$WORK/subkey-pub.gpg" --fingerprint "$MFPR" >"$WORK/v-pri.log" 2>&1; then
+    ok "verify-release.sh accepts the PUBLISHED primary fingerprint"
+else
+    notok "verify-release.sh rejected the primary fingerprint, which is what users are told to check: $(tail -1 "$WORK/v-pri.log")"
+fi
+if "$VERIFY" --dir "$SR" --keyring "$WORK/subkey-pub.gpg" --fingerprint "$SFPR" >/dev/null 2>&1; then
+    ok "verify-release.sh also accepts the signing subkey's own fingerprint"
+else
+    notok "verify-release.sh rejected the subkey fingerprint that made the signature"
+fi
+# and it must NOT have become permissive in the process
+refute "a master+subkey signature against an unrelated fingerprint"     "$VERIFY" --dir "$SR" --keyring "$WORK/subkey-pub.gpg" --fingerprint "$FPR"
+T11="$WORK/t11"; cp -r "$SR" "$T11"
+printf 'tampered\n' >> "$T11/ubuntu2404/omnibridge_0.0.0-test_amd64.deb"
+refute "a modified artifact under a master+subkey signature"     "$VERIFY" --dir "$T11" --keyring "$WORK/subkey-pub.gpg" --fingerprint "$MFPR"
+
 printf '\n-----------------------------------------------\n'
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 if [ "$FAIL" -gt 0 ]; then printf '\nFailed:\n'; for g in "${FAILED[@]}"; do printf '  %s\n' "$g"; done; fi

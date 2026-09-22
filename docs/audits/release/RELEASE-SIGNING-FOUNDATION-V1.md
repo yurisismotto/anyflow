@@ -289,6 +289,25 @@ inconvenience of plugging in a token.
 
 ## 6. SIGNING DECISION REQUIRED
 
+> ### Answered in part — 2026-09-22
+>
+> The maintainer answered the stop and **changed two of its terms**. The text of
+> §6.1–§6.4 below is the proposal as it was put; **§8 is what was decided** and
+> supersedes it where they differ.
+>
+> | | Proposed in §6 | Decided |
+> | --- | --- | --- |
+> | custody | OpenPGP key, private half in a CI secret | **OpenPGP key that never touches CI.** The private production key stays local; signing is a deliberate local act |
+> | identity | a UID carrying the maintainer's personal address | **a dedicated OmniBridge signing identity**, not bound to a personal address |
+> | key shape | one key | **certify-only master + separate signing subkey** |
+> | timing | generate now | **do not generate yet** — approve the identity first |
+>
+> The consequence for the wiring in §3.3 is stated plainly: with the key never
+> reaching CI, `RELEASE_SIGNING_KEY` is **not created**, the signing step stays
+> inert on every run, and signing becomes a manual step in the release flow.
+> The wiring is not removed — it is the upgrade path in §8.7, and it costs
+> nothing while unused.
+
 **This is where the phase stops.** Everything above is implemented, tested and
 merged-ready. Nothing below can be chosen on the user's behalf.
 
@@ -365,3 +384,229 @@ fingerprint to put in it.
 **No gate is claimed closed.** RC-SIGN-02 and RC-SIGN-03 have had their
 implementable halves done and their remainder named, which is the most this
 phase can honestly do without inventing a key.
+
+---
+
+## 8. The signing identity — design for approval
+
+**No key exists. Nothing here has been generated.** Every command in §8.6 was
+rehearsed with throwaway keys in a temporary `GNUPGHOME` that was deleted, and
+the two defects that rehearsal found are fixed in §8.8. Run nothing until you
+have approved §8.1 and §8.2.
+
+The requirement this design is built to: *the public identity must be suitable
+for long-term publication, and changing the maintainer's personal email later
+must not require abandoning the project's release-signing identity.*
+
+### 8.1 Recommended UID format
+
+```
+OmniBridge Release Signing Key
+```
+
+**A primary user id with no email address at all.** This is legal OpenPGP, and
+it is the only form that cannot be invalidated by anything that happens to a
+mailbox. Verified working end to end: `gpg --quick-generate-key` accepts it,
+`sign-release.sh` signs with it, `verify-release.sh` verifies it.
+
+Why not an address in the primary UID: every address available today is either
+tied to your person, tied to your GitHub account, or does not exist yet. A UID
+is what users read when they inspect the key, and this one says exactly what
+the key is for and nothing that will later be wrong.
+
+**The identity is the fingerprint, not the UID.** Users are told to check a
+fingerprint; the UID is a human label beside it.
+
+### 8.2 Identity strategy — answered in the order you asked
+
+| # | Option | Available today | Verdict |
+| --- | --- | :-: | --- |
+| 1 | a dedicated OmniBridge address | **no** — the project owns no mail domain; `io.github.yurisismotto.omnibridge` is a reverse-DNS app id, not a mailbox | **the right end state.** Add it as a second UID when it exists — §8.3 |
+| 2 | GitHub noreply — `3611354+yurisismotto@users.noreply.github.com` | yes | **usable, not recommended as primary.** It is public and stable, and GitHub keeps the numeric-id form working across a username change. But it is **not deliverable** — nothing sent there arrives — and it still embeds your personal username, so it only half-solves what you asked |
+| 3 | your personal address | yes | **fallback only**, and this design does not need it |
+
+**Recommendation: option 1 as the destination, reached without waiting for it.**
+Start with the email-less UID in §8.1. When a project address exists, add it as
+a second UID. If it ever stops being yours, revoke that UID.
+
+**This is the part that makes the requirement hold, and it is measured:**
+
+```console
+$ gpg --quick-add-uid    <FPR> "OmniBridge Release Signing <releases@example>"
+$ gpg --quick-revoke-uid <FPR> "OmniBridge Release Signing <releases@example>"
+```
+
+After adding **and** after revoking a UID:
+
+* the **fingerprint is unchanged** — `D9C3…2DCD` before and after;
+* **signatures made earlier still verify**, re-checked with `verify-release.sh`;
+* the revoked UID remains on the key marked revoked, which is how OpenPGP
+  records that an address is no longer the key's, rather than pretending it
+  never was.
+
+So the release-signing identity is never abandoned. Addresses come and go
+around a fingerprint that does not move.
+
+### 8.3 Master-key and subkey structure
+
+| Key | Algorithm | Capability | Expiry | Where it lives |
+| --- | --- | --- | --- | --- |
+| **primary (master)** | Ed25519 | **certify only** — `C` | **none** | offline, encrypted backup; used only to manage the key |
+| **signing subkey** | Ed25519 | **sign** — `S` | **2 years**, renewable | on the workstation, used by `sign-release.sh` |
+
+Measured on a rehearsal key: the primary's own capability flags come out `c`
+and it **cannot sign data**; the subkey's are `s`. That separation is the
+point — a compromised signing subkey is revoked and replaced without touching
+the published fingerprint, and the identity survives.
+
+Ed25519 for both: small, fast, supported by every gpg a user is likely to have,
+and the default `--quick-generate-key` offers.
+
+### 8.4 Expiration policy
+
+| | Policy | Why |
+| --- | --- | --- |
+| **primary** | **no expiry** | its fingerprint is the long-term anchor, printed in the README and in every verification instruction. An expired primary makes every past release look wrong to a user who checks it later, and the failure mode of forgetting to renew is worse than the risk it mitigates — which is what the revocation certificate is actually for |
+| **signing subkey** | **2 years** | a dead-man's switch that costs nothing: if the key is abandoned, the subkey lapses and signing visibly stops, while old signatures made while it was valid still verify |
+
+Renewal, tested:
+
+```console
+$ gpg --quick-set-expire <PRIMARY_FPR> 2y <SUBKEY_FPR>
+```
+
+Set a calendar reminder for **one month before** the subkey expires. Renewal is
+a thirty-second operation; discovering it at release time is not.
+
+### 8.5 Backup and revocation
+
+**The revocation certificate already exists** the moment the key is created —
+GnuPG 2.1+ writes it automatically, and the rehearsal confirmed a 1275-byte
+file at:
+
+```
+$GNUPGHOME/openpgp-revocs.d/<PRIMARY_FPR>.rev
+```
+
+No `--gen-revoke` run is needed. (`--gen-revoke` also **cannot run under
+`--batch`** — *"não é possível fazer isso no modo batch"* — so any instruction
+that scripts it is wrong. This design does not need it.)
+
+| Item | Where | Rule |
+| --- | --- | --- |
+| **encrypted secret-key backup** | two offline media, two physical locations | `gpg --export-secret-keys` → encrypt with a strong passphrase → write to media. **Restore it into a scratch `GNUPGHOME` once and verify a signature with it** before trusting the backup; an unverified backup is a belief, not a backup |
+| **revocation certificate** | offline, **separately from the key backup** | it must be reachable precisely when the key is *not*. Anyone holding it can kill the key, so it is protected like the key — but never in the only place the key also is |
+| **backup passphrase** | your password manager | not on the media |
+
+Publishing the revocation certificate is what marks the key dead. Do it if the
+key is lost or compromised, then follow §8.4's rotation for a new primary.
+
+### 8.6 The exact commands — run these only after approving §8.1 and §8.2
+
+Run on your workstation. **Nothing below has been run.** `<FPR>` is the primary
+fingerprint printed by step 2.
+
+```console
+# 1. the certify-only master. No expiry, no email in the uid.
+$ gpg --quick-generate-key "OmniBridge Release Signing Key" ed25519 cert never
+
+# 2. its fingerprint. THIS is the public identity — the string users check.
+$ gpg --with-colons --fingerprint "OmniBridge Release Signing Key" \
+    | awk -F: '/^fpr:/ {print $10; exit}'
+
+# 3. the signing subkey, two years
+$ gpg --quick-add-key <FPR> ed25519 sign 2y
+
+# 4. confirm the shape: primary certify-only, subkey signing
+$ gpg --with-colons --list-keys <FPR> | awk -F: '/^(pub|sub):/ {print $1, "caps="$12}'
+    # expect:  pub caps=cSC      (the lowercase c is the primary's own)
+    #          sub caps=s
+
+# 5. the revocation certificate gpg already wrote — copy it OFF this machine,
+#    to media that does not also hold the key backup
+$ ls -l ~/.gnupg/openpgp-revocs.d/<FPR>.rev
+
+# 6. the encrypted offline backup, and a restore test
+$ gpg --armor --export-secret-keys <FPR> > /tmp/omnibridge-secret.asc
+$ gpg --symmetric --cipher-algo AES256 -o /tmp/omnibridge-secret.asc.gpg /tmp/omnibridge-secret.asc
+$ shred -u /tmp/omnibridge-secret.asc
+    # restore test, into a scratch keyring that is then deleted:
+$ export GNUPGHOME=$(mktemp -d) && chmod 700 "$GNUPGHOME"
+$ gpg -d /tmp/omnibridge-secret.asc.gpg | gpg --import
+$ gpg --list-secret-keys        # the key must be here
+$ gpgconf --kill gpg-agent && rm -rf "$GNUPGHOME" && unset GNUPGHOME
+
+# 7. the public half, to publish
+$ gpg --armor --export <FPR> > omnibridge-release-pubkey.asc
+
+# 8. prove the whole path on a real release directory before trusting it
+$ ./packaging/release/sign-release.sh   --dir <release-dir> --key <FPR>
+$ gpg --export <FPR> > /tmp/ob-pub.gpg
+$ ./packaging/release/verify-release.sh --dir <release-dir> \
+      --keyring /tmp/ob-pub.gpg --fingerprint <FPR>
+```
+
+**Nothing is added to GitHub.** No `RELEASE_SIGNING_KEY`, no
+`RELEASE_SIGNING_FPR` — the key never touches CI, so neither is created. That
+is the difference between this and §6.3, which the decision superseded.
+
+### 8.7 What gets published, and what never does
+
+| Published | Where |
+| --- | --- |
+| the **primary fingerprint** | `README.md`, beside the verification recipe; the release page |
+| the **armoured public key** (`omnibridge-release-pubkey.asc`) | a release asset, and a stable URL |
+| `SHA256SUMS.asc` | with every release, from then on |
+
+| Never published | |
+| --- | --- |
+| the private key, in any form | it never leaves the workstation and the offline backups |
+| the revocation certificate | **until it is used** — publishing it kills the key |
+| the backup passphrase | |
+
+**If unattended signing is ever wanted**, the structure already allows it
+without weakening this decision: export the **signing subkey only**
+(`gpg --export-secret-subkeys`, rehearsed — 886 bytes) into
+`RELEASE_SIGNING_KEY`, leaving the certify-only master offline. The CI wiring
+in §3.3 then activates unchanged. **That is a separate decision and is not
+taken here.**
+
+### 8.8 Two defects the rehearsal found, fixed before any real key existed
+
+Rehearsing §8.6 against throwaway keys broke the scripts this phase had just
+written — on the exact structure §8.3 recommends.
+
+| | Defect | Effect |
+| --- | --- | --- |
+| 1 | `sign-release.sh` compared the signature's fingerprint against the **requested** key. gpg signs with the **subkey** when asked for the master, so the two differ | **signing aborted** on a certify-only master + subkey — the recommended layout could not be used at all |
+| 2 | `verify-release.sh --fingerprint` compared only the **signing** key's fingerprint | a user given the **published primary** fingerprint would be told *"This is what a substituted release looks like"* — a false alarm on a correct release, which is how a verifier teaches people to ignore it |
+
+`VALIDSIG` carries both: field 3 is the key that signed, the last field is the
+primary it belongs to. Both scripts now accept either and still reject
+everything else. Five checks were added to
+`packaging/tests/release-signing-tests.sh` — **38 checks, 0 failures** — covering
+the master's capability flags, the pre-generated revocation certificate, signing
+by master fingerprint, verifying by primary *and* by subkey fingerprint, and
+the two rejections that must survive: an unrelated fingerprint, and a modified
+artifact under a subkey signature.
+
+**This is the argument for rehearsing a procedure before writing it down.** Had
+these commands been published untested, the first real signing attempt would
+have failed, and the first user to check a fingerprint would have been told the
+release was tampered with.
+
+### 8.9 Gate status after this decision
+
+| Gate | Status | Blocked on |
+| --- | --- | --- |
+| **RC-SIGN-01** key exists, public half published | **OPEN** | your approval of §8.1–§8.2, then §8.6 |
+| **RC-SIGN-02** CI signs `SHA256SUMS` | **WILL NOT CLOSE AS WRITTEN** — the decision is that CI never holds the key. The equivalent is *"every release carries a valid `SHA256SUMS.asc`"*, produced locally | RC-SIGN-01 |
+| **RC-SIGN-03** documented verification | **IMPLEMENTED, UNPUBLISHED** | a real fingerprint for the README |
+
+**The production-signing gate stays OPEN** until all four of these hold, and
+R5 must not record otherwise:
+
+1. the production signing identity is provisioned;
+2. a **real** release artifact set is signed with it;
+3. those signatures are verified independently of the signing step;
+4. the negative verification tests pass against that real signed set.
