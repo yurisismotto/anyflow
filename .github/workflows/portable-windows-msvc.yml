@@ -168,6 +168,22 @@ jobs:
       # All three are named here rather than skipped by a wildcard, and the
       # guard below fails if the set of core test files changes, so a *new*
       # core test cannot slip past this gate unnoticed.
+      #
+      # `parser_fuzz.rs` (Security Certification v1, SEC-FUZZ-01) is
+      # **portable**, and deliberately so. It drives three parsers that an
+      # unauthenticated peer reaches before anything has decided who is
+      # talking: `framing::read_envelope` over a `std::io::Cursor`, the
+      # protobuf decoder beneath it, and `discovery::sanitize_device_name`.
+      # None of them touches the filesystem, so none is behind `unix-fs`, and a
+      # Windows agent will want every one of those assertions unchanged — a
+      # frame whose length prefix lies is a frame whose length prefix lies on
+      # any platform.
+      #
+      # The half of that campaign that *is* platform-shaped went elsewhere on
+      # purpose: `filename::sanitize`'s output becomes a path, so its campaign
+      # lives in `capabilities/files/tests/filename_fuzz.rs` with the crate
+      # that owns the sanitiser, rather than in `omnibridge-core`, which does
+      # not depend on a capability and must not start.
       - name: Core test files unchanged (guard for the exclusion below)
         run: |
           $expected = @(
@@ -176,6 +192,7 @@ jobs:
             'identity_states.rs',
             'notifications_protocol.rs',
             'pairing.rs',
+            'parser_fuzz.rs',
             'portable_boundary.rs',
             'protocol.rs',
             'revoked_tombstone.rs',
