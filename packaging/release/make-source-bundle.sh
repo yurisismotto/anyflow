@@ -166,9 +166,12 @@ note "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
 # --------------------------------------------------------------------------
 step "Checking Cargo.lock"
 ( cd "$ROOT/desktop" && cargo metadata --locked --offline --format-version 1 >/dev/null ) \
-    || die "Cargo.lock is inconsistent with the workspace manifests. \
-Run 'cargo update --workspace --offline' or commit the lockfile change; \
-a package build cannot resolve this for you."
+    || die "Cargo.lock is inconsistent with the workspace manifests, OR the \
+crates it names are not in this machine's cargo cache. On a clean checkout or \
+a fresh CI runner, run 'cargo fetch --locked' in desktop/ first. If that does \
+not fix it the lockfile really is stale: run 'cargo update --workspace \
+--offline' or commit the lockfile change. A package build cannot resolve \
+either of these for you."
 note "Cargo.lock resolves --locked --offline"
 
 # --------------------------------------------------------------------------

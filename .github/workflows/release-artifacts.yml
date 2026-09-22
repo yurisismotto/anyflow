@@ -125,6 +125,20 @@ jobs:
           rustup default 1.88.0
           rustc --version
 
+      # The bundle script checks the lockfile with `cargo metadata --locked
+      # --offline` before it does anything else, which needs the crates to be
+      # in the local cargo cache already. On a developer's machine they are; on
+      # a fresh runner they are not, and the check fails with "no matching
+      # package named `prost`" — a confusing way to say "nothing is cached".
+      #
+      # Fetching first is the right fix rather than dropping `--offline` from
+      # the script: that flag is what makes the check prove the vendored build
+      # will resolve, and weakening it to make CI green would remove the
+      # guarantee the check exists for.
+      - name: Populate the cargo cache
+        working-directory: desktop
+        run: cargo fetch --locked
+
       # `cargo vendor` needs the network; nothing after this job does.
       - name: Build the bundle
         run: |
