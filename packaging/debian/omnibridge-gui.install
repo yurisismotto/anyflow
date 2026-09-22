@@ -1,0 +1,4 @@
+usr/bin/omnibridge-gui
+usr/share/applications/io.github.yurisismotto.omnibridge.desktop
+usr/share/dbus-1/services/io.github.yurisismotto.omnibridge.service
+usr/share/metainfo/io.github.yurisismotto.omnibridge.metainfo.xml

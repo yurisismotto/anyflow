@@ -20,10 +20,11 @@ set -euo pipefail
 
 ROOT="$(git -C "$(dirname -- "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 SPEC="$ROOT/packaging/fedora/omnibridge.spec"
-VENDOR_CONFIG="$ROOT/packaging/fedora/cargo-vendor-config.toml"
+VENDOR_CONFIG="$ROOT/packaging/common/cargo-vendor-config.toml"
 
 UNIT="$ROOT/packaging/common/omnibridged.service"
 FIREWALLD="$ROOT/packaging/fedora/omnibridge-firewalld.xml"
+DEBIAN="$ROOT/packaging/debian"
 GUI_DATA="$ROOT/desktop/gui/data"
 APP_ID="io.github.yurisismotto.omnibridge"
 
@@ -444,6 +445,125 @@ else
 fi
 
 # --------------------------------------------------------------------------
+group "Debian / Ubuntu packaging (audit §6)"
+# --------------------------------------------------------------------------
+for f in control rules changelog copyright source/format README.source \
+         omnibridge.install omnibridge-gui.install; do
+    if [ -e "$DEBIAN/$f" ]; then
+        pass "debian/$f"
+    else
+        fail "debian/$f is missing"
+    fi
+done
+if [ -x "$DEBIAN/rules" ]; then
+    pass "debian/rules is executable"
+else
+    fail "debian/rules is not executable; dpkg-buildpackage will refuse it"
+fi
+
+# One unit, every format. The Debian packaging must install the SAME file the
+# RPM does, not a copy that can drift.
+if grep -q 'packaging/common/omnibridged.service' "$DEBIAN/rules"; then
+    pass "debian/rules installs the canonical unit from packaging/common/"
+else
+    fail "debian/rules does not install packaging/common/omnibridged.service"
+fi
+if [ -e "$DEBIAN/omnibridged.service" ] || [ -e "$DEBIAN/omnibridge.user.service" ]; then
+    fail "a second copy of the unit exists under packaging/debian/"
+else
+    pass "no duplicate unit under packaging/debian/"
+fi
+# And the same metadata installer, so the .desktop entry, the icon, the D-Bus
+# activation entry and the AppStream file cannot differ between formats (R9).
+if grep -q 'install-desktop-metadata.sh' "$DEBIAN/rules"; then
+    pass "debian/rules installs desktop metadata with the shared script"
+else
+    fail "debian/rules does not call install-desktop-metadata.sh (R9)"
+fi
+
+# The offline build is what makes a buildd build possible.
+for flag in --locked --offline; do
+    if grep -qE "cargo (build|test).*$flag" "$DEBIAN/rules"; then
+        pass "debian/rules runs cargo $flag"
+    else
+        fail "debian/rules does not run cargo $flag"
+    fi
+done
+if grep -q 'CARGO_HOME' "$DEBIAN/rules"; then
+    pass "debian/rules redirects CARGO_HOME into the build tree"
+else
+    fail "debian/rules lets the builder's ~/.cargo/config.toml reach the build"
+fi
+
+# The unit ships disabled on every format (R7).
+if grep -q 'dh_installsystemduser --no-enable' "$DEBIAN/rules"; then
+    pass "R7: dh_installsystemduser --no-enable"
+else
+    fail "R7: the Debian package may enable the unit for every user"
+fi
+
+# Runtime must not require Rust: rustc/cargo are build dependencies only.
+depends_block="$(awk '/^Package: /{p=1} p' "$DEBIAN/control" | grep -E '^(Depends|Recommends|Suggests):' || true)"
+if printf '%s' "$depends_block" | grep -qE '\b(rustc|cargo)\b'; then
+    fail "a runtime relation names rustc or cargo"
+else
+    pass "no runtime relation names rustc or cargo"
+fi
+# The MSRV floor must be stated, and must match the workspace.
+if grep -qE "^ *rustc \(>= $msrv\)" "$DEBIAN/control"; then
+    pass "Build-Depends states rustc (>= $msrv), matching the workspace MSRV"
+else
+    fail "Build-Depends does not state rustc (>= $msrv)"
+fi
+
+# Audit §9.3: a .deb must not carry firewalld metadata.
+if grep -rq 'firewalld' "$DEBIAN"/control "$DEBIAN"/rules "$DEBIAN"/*.install 2>/dev/null; then
+    fail "the Debian packaging references firewalld (audit §9.3 says it must not)"
+else
+    pass "no firewalld metadata in the Debian packaging (audit §9.3)"
+fi
+# And must not drag in a GNOME Shell extension.
+if grep -rqiE 'gnome-shell-extension|appindicator' "$DEBIAN"/control 2>/dev/null; then
+    fail "the Debian packaging depends on a GNOME Shell extension"
+else
+    pass "no GNOME Shell extension dependency"
+fi
+
+# --------------------------------------------------------------------------
+group "No maintainer script may touch the trust store, on any path (R6)"
+# --------------------------------------------------------------------------
+# The one that matters most. ~/.local/share/omnibridge holds the identity key
+# and every pairing. A postrm that removed it on purge would look like
+# tidiness in review and would destroy the user's trust store silently.
+scripts_found=0
+for f in "$DEBIAN"/*.postinst "$DEBIAN"/*.postrm "$DEBIAN"/*.preinst \
+         "$DEBIAN"/*.prerm "$DEBIAN"/postinst "$DEBIAN"/postrm \
+         "$DEBIAN"/preinst "$DEBIAN"/prerm; do
+    [ -e "$f" ] || continue
+    scripts_found=$((scripts_found + 1))
+    if grep -nE '(\.local/share|\$HOME|~/)' "$f" | grep -vE '^[0-9]+:[[:space:]]*#' > "$SCRATCH/deb-state"; then
+        fail "$(basename "$f") references a user-state path"
+        sed 's/^/        /' "$SCRATCH/deb-state"
+    else
+        pass "$(basename "$f") does not reference user state"
+    fi
+done
+if [ "$scripts_found" -eq 0 ]; then
+    pass "no hand-written maintainer scripts at all — debhelper generates them"
+fi
+# `purge` is the transaction most likely to grow a destructive postrm.
+# `grep -n` over one file emits `<line>:<text>` with no filename, so the
+# comment filter anchors on the line number alone.
+grep -n 'purge' "$DEBIAN/rules" 2>/dev/null \
+    | grep -vE '^[0-9]+:[[:space:]]*#' > "$SCRATCH/deb-purge" || true
+if [ -s "$SCRATCH/deb-purge" ]; then
+    fail "debian/rules mentions purge outside a comment"
+    sed 's/^/        /' "$SCRATCH/deb-purge"
+else
+    pass "debian/rules adds no purge behaviour"
+fi
+
+# --------------------------------------------------------------------------
 group "No maintainer script touches user state (audit R6)"
 # --------------------------------------------------------------------------
 # state.json and identity.key are the trust store. A scriptlet that removed
@@ -482,7 +602,7 @@ if [ -n "$src_tarball" ]; then
         desktop/Cargo.lock \
         desktop/Cargo.toml \
         packaging/fedora/omnibridge.spec \
-        packaging/fedora/cargo-vendor-config.toml \
+        packaging/common/cargo-vendor-config.toml \
         packaging/common/omnibridged.service \
         packaging/fedora/omnibridge-firewalld.xml \
         desktop/gui/tools/install-desktop-metadata.sh \

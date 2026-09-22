@@ -165,7 +165,7 @@ The daemon remains the only long-lived OmniBridge process.
 # From here on the build resolves every dependency from this tree, which is
 # what makes it survive a network-isolated buildroot.
 tar -xf %{SOURCE1} -C desktop
-install -Dpm0644 packaging/fedora/cargo-vendor-config.toml desktop/.cargo/config.toml
+install -Dpm0644 packaging/common/cargo-vendor-config.toml desktop/.cargo/config.toml
 
 %build
 # CARGO_HOME is redirected into the build tree so no ~/.cargo/config.toml

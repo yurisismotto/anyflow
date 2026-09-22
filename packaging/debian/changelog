@@ -1,0 +1,15 @@
+omnibridge (0.1.0-1) unstable; urgency=medium
+
+  * Initial Debian and Ubuntu packaging.
+  * Two binary packages: omnibridge (daemon, CLI, systemd user unit, hicolor
+    icon) and omnibridge-gui (desktop application, .desktop entry, D-Bus
+    activation entry, AppStream metadata).
+  * The systemd user unit is the same file the RPM installs, from
+    packaging/common/. It ships disabled on both formats.
+  * No firewall metadata: Debian enables no firewall by default and Ubuntu
+    ships ufw inactive, so a firewalld XML would be dead weight on nearly
+    every install. Audit 9.3.
+  * No maintainer script touches ~/.local/share/omnibridge, on any path,
+    including purge.
+
+ -- Yuri Converso Sismotto <yuri.sismotto@gmail.com>  Tue, 22 Sep 2026 00:00:00 +0000

@@ -1,0 +1,4 @@
+usr/bin/omnibridge
+usr/bin/omnibridged
+usr/lib/systemd/user/omnibridged.service
+usr/share/icons/hicolor/scalable/apps/io.github.yurisismotto.omnibridge.svg
