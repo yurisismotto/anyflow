@@ -8,6 +8,7 @@
 | [D-Bus activation](PACKAGING-V1-DBUS-ACTIVATION.md) | the daemon repairing its own desktop activation after an install into a live session | implemented and measured on a live `dbus-broker`; P4's session half closed |
 | [Fedora integration](PACKAGING-V1-FEDORA-INTEGRATION.md) | the RPM as a real installed desktop product: subpackage split, desktop metadata, lifecycle macros, firewall, `%doc` trim | P7, P5, R10, Q3 closed; two flaky `%check` tests fixed |
 | [Debian and Ubuntu](PACKAGING-V1-DEBIAN-UBUNTU.md) | the first debhelper packaging this project has had, built on all three targets | **build-verified** on Debian 13, Ubuntu 24.04 and 26.04; not runtime-certified |
+| [Release CI](PACKAGING-V1-RELEASE-CI.md) | the pipeline that produces every Linux artifact from one immutable commit | **working** — 14 artifacts, attested; **unsigned**, recorded as three open RC gates |
 
 The readiness audit is the authority the packaging tree cites by section number:
 `packaging/fedora/omnibridge.spec`, `packaging/fedora/README.md`,
@@ -22,6 +23,8 @@ Most of these documents are re-runnable rather than only readable:
 | `packaging/tests/systemd-unit-gates.sh` | gates S1, S2 and S3 against the real unit, on whatever machine it is run on |
 | `packaging/tests/install-smoke.sh` | install, remove, reinstall, **purge**, and above all that no transaction touches the user's trust store — `.rpm` and `.deb` alike |
 | `packaging/debian/build-deb.sh` | builds the `.deb` packages offline in a disposable container, as a non-root user, and runs lintian |
+| `packaging/fedora/build-rpm.sh` | the same for the RPM, for environments without `mock` |
+| `.github/workflows/release-artifacts.yml` | all of the above from one immutable commit, plus SBOM, checksums and provenance |
 
 That matters for Phase 6: the same verdicts have to be reached again on Ubuntu
 24.04, Ubuntu 26.04 and Debian 13, and a script can be re-run where a
