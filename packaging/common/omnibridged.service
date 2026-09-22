@@ -59,8 +59,49 @@ RuntimeDirectoryMode=0700
 # directory nobody reads and do nothing for the one that matters.
 ReadWritePaths=%h/.local/share
 
+# --- why ProtectKernelModules= is NOT here ---------------------------------
+# It was here, and it made the unit unstartable on both Ubuntu targets.
+#
+# ProtectKernelModules=yes implies CapabilityBoundingSet=~CAP_SYS_MODULE. In a
+# *user* unit the manager runs unprivileged, so systemd can only apply a
+# bounding-set change from inside an unprivileged user namespace. Where that is
+# permitted the unit starts; where it is not, systemd falls back to a direct
+# PR_CAPBSET_DROP, which needs CAP_SETPCAP that no user process has, and the
+# unit dies before ExecStart with status=218/CAPABILITIES:
+#
+#   (ibridged)[3727]: omnibridged.service: Failed to drop capabilities:
+#                     Operation not permitted
+#   omnibridged.service: Main process exited, code=exited,
+#                        status=218/CAPABILITIES
+#
+# MEASURED on the shipped 0.1.0-1 packages, one drop-in per directive:
+#
+#   Fedora 44      systemd 259.9-1.fc44        starts
+#   Debian 13      systemd 257.13-1~deb13u1    starts
+#   Ubuntu 24.04   systemd 255.4-1ubuntu8.17   FAILS 218/CAPABILITIES
+#   Ubuntu 26.04   systemd 259.5-0ubuntu3.4    FAILS 218/CAPABILITIES
+#
+# Turning off ProtectKernelTunables=, ProtectControlGroups= or
+# RestrictNamespaces= individually did not help; turning off
+# ProtectKernelModules= alone did. It is the only directive in this unit that
+# reaches the capability path.
+#
+# Removing it costs nothing that is not already covered twice over, MEASURED:
+#
+#   * `systemd-analyze syscall-filter @system-service` does NOT list
+#     init_module, finit_module or delete_module. SystemCallFilter= above is an
+#     allow-list, so all three module syscalls are already blocked by it.
+#   * an unprivileged process has CapEff=0000000000000000 — no CAP_SYS_MODULE
+#     to use even if a syscall got through.
+#   * NoNewPrivileges=true is set, so the bounding set cannot be re-gained
+#     across an execve either.
+#
+# This is therefore a removal of a redundant directive that broke two of four
+# supported distributions, not a relaxation of the sandbox. Nothing else in
+# this file changed. packaging-checks.sh asserts it does not come back, and
+# packaging/tests/lifecycle-gates.sh asserts the unit actually STARTS on each
+# distribution — the gate whose absence let this ship.
 ProtectKernelTunables=true
-ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictNamespaces=true
 RestrictRealtime=true

@@ -234,7 +234,6 @@ if [ -f "$UNIT" ]; then
         'ProtectSystem=strict' \
         'ProtectHome=read-only' \
         'ProtectKernelTunables=true' \
-        'ProtectKernelModules=true' \
         'ProtectControlGroups=true' \
         'RestrictNamespaces=true' \
         'RestrictRealtime=true' \
@@ -250,6 +249,31 @@ if [ -f "$UNIT" ]; then
             pass "hardening kept: $directive"
         else
             fail "hardening weakened or removed: $directive"
+        fi
+    done
+
+    # ProtectKernelModules= is the one hardening directive that must NOT come
+    # back, and it is asserted negatively for that reason.
+    #
+    # It shipped in 0.1.0-1 and made the unit unstartable on Ubuntu 24.04 and
+    # Ubuntu 26.04: it implies CapabilityBoundingSet=~CAP_SYS_MODULE, and a
+    # *user* manager can only apply a bounding-set change from inside an
+    # unprivileged user namespace. Where that is not permitted, systemd falls
+    # back to PR_CAPBSET_DROP, which needs CAP_SETPCAP that no user process
+    # has, and the unit dies with status=218/CAPABILITIES before ExecStart.
+    #
+    # The protection it nominally adds is already present twice: the module
+    # syscalls are absent from the SystemCallFilter=@system-service allow-list,
+    # and NoNewPrivileges=true stops the bounding set being re-gained across an
+    # execve. See packaging/common/omnibridged.service for the measurements.
+    #
+    # Same rule for the two directives that name the capability machinery
+    # outright: neither belongs in a unit the user's own manager starts.
+    for directive in 'ProtectKernelModules' 'CapabilityBoundingSet' 'AmbientCapabilities'; do
+        if grep -qE "^${directive}=" "$SCRATCH/unit.directives"; then
+            fail "$directive= is back in a user unit; it makes the unit unstartable wherever unprivileged user namespaces are restricted (218/CAPABILITIES)"
+        else
+            pass "no $directive= — a user manager cannot apply it, and it is redundant here"
         fi
     done
 
