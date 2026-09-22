@@ -18,6 +18,14 @@ Subcommands
   toggle-after <anchor> <label>    the checkable node nearest <label> below
                                    <anchor> -> "X Y checked"
   state <regex>                    "checked" of the nearest checkable node
+  nav <label>                      the BOTTOM NAVIGATION tab with that label.
+                                   Not the same as `find`: "Files" is also a
+                                   per-device permission row and a capability
+                                   chip, and `find` returned one of those on a
+                                   sub-screen -- so the offer prompt was
+                                   searched for on the screen the run was
+                                   already on. A nav tab is identified by
+                                   sitting on the same row as the other tabs.
   texts                            every distinct text node, one per line
 """
 import re
@@ -76,6 +84,29 @@ def main():
             print(f"phone-ui: no node matches {sys.argv[3]!r}", file=sys.stderr)
             sys.exit(1)
         print(hits[0]["x"], hits[0]["y"])
+        return
+
+    if cmd == "nav":
+        # The bottom navigation is the row of labels lowest on the screen that
+        # holds at least three of them. Requiring the whole row, rather than
+        # trusting the lowest match, is what stops a sub-screen with no
+        # navigation from answering with one of its own controls.
+        want = re.compile(sys.argv[3], re.I)
+        rows = {}
+        for n in ns:
+            if n["label"]:
+                rows.setdefault(n["top"] // 40, []).append(n)
+        best = None
+        for _, group in sorted(rows.items()):
+            labels = {g["label"] for g in group}
+            if len(labels) >= 3 and any(want.search(lbl) for lbl in labels):
+                best = group
+        if best is None:
+            print(f"phone-ui: no bottom-navigation row carrying {sys.argv[3]!r}",
+                  file=sys.stderr)
+            sys.exit(1)
+        hit = next(g for g in best if want.search(g["label"]))
+        print(hit["x"], hit["y"])
         return
 
     if cmd in ("find-after", "toggle-after", "state-after"):
