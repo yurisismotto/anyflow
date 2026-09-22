@@ -317,21 +317,69 @@ jobs:
         with:
           path: staged
 
-      - name: Gather every artifact into one directory
+      # Per-distribution subdirectories, and that is not cosmetic. All three
+      # targets build `omnibridge_0.1.0-1_amd64.deb` — the same filename, three
+      # different binaries. MEASURED on the first green run: flattening them
+      # into one directory kept whichever was copied last and silently dropped
+      # the other two, and SHA256SUMS listed 10 files where 14 were built.
+      #
+      # The canonical filename is preserved rather than mangled, because that
+      # is what `dpkg -i` and an apt repository expect; the directory carries
+      # the distinction instead.
+      - name: Gather every artifact, keeping the distributions apart
         run: |
-          mkdir -p release
-          find staged -type f \
-            \( -name '*.tar.gz' -o -name '*.tar.xz' -o -name '*.rpm' \
-               -o -name '*.deb' -o -name '*.cdx.json' \) \
-            -exec cp {} release/ \;
-          ls -l release/
+          mkdir -p release/fedora44 release/ubuntu2404 release/ubuntu2604 \
+                   release/debian13 release/sbom
+          cp staged/source-bundle/*.tar.* release/
+          cp staged/rpm-fedora44/*.rpm    release/fedora44/
+          cp staged/deb-ubuntu2404/*.deb  release/ubuntu2404/
+          cp staged/deb-ubuntu2604/*.deb  release/ubuntu2604/
+          cp staged/deb-debian13/*.deb    release/debian13/
+          cp staged/sbom/*.cdx.json       release/sbom/
+          find release -type f | sort
+
+      # A release that quietly ships less than it built is the failure this
+      # whole job exists to prevent, so the count is asserted rather than
+      # eyeballed.
+      - name: Every artifact that was built is present
+        run: |
+          fail=0
+          check() {
+            n=$(find "$1" -maxdepth 1 -type f -name "$2" | wc -l)
+            if [ "$n" -ne "$3" ]; then
+              echo "::error::expected $3 file(s) matching $2 in $1, found $n"
+              fail=1
+            else
+              echo "ok  $1/$2 -> $n"
+            fi
+          }
+          check release            '*.tar.*'    2
+          check release/fedora44   '*.rpm'      3
+          check release/ubuntu2404 '*.deb'      2
+          check release/ubuntu2604 '*.deb'      2
+          check release/debian13   '*.deb'      2
+          check release/sbom       '*.cdx.json' 3
+          # And the three same-named .deb sets must genuinely differ: identical
+          # bytes would mean one distribution's build was reused for another.
+          a=$(sha256sum release/ubuntu2404/omnibridge_*.deb | cut -d' ' -f1)
+          b=$(sha256sum release/ubuntu2604/omnibridge_*.deb | cut -d' ' -f1)
+          c=$(sha256sum release/debian13/omnibridge_*.deb   | cut -d' ' -f1)
+          if [ "$a" = "$b" ] || [ "$a" = "$c" ] || [ "$b" = "$c" ]; then
+            echo "::error::two distributions produced byte-identical packages"
+            fail=1
+          else
+            echo "ok  the three distributions produced three distinct packages"
+          fi
+          exit "$fail"
 
       - name: SHA256SUMS
         working-directory: release
         run: |
-          # Sorted, so two runs over the same inputs produce the same file.
-          sha256sum $(find . -maxdepth 1 -type f ! -name 'SHA256SUMS' -printf '%P\n' | sort) \
-            > SHA256SUMS
+          # Paths, not bare names, because the same filename occurs in three
+          # directories. Sorted, so two runs over the same inputs agree.
+          find . -type f ! -name 'SHA256SUMS' -printf '%P\n' | sort \
+            | xargs sha256sum > SHA256SUMS
+          wc -l < SHA256SUMS
           cat SHA256SUMS
 
       - name: What is deliberately missing
@@ -347,7 +395,14 @@ jobs:
       - name: Build provenance attestation
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: 'release/*'
+          # The files, not the directories. `release/*` now matches the
+          # per-distribution subdirectories rather than the artifacts inside
+          # them, which would attest nothing useful.
+          subject-path: |
+            release/*.tar.gz
+            release/*.tar.xz
+            release/SHA256SUMS
+            release/*/*
 
       - uses: actions/upload-artifact@v4
         with:
