@@ -29,12 +29,21 @@
 # human — this pipeline proves the artifacts can be produced, not that they
 # should be published.
 #
-# What is NOT signed, and why that is recorded rather than faked
-# --------------------------------------------------------------
-# `SHA256SUMS` is **not** GPG-signed. Signing needs a private key, this
-# repository has none, and inventing one for a CI run would produce an
-# artifact whose signature means nothing. That is carried as a release gate in
-# docs/audits/packaging/PACKAGING-V1-RELEASE-CI.md, not quietly skipped.
+# Signing: the path exists, the key does not
+# ------------------------------------------
+# `SHA256SUMS` is signed **if and only if** the `RELEASE_SIGNING_KEY` secret is
+# configured. Until somebody decides how the production key is custodied, it is
+# not, and the run says so in its summary rather than quietly skipping. The
+# wiring is here so that the decision is the only thing left to make: adding
+# the secret turns signing on with no workflow edit.
+#
+# The signing step never prints the key, never writes it into the release
+# directory, and asserts both of those after it runs. The scripts it calls
+# carry the reasoning: packaging/release/{sign,verify}-release.sh, with the
+# negative tests in packaging/tests/release-signing-tests.sh.
+#
+# The trust model and the open decision are in
+# docs/audits/release/RELEASE-SIGNING-FOUNDATION-V1.md.
 #
 # What IS attested: `actions/attest-build-provenance` records what was built,
 # from which commit, by which workflow, backed by Sigstore and GitHub's OIDC
@@ -382,12 +391,102 @@ jobs:
           wc -l < SHA256SUMS
           cat SHA256SUMS
 
-      - name: What is deliberately missing
+      # ----------------------------------------------------------------
+      # Sign SHA256SUMS, when and only when there is a key to sign with.
+      # ----------------------------------------------------------------
+      # `secrets` cannot be used in a job-level `if`, so presence is decided
+      # here and carried as an output. An empty secret is treated as absent:
+      # a secret configured to the empty string would otherwise take the
+      # signing path and fail deep inside gpg.
+      - name: Is a signing key configured?
+        id: signing
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
-          echo "SHA256SUMS is NOT signed. Signing needs a private key this"
-          echo "repository does not have, and a signature produced with an"
-          echo "invented key would mean nothing. Recorded as a release gate in"
-          echo "docs/audits/packaging/PACKAGING-V1-RELEASE-CI.md."
+          if [ -n "${RELEASE_SIGNING_KEY:-}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "A signing key is configured; SHA256SUMS will be signed."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No RELEASE_SIGNING_KEY secret is configured, so SHA256SUMS is NOT signed."
+          fi
+
+      - name: Sign SHA256SUMS
+        if: steps.signing.outputs.configured == 'true'
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          OMNIBRIDGE_SIGNING_FPR: ${{ vars.RELEASE_SIGNING_FPR }}
+        run: |
+          set -euo pipefail
+          # A keyring of our own, outside the runner's HOME, removed at the end
+          # of the step whatever happens.
+          GNUPGHOME="$(mktemp -d)"; export GNUPGHOME; chmod 700 "$GNUPGHOME"
+          cleanup() { gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"; }
+          trap cleanup EXIT
+
+          # Through a pipe, never a file and never an argument: a temporary
+          # file holding the key could outlive a failure, and an argument is
+          # visible in `ps` to anything else on the runner.
+          printf '%s' "$RELEASE_SIGNING_KEY" | gpg --batch --quiet --import
+          fpr="$(gpg --batch --with-colons --list-secret-keys \
+                 | awk -F: '/^fpr:/ {print $10; exit}')"
+          [ -n "$fpr" ] || { echo "::error::the imported key has no usable secret half"; exit 1; }
+          echo "imported a signing key: $fpr"
+
+          # If the repository declares which fingerprint is expected, the
+          # imported key must be it. A secret rotated to the wrong key would
+          # otherwise sign a release with an identity users do not trust.
+          if [ -n "${OMNIBRIDGE_SIGNING_FPR:-}" ]; then
+            want="$(printf '%s' "$OMNIBRIDGE_SIGNING_FPR" | tr -d '[:space:]' | tr 'a-f' 'A-F')"
+            got="$(printf '%s' "$fpr" | tr -d '[:space:]' | tr 'a-f' 'A-F')"
+            [ "$want" = "$got" ] || { echo "::error::RELEASE_SIGNING_KEY is $got but vars.RELEASE_SIGNING_FPR says $want"; exit 1; }
+            echo "the imported key matches the declared fingerprint"
+          else
+            echo "::warning::vars.RELEASE_SIGNING_FPR is not set, so the imported key's identity is not cross-checked."
+          fi
+
+          ./packaging/release/sign-release.sh --dir release --key "$fpr"
+
+          # Verify the way a user would: against an exported public keyring
+          # holding only this key, with the fingerprint pinned.
+          gpg --batch --export "$fpr" > "$RUNNER_TEMP/release-pubkey.gpg"
+          ./packaging/release/verify-release.sh \
+              --dir release \
+              --keyring "$RUNNER_TEMP/release-pubkey.gpg" \
+              --fingerprint "$fpr"
+
+      # Runs whether or not anything was signed. The release directory is about
+      # to be uploaded, and a private key reaching it would be published.
+      - name: No signing material may reach the artifacts
+        run: |
+          set -euo pipefail
+          if grep -rlq -- '-----BEGIN PGP PRIVATE KEY BLOCK-----' release 2>/dev/null; then
+            echo "::error::private key material is present under release/"
+            exit 1
+          fi
+          if grep -rlq -- '-----BEGIN OPENSSH PRIVATE KEY-----' release 2>/dev/null; then
+            echo "::error::an OpenSSH private key is present under release/"
+            exit 1
+          fi
+          if find release -name '*.gpg' -o -name 'secring*' -o -name '*.key' | grep -q .; then
+            echo "::error::a key-shaped file is present under release/:"
+            find release \( -name '*.gpg' -o -name 'secring*' -o -name '*.key' \) -print
+            exit 1
+          fi
+          echo "ok  no private key material and no key-shaped file under release/"
+
+      - name: Signing status
+        run: |
+          if [ "${{ steps.signing.outputs.configured }}" = "true" ]; then
+            echo "SHA256SUMS is signed; SHA256SUMS.asc is part of this release."
+            ls -l release/SHA256SUMS.asc
+          else
+            echo "SHA256SUMS is NOT signed. Signing needs a private key this"
+            echo "repository does not have, and a signature produced with an"
+            echo "invented key would mean nothing. The path is implemented and"
+            echo "waits on a key-custody decision — see"
+            echo "docs/audits/release/RELEASE-SIGNING-FOUNDATION-V1.md."
+          fi
 
       # Sigstore-backed, using GitHub's own OIDC identity. It records what was
       # built and from which commit; it is not, and does not pretend to be, a

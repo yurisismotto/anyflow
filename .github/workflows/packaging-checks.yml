@@ -86,6 +86,14 @@ jobs:
       - name: Static packaging checks
         run: ./packaging/tests/packaging-checks.sh
 
+      # The release verifier's whole job is to say NO, so the negative tests
+      # are the ones worth running on every change. They generate their own
+      # ephemeral keys into a temporary GNUPGHOME and delete them on exit; no
+      # secret is involved and none is needed, which is exactly why this can
+      # run on a pull request from a fork.
+      - name: Release signing — negative tests
+        run: ./packaging/tests/release-signing-tests.sh
+
       # systemd-analyze reads the unit the way systemd will: it catches a
       # misspelled directive, an unparseable value and a directive in the wrong
       # section, none of which a grep can see.
