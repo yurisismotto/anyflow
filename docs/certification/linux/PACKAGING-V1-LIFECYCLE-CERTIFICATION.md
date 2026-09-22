@@ -30,6 +30,19 @@ Two blockers, both environmental and neither fixable in scope:
 | **B-1** | **No root.** `sudo` on this host requires a password. Every gate that begins "install the package on a real system" cannot start. | L1–L3, L6, L8, L9, L14–L16, L19, L20 as *packaged-system* gates |
 | **B-2** | **No VM can reach the LAN.** KVM is available and `qemu:///session` works — but user-session QEMU uses SLIRP, which **accepts no inbound connections and does not carry mDNS multicast**. A VM built without root can never be discovered by the phone. Bridged or macvtap networking needs root. | The whole per-distribution runtime matrix, and L10/L12/L13 inside any VM |
 
+> **⚠ B-2's stated cause is SUPERSEDED — 2026-09-22, `feature/release-readiness-v1`.**
+> *"Bridged or macvtap networking needs root"* is **not true on this host and was
+> not true when this was written.** The invoking user is in the **`libvirt`**
+> group, so `virsh -c qemu:///system` succeeds with no `sudo`, no password and
+> no polkit prompt — the privileged half is done by `virtqemud`, not by the
+> caller. [`LINUX-UBUNTU-DEBIAN-COMPAT-U2.md`](../../audits/linux-compat/LINUX-UBUNTU-DEBIAN-COMPAT-U2.md)
+> §4.10 measured this on 2026-09-15, and three guests with macvtap over the
+> wired NIC were built on the strength of it. The real blocker is that
+> `enp0s13f0u2u2c2` has **no carrier**. See
+> [`RELEASE-READINESS-V1-BASELINE.md`](../../audits/release/RELEASE-READINESS-V1-BASELINE.md)
+> §3. **Everything B-2 says about SLIRP, and every gate verdict in this
+> document, stands unchanged.**
+
 B-2 is worth stating precisely because it is not a matter of effort. The four
 installation ISOs are staged on this host (`Fedora-KDE-Desktop-Live-44`,
 `ubuntu-24.04.4-desktop`, `ubuntu-26.04.1-desktop`, `debian-13.7.0-netinst`)
