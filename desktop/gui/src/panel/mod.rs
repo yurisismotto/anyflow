@@ -116,7 +116,10 @@ impl QuickPanel {
 
         // Icon-only, and therefore labelled. An unlabelled gear is a control
         // a screen reader reads out as "button".
-        let settings = gtk::Button::from_icon_name("preferences-system-symbolic");
+        // The same cog the sidebar's Settings row uses, and the same one the
+        // "Open OmniBridge Settings" button below carries: one action, one
+        // metaphor. See `widgets::SETTINGS_ICON`.
+        let settings = gtk::Button::from_icon_name(widgets::SETTINGS_ICON);
         settings.add_css_class("flat");
         settings.set_tooltip_text(Some("Open OmniBridge Settings"));
         settings.update_property(&[gtk::accessible::Property::Label("Open OmniBridge Settings")]);
@@ -135,8 +138,8 @@ impl QuickPanel {
             .resizable(false)
             .content(&toolbar)
             .build();
-        window.add_css_class("af-root");
-        window.add_css_class("af-quick-panel");
+        window.add_css_class("ob-root");
+        window.add_css_class("ob-quick-panel");
 
         Rc::new(QuickPanel {
             window,
@@ -268,10 +271,8 @@ impl QuickPanel {
         }
 
         self.content.append(&widgets::separator());
-        let settings = widgets::secondary_button(
-            "Open OmniBridge Settings",
-            Some("preferences-system-symbolic"),
-        );
+        let settings =
+            widgets::secondary_button("Open OmniBridge Settings", Some(widgets::SETTINGS_ICON));
         settings.set_action_name(Some("app.settings"));
         self.content.append(&settings);
     }
@@ -554,9 +555,9 @@ fn peer_card(peer: &model::PeerCard, radio: Option<&gtk::CheckButton>) -> gtk::B
         // Offline devices are muted rather than drawn as though they were
         // live. The word next to them is what actually carries the state.
         if peer.link.is_live() {
-            "af-tile-blue"
+            "ob-tile-blue"
         } else {
-            "af-tile-neutral"
+            "ob-tile-neutral"
         },
     );
     tile.set_valign(gtk::Align::Center);
@@ -710,7 +711,7 @@ fn recent_row(item: &model::RecentTransfer) -> gtk::Box {
     // A filename, and nothing else about the file. No size, no hash, no
     // stored path, no transfer id.
     let name = widgets::caption(&item.filename);
-    name.add_css_class("af-text-primary");
+    name.add_css_class("ob-text-primary");
     name.set_halign(gtk::Align::Start);
     name.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     name.set_xalign(0.0);
@@ -749,7 +750,7 @@ fn status_row(label: &str, icon_name: &str, line: &model::StatusLine) -> gtk::Bo
     row.append(&icon);
 
     let name = widgets::caption(label);
-    name.add_css_class("af-text-primary");
+    name.add_css_class("ob-text-primary");
     name.set_hexpand(true);
     row.append(&name);
 
@@ -1334,6 +1335,33 @@ pub(crate) mod tests {
                 settings.action_name().map(|n| n.to_string()).as_deref(),
                 Some("app.settings")
             );
+            // Still reachable by name, and still carrying one. An icon
+            // change must not cost the control its accessible label.
+            assert!(
+                button_text(&settings).contains("Settings"),
+                "the settings control lost its name"
+            );
         }
+    }
+
+    /// Settings wears one metaphor wherever it appears.
+    ///
+    /// The Quick Panel header, the Quick Panel's own button and the sidebar
+    /// row are three unrelated call sites for one action. They now share a
+    /// constant, and this is what says why: `preferences-system-symbolic`
+    /// draws crossed tools, which left the desktop using a different picture
+    /// from Android's gear for the same thing.
+    #[test]
+    fn the_settings_action_uses_one_icon_everywhere() {
+        assert_eq!(
+            crate::widgets::SETTINGS_ICON,
+            "applications-system-symbolic"
+        );
+        assert_ne!(
+            crate::widgets::SETTINGS_ICON,
+            "preferences-system-symbolic",
+            "that name is Adwaita's crossed tools, not a settings gear"
+        );
+        assert_eq!(crate::Page::Settings.icon(), crate::widgets::SETTINGS_ICON);
     }
 }

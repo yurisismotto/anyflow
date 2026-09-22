@@ -6,6 +6,9 @@ import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeGradient
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeRadius
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
 import io.github.yurisismotto.omnibridge.ui.theme.Brand
+import io.github.yurisismotto.omnibridge.ui.theme.Neutral
+import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeLayout
+import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeStatus
 import io.github.yurisismotto.omnibridge.ui.theme.DarkColors
 import io.github.yurisismotto.omnibridge.ui.theme.LightColors
 import androidx.compose.ui.graphics.Color
@@ -25,8 +28,8 @@ import kotlin.math.pow
  * one product from drifting apart a hex at a time.
  *
  * The contrast assertions matter more than the equality ones. They are what
- * make the accessibility claim executable rather than merely stated: brand
- * teal on white is 2.49:1, and the whole reason [AccentOnLight] exists apart
+ * make the accessibility claim executable rather than merely stated: Bridge
+ * Cyan on white is 2.40:1, and the whole reason [AccentOnLight] exists apart
  * from [Brand] is that a label may never be painted with it.
  */
 class DesignTokensTest {
@@ -53,21 +56,21 @@ class DesignTokensTest {
 
     @Test
     fun `the brand palette matches the canonical tokens`() {
-        assertEquals(hex("brand", "teal"), Brand.Teal.hex())
+        assertEquals(hex("brand", "cyan"), Brand.Cyan.hex())
         assertEquals(hex("brand", "blue"), Brand.Blue.hex())
         assertEquals(hex("brand", "violet"), Brand.Violet.hex())
-        assertEquals(hex("brand", "ink"), Brand.Ink.hex())
-        assertEquals(hex("brand", "paper"), Brand.Paper.hex())
+        assertEquals(hex("brand", "dark"), Brand.Dark.hex())
+        assertEquals(hex("brand", "surface"), Brand.Surface.hex())
     }
 
     @Test
     fun `the corrected accents match the canonical tokens`() {
-        assertEquals(hex("on_light", "teal"), AccentOnLight.Teal.hex())
+        assertEquals(hex("on_light", "cyan"), AccentOnLight.Cyan.hex())
         assertEquals(hex("on_light", "blue"), AccentOnLight.Blue.hex())
         assertEquals(hex("on_light", "violet"), AccentOnLight.Violet.hex())
         assertEquals(hex("on_light", "amber"), AccentOnLight.Amber.hex())
         assertEquals(hex("on_light", "red"), AccentOnLight.Red.hex())
-        assertEquals(hex("on_dark", "teal"), AccentOnDark.Teal.hex())
+        assertEquals(hex("on_dark", "cyan"), AccentOnDark.Cyan.hex())
         assertEquals(hex("on_dark", "blue"), AccentOnDark.Blue.hex())
         assertEquals(hex("on_dark", "violet"), AccentOnDark.Violet.hex())
         assertEquals(hex("on_dark", "amber"), AccentOnDark.Amber.hex())
@@ -141,26 +144,36 @@ class DesignTokensTest {
     fun `every text accent clears AA on its own surface`() {
         val floor = tokens.getJSONObject("contrast_floor").getDouble("text_on_surface")
         listOf(
-            "teal" to AccentOnLight.Teal,
+            "cyan" to AccentOnLight.Cyan,
             "blue" to AccentOnLight.Blue,
             "violet" to AccentOnLight.Violet,
             "amber" to AccentOnLight.Amber,
             "red" to AccentOnLight.Red,
         ).forEach { (name, colour) ->
             val onWhite = contrast(colour.hex(), "#FFFFFF")
-            val onPaper = contrast(colour.hex(), Brand.Paper.hex())
+            val onSurface = contrast(colour.hex(), Brand.Surface.hex())
             assertTrue("AccentOnLight.$name is $onWhite:1 on white", onWhite >= floor)
-            assertTrue("AccentOnLight.$name is $onPaper:1 on Paper", onPaper >= floor)
+            assertTrue("AccentOnLight.$name is $onSurface:1 on Surface", onSurface >= floor)
         }
         listOf(
-            "teal" to AccentOnDark.Teal,
+            "cyan" to AccentOnDark.Cyan,
             "blue" to AccentOnDark.Blue,
             "violet" to AccentOnDark.Violet,
             "amber" to AccentOnDark.Amber,
             "red" to AccentOnDark.Red,
         ).forEach { (name, colour) ->
-            val onSurface = contrast(colour.hex(), DarkColors.surface.hex())
-            assertTrue("AccentOnDark.$name is $onSurface:1 on the dark surface", onSurface >= floor)
+            val onDarkSurface = contrast(colour.hex(), DarkColors.surface.hex())
+            assertTrue(
+                "AccentOnDark.$name is $onDarkSurface:1 on the dark surface",
+                onDarkSurface >= floor,
+            )
+            // Elevated is the lighter of the two dark surfaces, so it is the
+            // harder one. A card sitting on an elevated sheet must stay AA too.
+            val onElevated = contrast(colour.hex(), DarkColors.surfaceElevated.hex())
+            assertTrue(
+                "AccentOnDark.$name is $onElevated:1 on the elevated dark surface",
+                onElevated >= floor,
+            )
         }
     }
 
@@ -188,7 +201,7 @@ class DesignTokensTest {
     /**
      * The brand hues are known to fail as text, and that must stay true.
      *
-     * A guard, not a curiosity: if a palette change ever made brand teal
+     * A guard, not a curiosity: if a palette change ever made Bridge Cyan
      * legible as a label, the two-family split could be collapsed — and this
      * failing is how anyone would find out.
      */
@@ -196,9 +209,9 @@ class DesignTokensTest {
     fun `the raw brand hues are known to fail as text`() {
         val floor = tokens.getJSONObject("contrast_floor").getDouble("text_on_surface")
         assertTrue(
-            "brand teal now passes AA on white — revisit the two-family palette " +
+            "Bridge Cyan now passes AA on white — revisit the two-family palette " +
                 "split in docs/design/BRAND.md before using it for text",
-            contrast(Brand.Teal.hex(), "#FFFFFF") < floor,
+            contrast(Brand.Cyan.hex(), "#FFFFFF") < floor,
         )
     }
 
@@ -232,5 +245,130 @@ class DesignTokensTest {
             "white on the CTA gradient falls to $worst:1 at $worstAt",
             worst >= floor,
         )
+    }
+
+    @Test
+    fun `the neutral ramp matches the canonical tokens and is anchored by the brand`() {
+        val ramp = tokens.getJSONObject("neutral")
+        listOf(
+            "50" to Neutral.N50, "100" to Neutral.N100, "200" to Neutral.N200,
+            "300" to Neutral.N300, "400" to Neutral.N400, "500" to Neutral.N500,
+            "600" to Neutral.N600, "700" to Neutral.N700, "800" to Neutral.N800,
+            "900" to Neutral.N900, "950" to Neutral.N950,
+        ).forEach { (step, colour) ->
+            assertEquals("neutral.$step", ramp.getString(step).uppercase(), colour.hex())
+        }
+        // The two ends are the brand, not merely near it. This is what makes
+        // "Surface and Dark are the ends of one ramp" a fact rather than a
+        // description that drifted.
+        assertEquals(Brand.Surface.hex(), Neutral.N50.hex())
+        assertEquals(Brand.Dark.hex(), Neutral.N900.hex())
+    }
+
+    @Test
+    fun `the status colours match the canonical tokens`() {
+        val status = tokens.getJSONObject("status")
+        fun expect(name: String, key: String) = status.getJSONObject(name).getString(key).uppercase()
+
+        // dot() is theme-independent, so it can be checked without composing.
+        listOf(
+            "connected" to OmniBridgeStatus.Connected,
+            "success" to OmniBridgeStatus.Success,
+            "available" to OmniBridgeStatus.Available,
+            "transferring" to OmniBridgeStatus.Transferring,
+            "warning" to OmniBridgeStatus.Warning,
+            "stale" to OmniBridgeStatus.Stale,
+            "error" to OmniBridgeStatus.Error,
+            "revoked" to OmniBridgeStatus.Revoked,
+            "disconnected" to OmniBridgeStatus.Disconnected,
+        ).forEach { (name, value) ->
+            assertEquals("status.$name.dot", expect(name, "dot"), value.dot().hex())
+        }
+    }
+
+    /**
+     * Every status still carries a word and an icon, not just a colour.
+     *
+     * Rule 1 of the UI guidelines, made executable. A status added as a
+     * colour and nothing else is the failure mode this catches.
+     */
+    @Test
+    fun `every status carries a word and an icon`() {
+        OmniBridgeStatus.entries.forEach { status ->
+            assertTrue("${status.name} has no label", status.label.isNotBlank())
+            assertTrue("${status.name} has no icon", status.icon != 0)
+        }
+        // And the words are distinct: two statuses that read the same are not
+        // distinguishable by a screen reader either.
+        val labels = OmniBridgeStatus.entries.map { it.label }
+        assertEquals(labels.size, labels.toSet().size)
+    }
+
+    /**
+     * Text must clear AA on the *background* as well as on a card.
+     *
+     * The background is Surface, not white, so a tier that only ever got
+     * checked against white was checked against the easier of the two.
+     */
+    @Test
+    fun `the body text tiers clear AA on the background too`() {
+        val floor = tokens.getJSONObject("contrast_floor").getDouble("text_on_surface")
+        listOf(
+            "textPrimary" to LightColors.textPrimary,
+            "textSecondary" to LightColors.textSecondary,
+            "textMuted" to LightColors.textMuted,
+        ).forEach { (name, colour) ->
+            val ratio = contrast(colour.hex(), LightColors.background.hex())
+            assertTrue("light $name is $ratio:1 on the background", ratio >= floor)
+        }
+        listOf(
+            "textPrimary" to DarkColors.textPrimary,
+            "textSecondary" to DarkColors.textSecondary,
+            "textMuted" to DarkColors.textMuted,
+        ).forEach { (name, colour) ->
+            val onBackground = contrast(colour.hex(), DarkColors.background.hex())
+            val onElevated = contrast(colour.hex(), DarkColors.surfaceElevated.hex())
+            assertTrue("dark $name is $onBackground:1 on the background", onBackground >= floor)
+            assertTrue("dark $name is $onElevated:1 on the elevated surface", onElevated >= floor)
+        }
+    }
+
+    /**
+     * The dark surfaces must stay ordered, or the card stops reading as lifted.
+     *
+     * Dark is derived from Dark rather than inverted, and the whole point of
+     * that derivation is this ordering: sunken < background < surface <
+     * elevated. Nudging one value without the others is how it gets lost.
+     */
+    @Test
+    fun `the dark surfaces stay ordered so a card still reads as lifted`() {
+        fun lum(c: androidx.compose.ui.graphics.Color) = luminance(c.hex())
+        assertTrue(
+            "dark surfaces are out of order",
+            lum(DarkColors.surfaceSunken) < lum(DarkColors.background) &&
+                lum(DarkColors.background) < lum(DarkColors.surface) &&
+                lum(DarkColors.surface) < lum(DarkColors.surfaceElevated),
+        )
+    }
+
+    /**
+     * The CTA gradient is the corrected accent triple, not a fourth set.
+     *
+     * Keeping them the same object is what stops the button's gradient and
+     * the app's accent colours drifting apart the next time one is retuned.
+     */
+    @Test
+    fun `the CTA gradient is exactly the corrected accent triple`() {
+        assertEquals(
+            listOf(AccentOnLight.Cyan, AccentOnLight.Blue, AccentOnLight.Violet),
+            OmniBridgeGradient.ctaStops,
+        )
+    }
+
+    @Test
+    fun `the layout tokens match the canonical tokens`() {
+        val layout = tokens.getJSONObject("layout")
+        assertEquals(layout.getInt("content_max").toFloat(), OmniBridgeLayout.contentMax.value, 0f)
+        assertEquals(layout.getInt("compact_max").toFloat(), OmniBridgeLayout.compactMax.value, 0f)
     }
 }

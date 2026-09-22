@@ -295,9 +295,9 @@ fn grant_row(
     let tile = widgets::icon_tile(
         icon,
         if granted {
-            "af-tile-teal"
+            "ob-tile-cyan"
         } else {
-            "af-tile-neutral"
+            "ob-tile-neutral"
         },
     );
     tile.set_size_request(28, 28);

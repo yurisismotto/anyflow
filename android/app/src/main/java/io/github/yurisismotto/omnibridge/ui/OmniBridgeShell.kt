@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.yurisismotto.omnibridge.R
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeGradientMark
+import io.github.yurisismotto.omnibridge.ui.components.exchangeAmbient
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeIconSize
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeMotion
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
@@ -99,7 +100,12 @@ fun OmniBridgeShell(
             Box(
                 Modifier
                     .padding(padding)
-                    .fillMaxSize(),
+                    .fillMaxSize()
+                    // Window-width, so the wash fades out by distance instead
+                    // of being cut off at the content column's edge. Only the
+                    // exchange flows ask for it: it is their background, not a
+                    // new one for the whole app.
+                    .then(if (current.isExchange) Modifier.exchangeAmbient() else Modifier),
                 contentAlignment = Alignment.TopCenter,
             ) {
               Box(Modifier.widthIn(max = ContentMaxWidth)) {
@@ -228,9 +234,9 @@ private fun ShellBottomBar(current: Tab, onSelect: (Tab) -> Unit) {
                 alwaysShowLabel = true,
                 modifier = Modifier.semantics { contentDescription = label },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = colors.accentTeal,
-                    selectedTextColor = colors.accentTeal,
-                    indicatorColor = colors.accentTeal.copy(alpha = 0.12f),
+                    selectedIconColor = colors.accentCyan,
+                    selectedTextColor = colors.accentCyan,
+                    indicatorColor = colors.accentCyan.copy(alpha = 0.12f),
                     unselectedIconColor = colors.textMuted,
                     unselectedTextColor = colors.textMuted,
                 ),

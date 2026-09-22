@@ -6,16 +6,13 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,7 +25,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -223,7 +219,7 @@ fun OmniBridgeBatteryPill(
     val tint = when {
         stale -> colors.textMuted
         percentage <= 15 -> colors.accentRed
-        else -> colors.accentTeal
+        else -> colors.accentCyan
     }
     val suffix = when {
         stale -> ", last known"
@@ -250,35 +246,5 @@ fun OmniBridgeBatteryPill(
         if (stale) {
             Text("last known", style = OmniBridgeType.caption, color = colors.textMuted)
         }
-    }
-}
-
-/**
- * The ribbon flourish behind a connected device card.
- *
- * Purely decorative — the reference sweeps a soft gradient wave across the
- * card, and this is that wave. It is hidden from assistive technology and it
- * carries no state: a card must not need the artwork to say it is connected.
- */
-@Composable
-fun OmniBridgeRibbonFlourish(modifier: Modifier = Modifier) {
-    val alpha = if (OmniBridgeTheme.colors.isDark) 0.22f else 0.14f
-    Canvas(modifier.clearAndSetSemantics { }) {
-        val w = size.width
-        val h = size.height
-        val path = androidx.compose.ui.graphics.Path().apply {
-            moveTo(0f, h * 0.72f)
-            cubicTo(w * 0.30f, h * 0.72f, w * 0.24f, h * 0.30f, w * 0.62f, h * 0.36f)
-            cubicTo(w * 0.86f, h * 0.40f, w * 0.86f, h * 0.18f, w, h * 0.24f)
-        }
-        drawPath(
-            path = path,
-            brush = OmniBridgeGradient.decorative(),
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = h * 0.16f,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-            ),
-            alpha = alpha,
-        )
     }
 }

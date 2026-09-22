@@ -90,7 +90,7 @@ fn device_card(device: &DeviceReport, panel: &PanelModel, pages: &Pages) -> gtk:
     let card = widgets::card();
 
     let top = widgets::row(SPACING_SM);
-    let tile = widgets::icon_tile(platform_icon(&device.platform), "af-tile-blue");
+    let tile = widgets::icon_tile(platform_icon(&device.platform), "ob-tile-blue");
     tile.set_valign(gtk::Align::Center);
     top.append(&tile);
 
@@ -105,7 +105,7 @@ fn device_card(device: &DeviceReport, panel: &PanelModel, pages: &Pages) -> gtk:
         "{} · {}",
         device.platform, device.fingerprint_short
     ));
-    meta.add_css_class("af-mono");
+    meta.add_css_class("ob-mono");
     text.append(&meta);
     text.append(&widgets::status_badge(Status::from_device_state(
         device.state,
@@ -117,7 +117,7 @@ fn device_card(device: &DeviceReport, panel: &PanelModel, pages: &Pages) -> gtk:
     // disconnects, so an offline device never carries a number here.
     if let Some(battery) = &device.battery {
         let gauge = widgets::column(2);
-        gauge.add_css_class("af-card-sunken");
+        gauge.add_css_class("ob-card-sunken");
         gauge.set_valign(gtk::Align::Start);
         gauge.append(&widgets::caption("Battery"));
         let pct = widgets::subtitle(&format!("{}%", battery.percentage));
@@ -181,14 +181,14 @@ fn device_card(device: &DeviceReport, panel: &PanelModel, pages: &Pages) -> gtk:
             "clipboard.v1",
             "Clipboard",
             "edit-paste-symbolic",
-            "af-tile-teal",
+            "ob-tile-cyan",
         ),
-        ("files.v1", "Files", "folder-symbolic", "af-tile-blue"),
+        ("files.v1", "Files", "folder-symbolic", "ob-tile-blue"),
         (
             "battery.v1",
             "Battery",
             "battery-symbolic",
-            "af-tile-violet",
+            "ob-tile-violet",
         ),
         // Listed for the same reason the other three are: a person looking at
         // this card should be able to see every grant a device holds, and
@@ -200,18 +200,18 @@ fn device_card(device: &DeviceReport, panel: &PanelModel, pages: &Pages) -> gtk:
             "notifications.v1",
             "Notifications",
             "preferences-system-notifications-symbolic",
-            "af-tile-amber",
+            "ob-tile-amber",
         ),
     ] {
         let granted = device.granted_capabilities.iter().any(|c| c == id);
         let chip = widgets::row(SPACING_XS);
-        let tile = widgets::icon_tile(icon, if granted { tone } else { "af-tile-neutral" });
+        let tile = widgets::icon_tile(icon, if granted { tone } else { "ob-tile-neutral" });
         tile.set_size_request(28, 28);
         chip.append(&tile);
         let text = widgets::column(0);
         let name = widgets::caption(label);
         if granted {
-            name.add_css_class("af-text-primary");
+            name.add_css_class("ob-text-primary");
         }
         text.append(&name);
         text.append(&widgets::caption(if granted {
@@ -267,16 +267,16 @@ fn activity_card(state: &DaemonState) -> gtk::Box {
                     "folder-download-symbolic"
                 },
                 if sending {
-                    "af-tile-blue"
+                    "ob-tile-blue"
                 } else {
-                    "af-tile-violet"
+                    "ob-tile-violet"
                 },
             );
             tile.set_size_request(28, 28);
             r.append(&tile);
             let text = widgets::column(0);
             let name = widgets::caption(&t.filename);
-            name.add_css_class("af-text-primary");
+            name.add_css_class("ob-text-primary");
             text.append(&name);
             text.append(&widgets::caption(&format!(
                 "{} {} · {}",

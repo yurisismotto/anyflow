@@ -7,11 +7,9 @@
 -->
 <resources>
     <color name="ic_launcher_background">#0B1020</color>
-    <color name="omnibridge_ink">#0F172A</color>
-    <color name="omnibridge_paper">#F8FAFC</color>
-    <color name="omnibridge_background">#F8FAFC</color>
-    <color name="omnibridge_background_dark">#0A0F1C</color>
+    <color name="omnibridge_background">#F7F9FC</color>
+    <color name="omnibridge_background_dark">#080C18</color>
     <!-- Notification accent. The corrected blue, not brand blue: a notification
          title can be small text on a light shade. -->
-    <color name="omnibridge_accent">#3B5BDB</color>
+    <color name="omnibridge_accent">#445CDD</color>
 </resources>

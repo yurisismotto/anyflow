@@ -33,15 +33,15 @@ pub fn render(container: &gtk::Box, state: &DaemonState) {
                 "computer-symbolic"
             },
             if device.revoked {
-                "af-tile-neutral"
+                "ob-tile-neutral"
             } else {
-                "af-tile-blue"
+                "ob-tile-blue"
             },
         ));
         let text = widgets::column(2);
         text.append(&widgets::subtitle(&device.device_name));
         let fp = widgets::caption(&device.fingerprint_short);
-        fp.add_css_class("af-mono");
+        fp.add_css_class("ob-mono");
         text.append(&fp);
         text.set_hexpand(true);
         row.append(&text);

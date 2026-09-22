@@ -17,67 +17,67 @@
  * override the user's own font settings is the wrong trade on Linux. If
  * Inter is installed it is picked up first. See docs/design/BRAND.md.
  */
-window, .af-root {
+window, .ob-root {
     font-family: Inter, Cantarell, "Adwaita Sans", sans-serif;
 }
 
-.af-display   { font-size: 32px; font-weight: 700; letter-spacing: -0.5px; }
-.af-title     { font-size: 24px; font-weight: 700; letter-spacing: -0.25px; }
-.af-heading   { font-size: 20px; font-weight: 600; }
-.af-subtitle  { font-size: 16px; font-weight: 600; }
-.af-body      { font-size: 14px; font-weight: 400; }
-.af-label     { font-size: 13px; font-weight: 500; }
-.af-caption   { font-size: 12px; font-weight: 400; }
-.af-mono      { font-family: "JetBrains Mono", "Source Code Pro", monospace; font-size: 13px; }
+.ob-display   { font-size: 32px; font-weight: 700; letter-spacing: -0.5px; }
+.ob-title     { font-size: 24px; font-weight: 700; letter-spacing: -0.25px; }
+.ob-heading   { font-size: 20px; font-weight: 600; }
+.ob-subtitle  { font-size: 16px; font-weight: 600; }
+.ob-body      { font-size: 14px; font-weight: 400; }
+.ob-label     { font-size: 13px; font-weight: 500; }
+.ob-caption   { font-size: 12px; font-weight: 400; }
+.ob-mono      { font-family: "JetBrains Mono", "Source Code Pro", monospace; font-size: 13px; }
 
-.af-text-primary   { color: @af_text_primary; }
-.af-text-secondary { color: @af_text_secondary; }
-.af-text-muted     { color: @af_text_muted; }
+.ob-text-primary   { color: @ob_text_primary; }
+.ob-text-secondary { color: @ob_text_secondary; }
+.ob-text-muted     { color: @ob_text_muted; }
 
 /* ---- surfaces --------------------------------------------------------- */
-window.af-root, .af-content {
-    background-color: @af_background;
+window.ob-root, .ob-content {
+    background-color: @ob_background;
 }
 
-.af-card {
-    background-color: @af_surface;
-    border: 1px solid @af_border;
+.ob-card {
+    background-color: @ob_surface;
+    border: 1px solid @ob_border;
     border-radius: 16px;
     padding: 16px;
 }
 
 /* A card that is itself a button keeps the card look and gains a hover. */
-button.af-card {
+button.ob-card {
     background-image: none;
     box-shadow: none;
     padding: 16px;
 }
-button.af-card:hover  { background-color: @af_surface_sunken; }
-button.af-card:active { background-color: @af_surface_sunken; }
+button.ob-card:hover  { background-color: @ob_surface_sunken; }
+button.ob-card:active { background-color: @ob_surface_sunken; }
 
-.af-card-sunken {
-    background-color: @af_surface_sunken;
+.ob-card-sunken {
+    background-color: @ob_surface_sunken;
     border-radius: 12px;
     padding: 12px;
 }
 
-.af-sidebar {
-    background-color: @af_surface;
-    border-right: 1px solid @af_border;
+.ob-sidebar {
+    background-color: @ob_surface;
+    border-right: 1px solid @ob_border;
 }
 
 /* ---- navigation ------------------------------------------------------- */
-.af-nav row {
+.ob-nav row {
     border-radius: 8px;
     margin: 2px 8px;
     min-height: 40px;
 }
-.af-nav row:selected {
-    background-color: alpha(@af_blue, 0.12);
-    color: @af_blue;
+.ob-nav row:selected {
+    background-color: alpha(@ob_blue, 0.12);
+    color: @ob_blue;
 }
-.af-nav row:selected label { color: @af_blue; font-weight: 600; }
-.af-nav row:hover { background-color: @af_surface_sunken; }
+.ob-nav row:selected label { color: @ob_blue; font-weight: 600; }
+.ob-nav row:hover { background-color: @ob_surface_sunken; }
 
 /* ---- an exclusive choice ----------------------------------------------- */
 /*
@@ -92,19 +92,19 @@ button.af-card:active { background-color: @af_surface_sunken; }
  * signal: the row keeps its title and its description, and assistive
  * technology reads the selected state from the list box itself.
  */
-.af-choice {
+.ob-choice {
     background-color: transparent;
 }
-.af-choice row {
+.ob-choice row {
     border-radius: 8px;
     padding: 6px 8px;
     min-height: 40px;
 }
-.af-choice row:selected {
-    background-color: alpha(@af_blue, 0.12);
+.ob-choice row:selected {
+    background-color: alpha(@ob_blue, 0.12);
 }
-.af-choice row:selected label { color: @af_blue; }
-.af-choice row:hover { background-color: @af_surface_sunken; }
+.ob-choice row:selected label { color: @ob_blue; }
+.ob-choice row:hover { background-color: @ob_surface_sunken; }
 
 /* ---- status language -------------------------------------------------- */
 /*
@@ -113,35 +113,38 @@ button.af-card:active { background-color: @af_surface_sunken; }
  * enough that its colour is decoration; the text classes use the corrected
  * hue that clears AA.
  */
-.af-status-connected    { color: @af_teal; }
-.af-status-available    { color: @af_blue; }
-.af-status-transferring { color: @af_blue; }
-.af-status-success      { color: @af_teal; }
-.af-status-warning      { color: @af_amber; }
-.af-status-stale        { color: @af_amber; }
-.af-status-error        { color: @af_red; }
-.af-status-revoked      { color: @af_red; }
-.af-status-disconnected { color: @af_text_muted; }
+.ob-status-connected    { color: @ob_cyan; }
+.ob-status-available    { color: @ob_blue; }
+.ob-status-transferring { color: @ob_blue; }
+.ob-status-success      { color: @ob_cyan; }
+.ob-status-warning      { color: @ob_amber; }
+.ob-status-stale        { color: @ob_amber; }
+.ob-status-error        { color: @ob_red; }
+.ob-status-revoked      { color: @ob_red; }
+.ob-status-disconnected { color: @ob_text_muted; }
 
-.af-dot {
+.ob-dot {
     min-width: 8px;
     min-height: 8px;
     border-radius: 999px;
 }
-.af-dot-teal    { background-color: @af_dot_teal; }
-.af-dot-blue    { background-color: @af_dot_blue; }
-.af-dot-violet  { background-color: @af_dot_violet; }
-.af-dot-amber   { background-color: #F59E0B; }
-.af-dot-red     { background-color: #EF4444; }
-.af-dot-neutral { background-color: @af_disabled; }
+.ob-dot-cyan    { background-color: @ob_dot_cyan; }
+.ob-dot-blue    { background-color: @ob_dot_blue; }
+.ob-dot-violet  { background-color: @ob_dot_violet; }
+.ob-dot-amber   { background-color: #F59E0B; }
+.ob-dot-red     { background-color: #EF4444; }
+.ob-dot-neutral { background-color: @ob_disabled; }
 
 /* ---- buttons ---------------------------------------------------------- */
 /*
- * The CTA wears the deepened gradient, not the identity one: white on brand
- * teal is 2.49:1 and this button always has a label on it.
+ * The CTA wears the corrected accent sweep, not the identity one: white on
+ * Bridge Cyan is 2.40:1 and this button always has a label on it. These three
+ * stops are the on_light accents, the same values @ob_cyan/@ob_blue/@ob_violet
+ * carry in the light theme — spelled out because GTK CSS cannot interpolate
+ * between two @colors in a gradient.
  */
-button.af-cta {
-    background-image: linear-gradient(to right, #0B7F72 0%, #3B5BDB 55%, #7C3AED 100%);
+button.ob-cta {
+    background-image: linear-gradient(to right, #10747E 0%, #445CDD 55%, #6A49EE 100%);
     background-color: transparent;
     color: #FFFFFF;
     font-weight: 600;
@@ -150,81 +153,81 @@ button.af-cta {
     padding: 10px 20px;
     box-shadow: none;
 }
-button.af-cta:hover { filter: brightness(1.08); }
-button.af-cta:disabled {
+button.ob-cta:hover { filter: brightness(1.08); }
+button.ob-cta:disabled {
     background-image: none;
-    background-color: @af_surface_sunken;
-    color: @af_disabled;
+    background-color: @ob_surface_sunken;
+    color: @ob_disabled;
 }
 
-button.af-secondary {
+button.ob-secondary {
     background-image: none;
-    background-color: @af_surface;
-    color: @af_text_primary;
-    border: 1px solid @af_border_strong;
+    background-color: @ob_surface;
+    color: @ob_text_primary;
+    border: 1px solid @ob_border_strong;
     border-radius: 999px;
     padding: 8px 16px;
 }
-button.af-secondary:hover { background-color: @af_surface_sunken; }
+button.ob-secondary:hover { background-color: @ob_surface_sunken; }
 
 /* Set apart from everything else, never filled: forgetting a device is not
    an action that should be the loudest thing on the screen. */
-button.af-destructive {
+button.ob-destructive {
     background-image: none;
     background-color: transparent;
-    color: @af_red;
-    border: 1px solid alpha(@af_red, 0.5);
+    color: @ob_red;
+    border: 1px solid alpha(@ob_red, 0.5);
     border-radius: 999px;
     padding: 8px 16px;
 }
-button.af-destructive:hover { background-color: alpha(@af_red, 0.08); }
+button.ob-destructive:hover { background-color: alpha(@ob_red, 0.08); }
 
 /* ---- tinted icon tiles ------------------------------------------------ */
-.af-tile {
+.ob-tile {
     border-radius: 12px;
     /* A floor, not a size: callers set_size_request smaller tiles for chips. */
     min-width: 28px;
     min-height: 28px;
     padding: 6px;
 }
-.af-tile-teal   { background-color: alpha(@af_teal, 0.10); color: @af_teal; }
-.af-tile-blue   { background-color: alpha(@af_blue, 0.10); color: @af_blue; }
-.af-tile-violet { background-color: alpha(@af_violet, 0.10); color: @af_violet; }
-.af-tile-amber  { background-color: alpha(@af_amber, 0.10); color: @af_amber; }
-.af-tile-red    { background-color: alpha(@af_red, 0.10); color: @af_red; }
+.ob-tile-cyan   { background-color: alpha(@ob_cyan, 0.10); color: @ob_cyan; }
+.ob-tile-blue   { background-color: alpha(@ob_blue, 0.10); color: @ob_blue; }
+.ob-tile-violet { background-color: alpha(@ob_violet, 0.10); color: @ob_violet; }
+.ob-tile-amber  { background-color: alpha(@ob_amber, 0.10); color: @ob_amber; }
+.ob-tile-red    { background-color: alpha(@ob_red, 0.10); color: @ob_red; }
 /* A capability that is not granted: present, legible, plainly inactive. */
-.af-tile-neutral { background-color: @af_surface_sunken; color: @af_disabled; }
+.ob-tile-neutral { background-color: @ob_surface_sunken; color: @ob_disabled; }
 
 /* ---- notices ---------------------------------------------------------- */
-.af-notice {
+.ob-notice {
     border-radius: 12px;
     padding: 12px;
-    background-color: alpha(@af_blue, 0.08);
+    background-color: alpha(@ob_blue, 0.08);
 }
-.af-notice-caution { background-color: alpha(@af_amber, 0.10); }
+.ob-notice-caution { background-color: alpha(@ob_amber, 0.10); }
 
 /* ---- progress --------------------------------------------------------- */
 /* No text sits on a progress fill, so the vivid brand stops are fine here. */
-progressbar.af-progress > trough {
-    background-color: @af_surface_sunken;
+progressbar.ob-progress > trough {
+    background-color: @ob_surface_sunken;
     border-radius: 999px;
     min-height: 6px;
 }
-progressbar.af-progress > trough > progress {
-    background-image: linear-gradient(to right, #16B8A6, #4F7CFF);
+progressbar.ob-progress > trough > progress {
+    background-image: linear-gradient(to right, #18B8C9, #4F6BFF);
     border-radius: 999px;
     min-height: 6px;
 }
 
 /* ---- status bar ------------------------------------------------------- */
-.af-statusbar {
-    background-color: @af_surface;
-    border-top: 1px solid @af_border;
+.ob-statusbar {
+    background-color: @ob_surface;
+    border-top: 1px solid @ob_border;
     padding: 6px 16px;
 }
 
 /* ---- misc ------------------------------------------------------------- */
-.af-separator { background-color: @af_border; min-height: 1px; }
+.ob-separator { background-color: @ob_border; min-height: 1px; }
 
 /*
  * Focus must stay visible: keyboard navigation is the primary way some
@@ -232,6 +235,6 @@ progressbar.af-progress > trough > progress {
  * against a tinted card.
  */
 *:focus-visible {
-    outline: 2px solid @af_blue;
+    outline: 2px solid @ob_blue;
     outline-offset: 2px;
 }

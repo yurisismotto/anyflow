@@ -34,8 +34,10 @@ import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeEmptyState
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeQuickAction
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSecondaryButton
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSectionLabel
+import io.github.yurisismotto.omnibridge.ui.components.NoticeTone
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSecurityNotice
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeStatusBadge
+import io.github.yurisismotto.omnibridge.ui.components.omniBridgeContentColumn
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeIconSize
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeStatus
@@ -61,6 +63,7 @@ fun DevicesScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
+            .omniBridgeContentColumn()
             .padding(horizontal = OmniBridgeSpacing.md),
         verticalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.sm),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -113,7 +116,7 @@ fun DevicesScreen(
                 val connected = !peer.revoked && state.isConnected(peer)
                 OmniBridgeDeviceCard(
                     name = peer.deviceName,
-                    platform = "Desktop · Linux",
+                    subtitle = UiMapping.peerIdentityLine(peer, state.liveSession),
                     // A revoked computer says so in a word, in the same badge
                     // every other state uses. Never a colour on its own.
                     status = if (peer.revoked) OmniBridgeStatus.Revoked else state.statusFor(peer),
@@ -179,7 +182,7 @@ fun DevicesScreen(
                     OmniBridgeQuickAction(
                         label = "Send clipboard",
                         icon = R.drawable.ic_clipboard,
-                        accent = colors.accentTeal,
+                        accent = colors.accentCyan,
                         // Disabled rather than hidden: the reason is one tap
                         // away on the device screen, and a row that reflows
                         // whenever a session drops is worse than a grey tile.
@@ -219,9 +222,12 @@ fun DevicesScreen(
                 }
             }
 
-            // --- connection ------------------------------------------------
-            item { OmniBridgeSectionLabel("Connection") }
-            item { ConnectionCard(state, actions) }
+            // --- what the link has to add ----------------------------------
+            // Only when there is something the device cards above cannot
+            // already say. See [ConnectionNotice].
+            UiMapping.connectionNotice(state.connection, state.mustChooseTarget)?.let { notice ->
+                item { ConnectionNotice(notice) }
+            }
         }
 
         item {
@@ -299,7 +305,7 @@ private fun DeviceConnectAction(
 private fun CapabilityChips(peer: TrustStore.TrustedPeer) {
     val colors = OmniBridgeTheme.colors
     Row(horizontalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.md)) {
-        Chip("Clipboard", R.drawable.ic_clipboard, peer.allows(ClipboardCapability.ID), colors.accentTeal)
+        Chip("Clipboard", R.drawable.ic_clipboard, peer.allows(ClipboardCapability.ID), colors.accentCyan)
         Chip("Files", R.drawable.ic_files, peer.allows(FilesCapability.ID), colors.accentBlue)
         Chip("Battery", R.drawable.ic_battery, peer.allows(BatteryCapability.ID), colors.accentViolet)
     }
@@ -331,53 +337,38 @@ private fun Chip(label: String, icon: Int, granted: Boolean, accent: Color) {
     }
 }
 
-/** Connect / disconnect, and what the link is doing right now. */
+/**
+ * What the link has to add, when it has anything.
+ *
+ * ## Why this is not a card with buttons any more
+ *
+ * It used to be one, and the Devices screen said everything twice: the
+ * selected device card already showed `Connected` and a `Disconnect`, and
+ * then a "Connection" section underneath showed `Connected to fedora` with
+ * its own `Connect` and `Disconnect`. Two controls appearing to drive one
+ * session is not a small cosmetic problem — it invites the reading that
+ * disconnecting in one place leaves the other still connected.
+ *
+ * The device card is now the only place a session is started, stopped, or
+ * reported. What it *cannot* express is the detail the coordinator carries
+ * while a link is failing: how long until the next retry and why, or the
+ * text of a terminal error. A status badge has room for a word, not a
+ * sentence.
+ *
+ * So this renders **nothing at all** in the ordinary states, and a notice —
+ * no badge, no buttons — only when there is a sentence worth reading. The
+ * state itself is untouched: [OmniBridgeApp.ConnectionState] still carries
+ * every case it did, and [UiMapping.connectionNotice] decides which of them
+ * is worth a line of screen.
+ */
 @Composable
-private fun ConnectionCard(state: MainUiState, actions: MainActions) {
-    val colors = OmniBridgeTheme.colors
-    OmniBridgeCard {
-        val status = when (state.connection) {
-            is OmniBridgeApp.ConnectionState.Connected -> OmniBridgeStatus.Connected
-            is OmniBridgeApp.ConnectionState.Connecting -> OmniBridgeStatus.Connecting
-            is OmniBridgeApp.ConnectionState.Retrying -> OmniBridgeStatus.Connecting
-            is OmniBridgeApp.ConnectionState.Error -> OmniBridgeStatus.Error
-            is OmniBridgeApp.ConnectionState.Idle -> OmniBridgeStatus.Disconnected
-        }
-        val detail = when (val s = state.connection) {
-            is OmniBridgeApp.ConnectionState.Connected -> "Connected to ${s.deviceName}"
-            is OmniBridgeApp.ConnectionState.Connecting -> "Connecting…"
-            is OmniBridgeApp.ConnectionState.Retrying ->
-                "Reconnecting in ${s.inSeconds}s · ${s.reason}"
-            is OmniBridgeApp.ConnectionState.Error -> s.message
-            is OmniBridgeApp.ConnectionState.Idle -> "Not connected"
-        }
-        OmniBridgeStatusBadge(status, label = status.label)
-        Text(detail, style = OmniBridgeType.body, color = colors.textSecondary)
-        if (state.mustChooseTarget) {
-            // The one case the old code answered with `first()`. Saying it is
-            // the whole point: a disabled button with a reason beats a button
-            // that works and dials the wrong desktop.
-            Text(
-                "Several devices are paired. Use Connect on the one you want.",
-                style = OmniBridgeType.body,
-                color = colors.textSecondary,
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.xs)) {
-            val target = state.targetPeer
-            OmniBridgeSecondaryButton(
-                text = "Connect",
-                onClick = { target?.let { actions.onConnect(it.fingerprint) } },
-                enabled = target != null &&
-                    state.connection !is OmniBridgeApp.ConnectionState.Connected,
-            )
-            OmniBridgeSecondaryButton(
-                text = "Disconnect",
-                onClick = actions.onDisconnect,
-                enabled = state.connection is OmniBridgeApp.ConnectionState.Connected,
-            )
-        }
-    }
+private fun ConnectionNotice(notice: UiMapping.ConnectionNotice) {
+    OmniBridgeSecurityNotice(
+        title = notice.title,
+        body = notice.body,
+        tone = if (notice.isProblem) NoticeTone.Caution else NoticeTone.Info,
+        icon = if (notice.isProblem) R.drawable.ic_warning else R.drawable.ic_activity,
+    )
 }
 
 /** Maps a peer to the status vocabulary. See [UiMapping] for the rules. */

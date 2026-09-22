@@ -17,6 +17,7 @@ use std::rc::Rc;
 
 use super::Pages;
 use crate::client;
+use crate::theme;
 use crate::widgets::{self, SPACING_MD, SPACING_SM, SPACING_XS};
 
 pub fn present_pairing_dialog(parent: Option<&gtk::Window>, pages: &Pages) {
@@ -92,7 +93,7 @@ pub fn present_pairing_dialog(parent: Option<&gtk::Window>, pages: &Pages) {
         let i = gtk::Image::from_icon_name(icon);
         i.set_pixel_size(16);
         i.set_valign(gtk::Align::Start);
-        i.add_css_class("af-status-connected");
+        i.add_css_class("ob-status-connected");
         r.append(&i);
         r.append(&widgets::caption(text));
         notes.append(&r);
@@ -278,10 +279,13 @@ fn draw_ribbon(cr: &gtk::cairo::Context, x: f64, y: f64, size: f64) {
     cr.translate(x, y);
     cr.scale(s, s);
 
+    // Straight off the brand gradient token, so the drawn mark cannot drift
+    // from the stylesheet or from the SVG the rest of the product ships.
+    let [start, middle, end] = theme::BRAND_GRADIENT.map(theme::rgb);
     let gradient = gtk::cairo::LinearGradient::new(12.0, 46.0, 52.0, 20.0);
-    gradient.add_color_stop_rgb(0.0, 0.086, 0.722, 0.651); // #16B8A6
-    gradient.add_color_stop_rgb(0.5, 0.310, 0.486, 1.000); // #4F7CFF
-    gradient.add_color_stop_rgb(1.0, 0.545, 0.361, 0.965); // #8B5CF6
+    gradient.add_color_stop_rgb(0.0, start.0, start.1, start.2);
+    gradient.add_color_stop_rgb(0.5, middle.0, middle.1, middle.2);
+    gradient.add_color_stop_rgb(1.0, end.0, end.1, end.2);
     let _ = cr.set_source(&gradient);
 
     cr.set_line_width(6.5);
@@ -290,10 +294,10 @@ fn draw_ribbon(cr: &gtk::cairo::Context, x: f64, y: f64, size: f64) {
     cr.curve_to(30.0, 44.0, 24.0, 21.0, 50.0, 22.0);
     let _ = cr.stroke();
 
-    cr.set_source_rgb(0.086, 0.722, 0.651);
+    cr.set_source_rgb(start.0, start.1, start.2);
     cr.arc(14.0, 44.0, 7.0, 0.0, std::f64::consts::TAU);
     let _ = cr.fill();
-    cr.set_source_rgb(0.545, 0.361, 0.965);
+    cr.set_source_rgb(end.0, end.1, end.2);
     cr.arc(50.0, 22.0, 7.0, 0.0, std::f64::consts::TAU);
     let _ = cr.fill();
 

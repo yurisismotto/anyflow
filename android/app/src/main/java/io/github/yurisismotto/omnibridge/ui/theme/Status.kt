@@ -12,7 +12,7 @@ import io.github.yurisismotto.omnibridge.R
  * ## The rule this type exists to enforce
  *
  * **Nothing in OmniBridge says something with colour alone.** Roughly one man in
- * twelve cannot separate the teal of "connected" from the amber of "stale",
+ * twelve cannot separate the cyan of "connected" from the amber of "stale",
  * and both of those are claims about whether the thing on screen is true
  * right now. So a status is never a coloured dot: it is a dot, an icon and a
  * word, and the word is the part that carries the meaning.
@@ -63,7 +63,7 @@ enum class OmniBridgeStatus(
     fun color(): Color {
         val c = LocalOmniBridgeColors.current
         return when (this) {
-            Connected, Success -> c.accentTeal
+            Connected, Success -> c.accentCyan
             Available, Connecting, Transferring -> c.accentBlue
             Stale, Warning -> c.accentAmber
             Error, Revoked -> c.accentRed
@@ -73,7 +73,7 @@ enum class OmniBridgeStatus(
 
     /** The brand hue at full strength, for the indicator dot only. */
     fun dot(): Color = when (this) {
-        Connected, Success -> Brand.Teal
+        Connected, Success -> Brand.Cyan
         Available, Connecting, Transferring -> Brand.Blue
         Stale, Warning -> Color(0xFFF59E0B)
         Error, Revoked -> Color(0xFFEF4444)

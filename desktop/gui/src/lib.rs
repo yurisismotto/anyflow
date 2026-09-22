@@ -294,7 +294,8 @@ impl Page {
             Page::Notifications => "preferences-system-notifications-symbolic",
             Page::Devices => "computer-symbolic",
             Page::TrustedPeers => "system-users-symbolic",
-            Page::Settings => "preferences-system-symbolic",
+            // One action, one metaphor. See `widgets::SETTINGS_ICON`.
+            Page::Settings => crate::widgets::SETTINGS_ICON,
         }
     }
 
@@ -716,7 +717,7 @@ impl App {
         // --- sidebar ----------------------------------------------------
         let nav = gtk::ListBox::new();
         nav.set_selection_mode(gtk::SelectionMode::Single);
-        nav.add_css_class("af-nav");
+        nav.add_css_class("ob-nav");
         nav.add_css_class("navigation-sidebar");
         for page in Page::ALL {
             let r = widgets::row(widgets::SPACING_SM);
@@ -745,7 +746,7 @@ impl App {
         stack.set_visible_child_name(initial.name());
 
         let sidebar = widgets::column(0);
-        sidebar.add_css_class("af-sidebar");
+        sidebar.add_css_class("ob-sidebar");
         let nav_scroll = gtk::ScrolledWindow::builder()
             .child(&nav)
             .vexpand(true)
@@ -763,7 +764,7 @@ impl App {
             .build();
         content.append(&content_scroll);
         content.append(&pages.statusbar);
-        content.add_css_class("af-content");
+        content.add_css_class("ob-content");
 
         let split = adw::NavigationSplitView::builder()
             .sidebar(
@@ -812,7 +813,7 @@ impl App {
             .height_request(420)
             .content(&toolbar)
             .build();
-        window.add_css_class("af-root");
+        window.add_css_class("ob-root");
 
         // Narrow windows collapse the sidebar rather than squeezing the
         // content.

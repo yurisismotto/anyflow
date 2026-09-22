@@ -58,14 +58,11 @@ fails the build instead of shipping.
 The artwork is installed exactly as supplied. This repository does not
 regenerate, simplify or re-export it.
 
-> **One delta, deliberately left for a later sprint.** The *brand palette*
-> above is the official OmniBridge one. The *UI gradient tokens* further down
-> are still the AnyFlow-era sweep (`#16B8A6` → `#4F7CFF` → `#8B5CF6`), because
-> those are code — `docs/design/tokens.json`, `ui/theme/Color.kt` and
-> `desktop/gui/src/theme.rs`, pinned by token tests on both front ends — and
-> retuning them is an interface change, not artwork integration. The two are
-> close but not identical. Moving the tokens onto the official palette is a
-> self-contained follow-up and is not blocked by anything here.
+The palette below **is** the official one, in the artwork and in the code
+alike. The UI gradient tokens carried the AnyFlow-era sweep
+(`#16B8A6` → `#4F7CFF` → `#8B5CF6`) until the UI polish sprint retuned
+`docs/design/tokens.json`, `ui/theme/Color.kt` and `desktop/gui/src/theme.rs`
+onto it. There is no remaining delta between the brand and the interface.
 
 ---
 
@@ -131,25 +128,33 @@ Do not:
 
 ---
 
-## Palette — Palette A
+## Palette
 
 | Token | Hex | What it is for |
 |---|---|---|
-| **Primary Teal** | `#16B8A6` | Connected, active, flow origin, toggles |
-| **Primary Blue** | `#4F7CFF` | Primary actions, links, progress, selection |
-| **Violet** | `#8B5CF6` | Secondary accent, gradients, flow destination |
-| **Ink** | `#0F172A` | Primary text, dark surfaces, dark-theme base |
-| **Paper** | `#F8FAFC` | Application background, light surfaces |
+| **Bridge Cyan** | `#18B8C9` | Connected, active, flow origin, toggles |
+| **Primary Blue** | `#4F6BFF` | Primary actions, links, progress, selection |
+| **Accent Violet** | `#7C5CFC` | Secondary accent, gradients, flow destination |
+| **Dark** | `#0B1020` | Primary text, dark surfaces, dark-theme card |
+| **Surface** | `#F7F9FC` | Application background, light surfaces |
+
+The token names are these names. `Brand.Teal`, `brand::INK` and `brand::PAPER`
+are gone: a constant called `Teal` holding a cyan is a comment that lies, and
+it is the kind that survives a rebrand.
 
 ### The two-family rule
 
 This is the single most important thing on this page.
 
-**The brand hues above are not legible as text.** Brand teal on white is
-**2.49 : 1** — WCAG AA asks for 4.5 : 1. Blue reaches 3.71 : 1 and violet
-4.23 : 1, both short of it. The design reference draws "Connected" in brand
-teal; done literally, that makes the most important word on the screen the
+**The brand hues above are not legible as text.** Bridge Cyan on white is
+**2.40 : 1** — WCAG AA asks for 4.5 : 1. Blue reaches 4.30 : 1 and violet
+4.38 : 1, both short of it. The design reference draws "Connected" in brand
+cyan; done literally, that makes the most important word on the screen the
 hardest one to read.
+
+The retune moved all three hues and did **not** move them closer to legible:
+blue and violet now land just under the line rather than well under it, which
+is precisely why the correction is a table and not a judgement call.
 
 So the palette has two families:
 
@@ -158,24 +163,41 @@ So the palette has two families:
 | `brand.*` | Fills, marks, gradients, indicator dots — shapes large enough that their colour is decoration | Never for text or small icons |
 | `on_light.*` / `on_dark.*` | Every text label, every icon at label size | Corrected until it clears AA on its own surface |
 
-| Role | Light (on white) | Dark (on Ink) |
+| Role | Light (on white) | Dark (on Dark) |
 |---|---|---|
-| Teal | `#0F766E` — 5.47 : 1 | `#2DD4BF` — 9.59 : 1 |
-| Blue | `#3B5BDB` — 5.67 : 1 | `#8FA9FF` — 7.90 : 1 |
-| Violet | `#7C3AED` — 5.70 : 1 | `#A78BFA` — 6.56 : 1 |
-| Amber | `#B45309` — 5.02 : 1 | `#FBBF24` — 10.69 : 1 |
-| Red | `#DC2626` — 4.83 : 1 | `#F87171` — 6.45 : 1 |
+| Cyan | `#10747E` — 5.50 : 1 | `#3DC9D7` — 9.50 : 1 |
+| Blue | `#445CDD` — 5.50 : 1 | `#90A1FF` — 7.87 : 1 |
+| Violet | `#6A49EE` — 5.53 : 1 | `#A28CFA` — 6.91 : 1 |
+| Amber | `#B45309` — 5.02 : 1 | `#FBBF24` — 11.34 : 1 |
+| Red | `#DC2626` — 4.83 : 1 | `#F87171` — 6.84 : 1 |
+
+Amber and red did not move. **Brand colours and semantic colours are
+different concepts**: warning and error mean the same thing whatever the
+identity is, and recolouring them to match a sweep would have made the
+palette prettier and the status language less legible.
+
+Each hue is the *lightest* shade of its own brand hue that still clears the
+floor with the headroom the previous palette had, so they stay recognisably
+the brand rather than becoming three dark neutrals.
 
 These ratios are **asserted by tests**, not just written here — see
 [Tokens](#tokens) below.
 
 ### Neutrals
 
-Paper and Ink are the two ends of one slate ramp, so the whole scale is
-already implied by the brand:
+Surface and Dark are the two ends of one ramp, so the whole scale is already
+implied by the brand:
 
-`#F8FAFC` · `#F1F5F9` · `#E2E8F0` · `#CBD5E1` · `#94A3B8` · `#64748B` ·
-`#475569` · `#334155` · `#1E293B` · `#0F172A` · `#020617`
+`#F7F9FC` · `#F1F4F9` · `#E2E7F0` · `#CBD3E1` · `#94A0B8` · `#64718B` ·
+`#475269` · `#333E55` · `#1E263B` · `#0B1020` · `#05070F`
+
+The ends are the brand exactly — the token tests assert `neutral.50 == Surface`
+and `neutral.900 == Dark` rather than trusting this sentence.
+
+**The middle stays neutral.** Interpolating the ramp towards Dark's own
+saturation looks more principled and is wrong: Dark is 49 % saturated because
+it is nearly black, and carrying that through the midtones turns every body
+paragraph and every hairline border faintly blue. Greys are grey.
 
 Semantic names — `surface`, `border`, `text-secondary`, `disabled` and the
 rest — are defined in [`tokens.json`](tokens.json). Screens use those, never a
@@ -185,15 +207,20 @@ ramp step directly and never a literal hex.
 
 ## Gradient
 
-The official sweep is Teal → Blue → Violet.
+The official sweep is Cyan → Blue → Violet.
 
 There are **two** of them, and choosing wrongly is an accessibility bug rather
 than a matter of taste:
 
 | Gradient | Stops | Use |
 |---|---|---|
-| **Brand** (decorative) | `#16B8A6` → `#4F7CFF` → `#8B5CF6` | Marks, ribbons, progress fills. **Never** under text. |
-| **CTA** (text-bearing) | `#0B7F72` → `#3B5BDB` → `#7C3AED` | Primary buttons. White clears 4.5 : 1 at *every* interpolated point, not just at the stops. |
+| **Brand** (decorative) | `#18B8C9` → `#4F6BFF` → `#7C5CFC` | Marks, ribbons, progress fills. **Never** under text. |
+| **CTA** (text-bearing) | `#10747E` → `#445CDD` → `#6A49EE` | Primary buttons. White clears 4.5 : 1 at *every* interpolated point — 5.48 : 1 at the worst — not just at the stops. |
+
+The CTA sweep **is** the corrected accent triple, not a fourth colour set
+tuned by hand. That is the whole trick: the three hues a label may be drawn
+in are already the three a label may sit on, so there is nothing extra to
+keep in step the next time the palette moves.
 
 Use gradient sparingly: the mark, one primary button, a progress fill, an
 illustration. The interface stays neutral.
@@ -268,13 +295,24 @@ A GNOME app that used Material glyphs would look like a port. This is what
 
 ## Light and dark
 
-Light is the primary theme: Paper background, white surfaces, Ink text.
+Light is the primary theme: Surface background, white cards, Dark text.
 
-Dark is **derived from Ink, not inverted**. The background (`#0A0F1C`) sits
-just *below* Ink and Ink itself becomes the card surface, so a card reads as
+Dark is **derived from Dark, not inverted**. The background (`#080C18`) sits
+just *below* Dark and Dark itself becomes the card surface, so a card reads as
 lifted out of the page exactly as it does in light. Inverting the light ramp
 would have put the lightest neutral behind the darkest text and lost that
 relationship entirely.
+
+| | Dark theme |
+|---|---|
+| Background | `#080C18` |
+| Surface (card) | `#0B1020` — the brand Dark |
+| Elevated | `#141B30` |
+| Sunken | `#05070F` |
+
+The ordering `sunken < background < surface < elevated` is what makes a card
+read as lifted, so it is asserted by a test on both platforms rather than
+left to whoever next nudges one of the four.
 
 Gradients stay vivid in dark; accents move to the `on_dark` family.
 

@@ -20,6 +20,7 @@ import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeCard
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeFingerprint
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSectionLabel
 import io.github.yurisismotto.omnibridge.ui.components.OmniBridgeSecurityNotice
+import io.github.yurisismotto.omnibridge.ui.components.omniBridgeContentColumn
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeSpacing
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeTheme
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeType
@@ -42,6 +43,7 @@ fun SettingsScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .omniBridgeContentColumn()
             .padding(horizontal = OmniBridgeSpacing.md),
         verticalArrangement = Arrangement.spacedBy(OmniBridgeSpacing.sm),
     ) {

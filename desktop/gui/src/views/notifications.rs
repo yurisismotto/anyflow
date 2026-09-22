@@ -317,9 +317,9 @@ fn this_computer(report: &NotificationsStatusReport) -> gtk::Box {
     row.append(&widgets::icon_tile(
         "preferences-system-notifications-symbolic",
         if report.available {
-            "af-tile-violet"
+            "ob-tile-violet"
         } else {
-            "af-tile-neutral"
+            "ob-tile-neutral"
         },
     ));
     let text = widgets::column(2);
@@ -367,11 +367,11 @@ fn peer_card(peer: &NotificationPeerReport, available: bool, pages: &Pages) -> g
     let readiness = Readiness::of(peer, available);
 
     let head = widgets::row(SPACING_SM);
-    head.append(&widgets::icon_tile("phone-symbolic", "af-tile-blue"));
+    head.append(&widgets::icon_tile("phone-symbolic", "ob-tile-blue"));
     let text = widgets::column(2);
     text.append(&widgets::subtitle(&peer.device_name));
     let fp = widgets::caption(&peer.fingerprint_short);
-    fp.add_css_class("af-mono");
+    fp.add_css_class("ob-mono");
     text.append(&fp);
     text.set_hexpand(true);
     head.append(&text);
@@ -546,7 +546,7 @@ fn policy_switch(
 fn lock_choices(peer: &NotificationPeerReport, pages: &Pages) -> gtk::ListBox {
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::Single);
-    list.add_css_class("af-choice");
+    list.add_css_class("ob-choice");
 
     for (_, title, description) in LOCK_POLICIES {
         let text = widgets::column(0);

@@ -7,6 +7,7 @@ import io.github.yurisismotto.omnibridge.clipboard.ClipboardCapabilities
 import io.github.yurisismotto.omnibridge.clipboard.ClipboardPolicy
 import io.github.yurisismotto.omnibridge.files.FileTransferManager
 import io.github.yurisismotto.omnibridge.files.TransferState
+import io.github.yurisismotto.omnibridge.proto.Platform
 import io.github.yurisismotto.omnibridge.store.TrustStore
 import io.github.yurisismotto.omnibridge.ui.theme.OmniBridgeStatus
 
@@ -243,12 +244,21 @@ object UiMapping {
      * here rather than inline so the property issue #12 violated — that
      * "Sending…" is never what a finished attempt reads as — is a test rather
      * than a reading of a nested conditional.
+     *
+     * @param idleLabel what the untouched button says. The exchange screens
+     *   name the destination in it — "Send file to fedora" — which is a
+     *   *live* peer name assembled by the caller, never a constant. It
+     *   deliberately applies to the idle state only: once an attempt is under
+     *   way the button is reporting the attempt, and a button still offering
+     *   to send to a named computer while that send is in flight would be
+     *   describing something that has already happened.
      */
-    fun sendButtonLabel(attempt: SendAttempt): String = when (attempt) {
-        is SendAttempt.Idle -> "Send"
-        is SendAttempt.Sending, is SendAttempt.Sent, is SendAttempt.Offered -> "Sending…"
-        is SendAttempt.Failed -> "Try again"
-    }
+    fun sendButtonLabel(attempt: SendAttempt, idleLabel: String = "Send"): String =
+        when (attempt) {
+            is SendAttempt.Idle -> idleLabel
+            is SendAttempt.Sending, is SendAttempt.Sent, is SendAttempt.Offered -> "Sending…"
+            is SendAttempt.Failed -> "Try again"
+        }
 
     /**
      * The outcome of one `files.offer`, as the screen should show it.
@@ -483,4 +493,204 @@ object UiMapping {
         } else {
             peer.deviceName
         }
+
+    /**
+     * Everything the Send clipboard screen decides, in one value.
+     *
+     * Pulled out of the composable so the states that matter can be tested on
+     * the JVM: empty, content present, sensitive, and each of the four ways
+     * the send can be blocked. A rule that only exists inside a `@Composable`
+     * is a rule that only an instrumented test can reach, and the send gate
+     * is too important for that — this screen was once the most permissive of
+     * the three Send clipboard affordances precisely because its condition
+     * was written inline and nothing checked it.
+     */
+    data class SendClipboardUi(
+        /** Whether the primary action may be pressed. */
+        val enabled: Boolean,
+        /**
+         * Why not, or null when [enabled].
+         *
+         * Always populated when the button is off. A disabled button with no
+         * explanation is the "dead control" the guidelines forbid.
+         */
+        val blockedReason: String?,
+        /** Whether there is a clip at all — decides empty state vs preview. */
+        val hasContent: Boolean,
+        /** Whether the clip is present but withheld from the preview. */
+        val contentHidden: Boolean,
+    )
+
+    /**
+     * @param gate what the session and the grants permit, from
+     *   [clipboardSendGate].
+     * @param preview what this phone could read from the clipboard, or null.
+     */
+    fun sendClipboardUi(
+        gate: ClipboardSendGate,
+        preview: ClipboardPreview?,
+    ): SendClipboardUi {
+        // The gate is checked first: "connect to this computer" is a more
+        // useful thing to say than "copy something" when both are true, and
+        // it is the one the person has to act on first anyway.
+        val reason = gate.reasonOrNull
+            ?: EMPTY_CLIPBOARD_REASON.takeIf { preview == null }
+        return SendClipboardUi(
+            enabled = gate.ready && preview != null,
+            blockedReason = reason,
+            hasContent = preview != null,
+            contentHidden = preview != null && preview.text == null,
+        )
+    }
+
+    /**
+     * Said when the clipboard is empty.
+     *
+     * Deliberately not "OmniBridge could not read your clipboard": Android
+     * only permits a clipboard read while the app has focus, this screen has
+     * already taken its one chance, and implying that a retry might work
+     * would be inviting the person to do something that cannot help.
+     */
+    const val EMPTY_CLIPBOARD_REASON: String = "There is nothing to send."
+
+    /**
+     * A line about the link, shown under the device list — or null.
+     *
+     * @property isProblem whether it should wear the caution tone. A retry in
+     *   progress is not a fault: it is the app doing its job, and painting it
+     *   amber would make an ordinary Wi-Fi blip look like a failure.
+     */
+    data class ConnectionNotice(
+        val title: String,
+        val body: String?,
+        val isProblem: Boolean,
+    )
+
+    /**
+     * What, if anything, the Devices screen should add under the device list.
+     *
+     * Returns null for every state a device card already expresses, which is
+     * most of them. The Devices screen used to carry a whole second card —
+     * status badge, Connect, Disconnect — duplicating the selected device's
+     * own row; this replaces it, and the rule it encodes is *only say what
+     * the card above cannot*.
+     *
+     * `Connected` and `Idle` are therefore null: the card shows `Connected`
+     * with a `Disconnect`, or `Available` with a `Connect`, and repeating
+     * that is exactly the duplication this exists to remove. `Connecting` is
+     * null too — the card's badge already says the word and there is no
+     * detail to add.
+     *
+     * What survives is the detail a badge has no room for: a retry countdown
+     * with its reason, and the text of a terminal error. Neither is
+     * recoverable from the device card, and dropping them to tidy the screen
+     * would be hiding a warning a person needs.
+     *
+     * @param mustChoose several devices are paired and none is the target —
+     *   the one case where the screen must say something the cards cannot,
+     *   because the answer is "pick one", not a property of any single row.
+     */
+    fun connectionNotice(
+        connection: OmniBridgeApp.ConnectionState,
+        mustChoose: Boolean,
+    ): ConnectionNotice? = when (connection) {
+        is OmniBridgeApp.ConnectionState.Retrying -> ConnectionNotice(
+            title = "Reconnecting in ${connection.inSeconds}s",
+            body = connection.reason,
+            isProblem = false,
+        )
+        is OmniBridgeApp.ConnectionState.Error -> ConnectionNotice(
+            title = "Could not connect",
+            body = connection.message,
+            isProblem = true,
+        )
+        // Nothing to add: the device card carries the whole story.
+        is OmniBridgeApp.ConnectionState.Connected,
+        is OmniBridgeApp.ConnectionState.Connecting,
+        is OmniBridgeApp.ConnectionState.Idle,
+        -> if (mustChoose) {
+            ConnectionNotice(
+                title = "Choose a device",
+                body = "Several devices are paired. Use Connect on the one you want.",
+                isProblem = false,
+            )
+        } else {
+            null
+        }
+    }
+
+    /**
+     * What kind of machine is on the other end, as far as anything has said.
+     *
+     * Three cases and no guessing. [Unknown] is a real answer, not a gap to
+     * be filled with the likeliest platform: the exchange hero draws a device
+     * glyph from this, and drawing a monitor for a peer that has never stated
+     * a platform would put the same untrue "Desktop · Linux" claim back on
+     * the screen in pictures, one layer below where it was fixed.
+     */
+    enum class DeviceKind { Desktop, Mobile, Unknown }
+
+    /** The kind a stated platform implies, or [DeviceKind.Unknown]. */
+    fun deviceKind(platform: Platform?): DeviceKind = when (platform) {
+        Platform.PLATFORM_LINUX -> DeviceKind.Desktop
+        Platform.PLATFORM_ANDROID -> DeviceKind.Mobile
+        else -> DeviceKind.Unknown
+    }
+
+    /**
+     * The kind of machine a peer is, **while its own session is up**.
+     *
+     * The same rule, and the same identity comparison, as
+     * [peerIdentityLine]: a platform arrives with a session and this app does
+     * not keep it, so a peer with no live session of its own is
+     * [DeviceKind.Unknown] rather than whatever it last said. A session with
+     * another computer says nothing about this one.
+     */
+    fun peerDeviceKind(
+        peer: TrustStore.TrustedPeer,
+        session: OmniBridgeApp.LiveSession?,
+    ): DeviceKind =
+        deviceKind(session?.takeIf { it.peerHex == peer.fingerprint.toHex() }?.platform)
+
+    /**
+     * How a platform reads on screen, or null when nothing said.
+     *
+     * `PLATFORM_UNSPECIFIED` and any value this build does not know are
+     * deliberately null rather than "Unknown": a device whose platform was
+     * never stated should show nothing there, not a label asserting that the
+     * platform is the unknown one.
+     */
+    fun platformLabel(platform: Platform): String? = when (platform) {
+        Platform.PLATFORM_LINUX -> "Desktop · Linux"
+        Platform.PLATFORM_ANDROID -> "Phone or tablet · Android"
+        else -> null
+    }
+
+    /**
+     * The line under a device's name.
+     *
+     * The peer's platform **while a session is up**, and its short
+     * fingerprint otherwise.
+     *
+     * Three screens used to print a literal `"Desktop · Linux"` here, with
+     * nothing behind it: every paired device was labelled Linux, including a
+     * phone. The platform is real — `DeviceInfo.platform` is field 3 of the
+     * HELLO — but it arrives *with a session* and this app does not keep it,
+     * because a stored platform is a claim about a machine that is not
+     * talking to us, made by a message that arrived days ago.
+     *
+     * So the line says the platform when there is a live session to back it,
+     * and falls back to the pinned fingerprint when there is not. The
+     * fingerprint is not a consolation prize: it is what tells two computers
+     * called `fedora` apart, and what a person compares while pairing.
+     */
+    fun peerIdentityLine(
+        peer: TrustStore.TrustedPeer,
+        session: OmniBridgeApp.LiveSession? = null,
+    ): String {
+        // Identity, not a flag: a session with another computer says nothing
+        // about this one. The same comparison the send gate makes.
+        val mine = session?.takeIf { it.peerHex == peer.fingerprint.toHex() }
+        return mine?.let { platformLabel(it.platform) } ?: peer.fingerprint.toDisplayShort()
+    }
 }

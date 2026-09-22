@@ -207,7 +207,7 @@ impl Pages {
         pages.sidebar_footer.set_margin_start(SPACING_SM);
         pages.sidebar_footer.set_margin_end(SPACING_SM);
         pages.sidebar_footer.set_margin_bottom(SPACING_SM);
-        pages.statusbar.add_css_class("af-statusbar");
+        pages.statusbar.add_css_class("ob-statusbar");
         pages
     }
 
@@ -351,7 +351,7 @@ impl Pages {
         widgets::clear(&self.sidebar_footer);
 
         let net = widgets::row(SPACING_XS);
-        net.add_css_class("af-card-sunken");
+        net.add_css_class("ob-card-sunken");
         let icon = gtk::Image::from_icon_name(if state.reachable() {
             "security-high-symbolic"
         } else {
@@ -359,9 +359,9 @@ impl Pages {
         });
         icon.set_pixel_size(16);
         icon.add_css_class(if state.reachable() {
-            "af-status-connected"
+            "ob-status-connected"
         } else {
-            "af-status-disconnected"
+            "ob-status-disconnected"
         });
         net.append(&icon);
         let text = widgets::column(0);
@@ -375,7 +375,7 @@ impl Pages {
         } else {
             "Not running"
         });
-        value.add_css_class("af-text-primary");
+        value.add_css_class("ob-text-primary");
         text.append(&value);
         net.append(&text);
         self.sidebar_footer.append(&net);
@@ -388,10 +388,10 @@ impl Pages {
             me.append(&widgets::brand_mark(20));
             let text = widgets::column(0);
             let name = widgets::caption(&status.device_name);
-            name.add_css_class("af-text-primary");
+            name.add_css_class("ob-text-primary");
             text.append(&name);
             let fp = widgets::caption(&status.fingerprint_short);
-            fp.add_css_class("af-mono");
+            fp.add_css_class("ob-mono");
             text.append(&fp);
             me.append(&text);
             self.sidebar_footer.append(&me);
@@ -411,7 +411,7 @@ impl Pages {
         let (icon_name, class, text, detail) = if state.reachable() {
             (
                 "security-high-symbolic",
-                "af-status-connected",
+                "ob-status-connected",
                 "Secure connection",
                 "TLS 1.3 with ALPN omnibridge/1, mutually authenticated and pinned to the \
                  key you approved when pairing. Direct on your network — no relay, no cloud.",
@@ -419,7 +419,7 @@ impl Pages {
         } else {
             (
                 "security-low-symbolic",
-                "af-status-disconnected",
+                "ob-status-disconnected",
                 "Daemon not reachable",
                 "Start the OmniBridge daemon to connect to your devices.",
             )

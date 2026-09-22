@@ -79,26 +79,26 @@ impl Status {
     /// The AA-corrected text colour class.
     pub fn text_class(self) -> &'static str {
         match self {
-            Status::Connected => "af-status-connected",
-            Status::Available => "af-status-available",
-            Status::Connecting | Status::Transferring => "af-status-transferring",
-            Status::Success => "af-status-success",
-            Status::Stale => "af-status-stale",
-            Status::Warning => "af-status-warning",
-            Status::Error => "af-status-error",
-            Status::Revoked => "af-status-revoked",
-            Status::Disconnected => "af-status-disconnected",
+            Status::Connected => "ob-status-connected",
+            Status::Available => "ob-status-available",
+            Status::Connecting | Status::Transferring => "ob-status-transferring",
+            Status::Success => "ob-status-success",
+            Status::Stale => "ob-status-stale",
+            Status::Warning => "ob-status-warning",
+            Status::Error => "ob-status-error",
+            Status::Revoked => "ob-status-revoked",
+            Status::Disconnected => "ob-status-disconnected",
         }
     }
 
     /// The full-strength brand hue, for the dot only.
     pub fn dot_class(self) -> &'static str {
         match self {
-            Status::Connected | Status::Success => "af-dot-teal",
-            Status::Available | Status::Connecting | Status::Transferring => "af-dot-blue",
-            Status::Stale | Status::Warning => "af-dot-amber",
-            Status::Error | Status::Revoked => "af-dot-red",
-            Status::Disconnected => "af-dot-neutral",
+            Status::Connected | Status::Success => "ob-dot-cyan",
+            Status::Available | Status::Connecting | Status::Transferring => "ob-dot-blue",
+            Status::Stale | Status::Warning => "ob-dot-amber",
+            Status::Error | Status::Revoked => "ob-dot-red",
+            Status::Disconnected => "ob-dot-neutral",
         }
     }
 
@@ -125,7 +125,7 @@ pub fn card() -> gtk::Box {
         .orientation(gtk::Orientation::Vertical)
         .spacing(space::XS)
         .build();
-    b.add_css_class("af-card");
+    b.add_css_class("ob-card");
     b
 }
 
@@ -157,32 +157,32 @@ fn label(text: &str, classes: &[&str]) -> gtk::Label {
 }
 
 pub fn title(text: &str) -> gtk::Label {
-    label(text, &["af-title", "af-text-primary"])
+    label(text, &["ob-title", "ob-text-primary"])
 }
 
 pub fn heading(text: &str) -> gtk::Label {
-    label(text, &["af-heading", "af-text-primary"])
+    label(text, &["ob-heading", "ob-text-primary"])
 }
 
 pub fn subtitle(text: &str) -> gtk::Label {
-    label(text, &["af-subtitle", "af-text-primary"])
+    label(text, &["ob-subtitle", "ob-text-primary"])
 }
 
 pub fn body(text: &str) -> gtk::Label {
-    label(text, &["af-body", "af-text-primary"])
+    label(text, &["ob-body", "ob-text-primary"])
 }
 
 pub fn body_muted(text: &str) -> gtk::Label {
-    label(text, &["af-body", "af-text-secondary"])
+    label(text, &["ob-body", "ob-text-secondary"])
 }
 
 pub fn caption(text: &str) -> gtk::Label {
-    label(text, &["af-caption", "af-text-secondary"])
+    label(text, &["ob-caption", "ob-text-secondary"])
 }
 
 /// The small grey heading above a group. A real heading for assistive tech.
 pub fn section_label(text: &str) -> gtk::Label {
-    let l = label(text, &["af-label", "af-text-secondary"]);
+    let l = label(text, &["ob-label", "ob-text-secondary"]);
     l.set_accessible_role(gtk::AccessibleRole::Heading);
     l
 }
@@ -202,8 +202,8 @@ pub fn fingerprint(text: &str) -> gtk::Label {
         .wrap(true)
         .wrap_mode(gtk::pango::WrapMode::WordChar)
         .build();
-    l.add_css_class("af-mono");
-    l.add_css_class("af-text-primary");
+    l.add_css_class("ob-mono");
+    l.add_css_class("ob-text-primary");
     l.update_property(&[gtk::accessible::Property::Label(&format!(
         "Fingerprint {}",
         grouped.split_whitespace().collect::<Vec<_>>().join(", ")
@@ -236,7 +236,7 @@ pub fn status_badge(status: Status) -> gtk::Box {
     b.set_valign(gtk::Align::Center);
 
     let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    dot.add_css_class("af-dot");
+    dot.add_css_class("ob-dot");
     dot.add_css_class(status.dot_class());
     dot.set_valign(gtk::Align::Center);
     b.append(&dot);
@@ -246,7 +246,7 @@ pub fn status_badge(status: Status) -> gtk::Box {
     icon.add_css_class(status.text_class());
     b.append(&icon);
 
-    let text = label(status.label(), &["af-label", status.text_class()]);
+    let text = label(status.label(), &["ob-label", status.text_class()]);
     text.set_wrap(false);
     text.set_ellipsize(gtk::pango::EllipsizeMode::End);
     b.append(&text);
@@ -260,7 +260,7 @@ pub fn status_badge(status: Status) -> gtk::Box {
 /// An icon on a soft tint of its own accent.
 pub fn icon_tile(icon_name: &str, tone: &str) -> gtk::Box {
     let b = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    b.add_css_class("af-tile");
+    b.add_css_class("ob-tile");
     b.add_css_class(tone);
     b.set_halign(gtk::Align::Center);
     b.set_valign(gtk::Align::Center);
@@ -287,7 +287,7 @@ pub fn cta_button(text: &str, icon_name: Option<&str>) -> gtk::Button {
     }
     content.append(&gtk::Label::new(Some(text)));
     let b = gtk::Button::builder().child(&content).build();
-    b.add_css_class("af-cta");
+    b.add_css_class("ob-cta");
     b
 }
 
@@ -301,14 +301,14 @@ pub fn secondary_button(text: &str, icon_name: Option<&str>) -> gtk::Button {
     }
     content.append(&gtk::Label::new(Some(text)));
     let b = gtk::Button::builder().child(&content).build();
-    b.add_css_class("af-secondary");
+    b.add_css_class("ob-secondary");
     b
 }
 
 /// An action that takes something away. Outlined, red, kept apart.
 pub fn destructive_button(text: &str) -> gtk::Button {
     let b = gtk::Button::with_label(text);
-    b.add_css_class("af-destructive");
+    b.add_css_class("ob-destructive");
     b
 }
 
@@ -319,9 +319,9 @@ pub fn destructive_button(text: &str) -> gtk::Button {
 /// the volume only when the message needs acting on.
 pub fn security_notice(title_text: &str, body_text: &str, caution: bool) -> gtk::Box {
     let b = row(space::SM);
-    b.add_css_class("af-notice");
+    b.add_css_class("ob-notice");
     if caution {
-        b.add_css_class("af-notice-caution");
+        b.add_css_class("ob-notice-caution");
     }
     let icon = gtk::Image::from_icon_name(if caution {
         "dialog-warning-symbolic"
@@ -331,14 +331,14 @@ pub fn security_notice(title_text: &str, body_text: &str, caution: bool) -> gtk:
     icon.set_pixel_size(20);
     icon.set_valign(gtk::Align::Start);
     icon.add_css_class(if caution {
-        "af-status-warning"
+        "ob-status-warning"
     } else {
-        "af-status-available"
+        "ob-status-available"
     });
     b.append(&icon);
 
     let text = column(space::XXS);
-    text.append(&label(title_text, &["af-label", "af-text-primary"]));
+    text.append(&label(title_text, &["ob-label", "ob-text-primary"]));
     if !body_text.is_empty() {
         text.append(&caption(body_text));
     }
@@ -359,11 +359,15 @@ pub fn empty_state(title_text: &str, subtitle_text: &str) -> gtk::Box {
     b.set_margin_top(space::XXL);
     b.set_margin_bottom(space::XXL);
 
-    let art = gtk::Picture::for_resource("/io/github/yurisismotto/omnibridge/omnibridge-mark.svg");
-    art.set_size_request(200, 155);
-    art.set_can_shrink(true);
-    // Decoration: the text below says the same thing.
-    art.set_accessible_role(gtk::AccessibleRole::Presentation);
+    // Capped, not merely requested — see `brand_mark`. An empty state is
+    // mostly whitespace, so this is exactly the place a Picture would have
+    // grown to fill the page.
+    //
+    // 96 rather than the 200 the old size request asked for: the mark is the
+    // illustration here, not the subject. At 200 it out-weighed the sentence
+    // underneath it that actually says what is going on, which is the
+    // "logo as decoration" failure the brand guidance warns about.
+    let art = brand_mark(96);
     b.append(&art);
 
     let t = heading(title_text);
@@ -392,18 +396,40 @@ pub fn empty_state(title_text: &str, subtitle_text: &str) -> gtk::Box {
 /// under a pixel and a half and greyed out, which is why a thicker variant had
 /// to exist. The OmniBridge mark is filled, so it has no stroke to thin: it
 /// scales down as area, not as line weight, and one file answers for every size.
-pub fn brand_mark(size: i32) -> gtk::Picture {
-    let p = gtk::Picture::for_resource("/io/github/yurisismotto/omnibridge/omnibridge-mark.svg");
-    p.set_size_request(size, size);
-    p.set_can_shrink(true);
-    p.set_accessible_role(gtk::AccessibleRole::Presentation);
-    p
+/// The icon for "open Settings", everywhere it appears.
+///
+/// A constant rather than a convention, because this action shows up in three
+/// unrelated places — the sidebar row, the Quick Panel header button and the
+/// Quick Panel's own "Open OmniBridge Settings" — and a fourth caller
+/// reaching for a different name is how one action ends up with two
+/// metaphors.
+///
+/// It is the cog. Adwaita's `preferences-system-symbolic`, which this used to
+/// be, draws a hammer crossed with a wrench: it reads as "tools", and it left
+/// the desktop showing crossed tools for the concept Android draws as a gear.
+pub const SETTINGS_ICON: &str = "applications-system-symbolic";
+
+pub fn brand_mark(size: i32) -> gtk::Image {
+    let i = gtk::Image::from_resource("/io/github/yurisismotto/omnibridge/omnibridge-mark.svg");
+    // `set_pixel_size` is a *cap*; `set_size_request` — which this used to
+    // use, on a `GtkPicture` — is a floor. A Picture given a 22px size
+    // request and a header bar with room to spare takes the room: the mark
+    // rendered about 350px tall across the top of the window, which is how a
+    // 22 in the source became a logo the size of the content beneath it.
+    i.set_pixel_size(size);
+    i.set_halign(gtk::Align::Center);
+    i.set_valign(gtk::Align::Center);
+    i.set_hexpand(false);
+    i.set_vexpand(false);
+    // Decoration: every surface that shows the mark also says the name.
+    i.set_accessible_role(gtk::AccessibleRole::Presentation);
+    i
 }
 
 /// Transfer progress in the brand gradient.
 pub fn progress(fraction: Option<f64>) -> gtk::ProgressBar {
     let p = gtk::ProgressBar::new();
-    p.add_css_class("af-progress");
+    p.add_css_class("ob-progress");
     match fraction {
         Some(f) => p.set_fraction(f.clamp(0.0, 1.0)),
         // A zero-byte file has no meaningful percentage; pulsing says
@@ -416,7 +442,7 @@ pub fn progress(fraction: Option<f64>) -> gtk::ProgressBar {
 /// A horizontal hairline.
 pub fn separator() -> gtk::Separator {
     let s = gtk::Separator::new(gtk::Orientation::Horizontal);
-    s.add_css_class("af-separator");
+    s.add_css_class("ob-separator");
     s
 }
 

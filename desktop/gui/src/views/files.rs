@@ -63,9 +63,9 @@ fn transfer_card(t: &TransferReport, active: bool) -> gtk::Box {
             "folder-download-symbolic"
         },
         if sending {
-            "af-tile-blue"
+            "ob-tile-blue"
         } else {
-            "af-tile-violet"
+            "ob-tile-violet"
         },
     );
     top.append(&tile);
@@ -88,7 +88,7 @@ fn transfer_card(t: &TransferReport, active: bool) -> gtk::Box {
 
     if let Some(pct) = t.percentage {
         let l = widgets::caption(&format!("{pct}%"));
-        l.add_css_class("af-status-transferring");
+        l.add_css_class("ob-status-transferring");
         l.set_valign(gtk::Align::Center);
         top.append(&l);
     }
