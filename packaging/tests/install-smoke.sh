@@ -6,6 +6,10 @@
 #   ./install-smoke.sh --image registry.fedoraproject.org/fedora:44 out/*.rpm
 #   ./install-smoke.sh --image docker.io/library/debian:trixie out/*.deb
 #
+#   # gate L17 — install an older build, then upgrade to the new one
+#   ./install-smoke.sh --image registry.fedoraproject.org/fedora:44 \
+#       --upgrade-from old/omnibridge-0.1.0-2.rpm  new/*.rpm
+#
 # The container is always disposable: it is created for the run and removed
 # afterwards, so there is nothing to keep and no flag to keep it with.
 #
@@ -42,10 +46,14 @@ set -euo pipefail
 
 IMAGE=""
 PACKAGES=()
+UPGRADE_FROM=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --image) IMAGE="${2:?--image needs a container image}"; shift 2 ;;
+        # Gate L17: install these first, then upgrade to the packages given as
+        # positional arguments. The trust store is compared across the upgrade.
+        --upgrade-from) UPGRADE_FROM+=("${2:?--upgrade-from needs a file}"); shift 2 ;;
         -h|--help) sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
         *) PACKAGES+=("$1"); shift ;;
@@ -75,6 +83,12 @@ STAGE="$(mktemp -d "${TMPDIR:-/tmp}/omnibridge-smoke.XXXXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/pkgs"
 cp -- "${PACKAGES[@]}" "$STAGE/pkgs/"
+if [ "${#UPGRADE_FROM[@]}" -gt 0 ]; then
+    mkdir -p "$STAGE/old"
+    cp -- "${UPGRADE_FROM[@]}" "$STAGE/old/"
+    printf '    upgrading from:\n'
+    for p in "${UPGRADE_FROM[@]}"; do printf '      %s\n' "$(basename "$p")"; done
+fi
 
 printf '\n==> %s packages, %s\n' "$FORMAT" "$IMAGE"
 for p in "${PACKAGES[@]}"; do printf '    %s\n' "$(basename "$p")"; done
@@ -94,6 +108,7 @@ group() { printf '\n%s\n' "$*"; }
 
 FORMAT="$1"
 APP_ID="io.github.yurisismotto.omnibridge"
+UPGRADE_REQUESTED="${UPGRADE_REQUESTED:-0}"
 
 # --------------------------------------------------------------------------
 group "Install"
@@ -221,6 +236,95 @@ else
 fi
 
 # --------------------------------------------------------------------------
+group "Upgrade (gate L17, L13)"
+# --------------------------------------------------------------------------
+# `ls /old/*.rpm /old/*.deb` exits non-zero whenever only ONE format is
+# present, because the other pattern stays literal and `ls` reports it missing.
+# That made this whole group skip silently while the suite still reported
+# "25 passed, 0 failed" — a requested gate that ran nothing and said nothing.
+# The two patterns are counted separately now, and `UPGRADE_REQUESTED` below
+# turns a skip into a failure rather than a silence.
+old_count=0
+if [ -d /old ]; then
+    old_count=$(find /old -maxdepth 1 \( -name '*.rpm' -o -name '*.deb' \) | wc -l)
+fi
+if [ "${UPGRADE_REQUESTED:-0}" = 1 ] && [ "$old_count" -eq 0 ]; then
+    fail "L17: an upgrade was requested but no older package reached the container"
+fi
+if [ "$old_count" -gt 0 ]; then
+    # The fixture has to exist before the upgrade, or the comparison after it
+    # is between two absences.
+    id -u upgrader >/dev/null 2>&1 || useradd -m upgrader
+    UDATA=/home/upgrader/.local/share/omnibridge
+    mkdir -p "$UDATA"
+    printf 'PRETEND-PRIVATE-KEY-UPGRADE\n' > "$UDATA/identity.key"
+    printf '{"schema":1,"peers":["SM-X620"]}\n' > "$UDATA/state.json"
+    chmod 700 "$UDATA"; chmod 600 "$UDATA/identity.key" "$UDATA/state.json"
+    chown -R upgrader:upgrader /home/upgrader/.local
+    before_up="$(sha256sum $UDATA/identity.key $UDATA/state.json; stat -c '%a %U %n' $UDATA $UDATA/identity.key $UDATA/state.json)"
+    if printf '%s' "$before_up" | grep -q identity.key; then
+        pass "L17: trust-store fixture planted before the upgrade"
+    else
+        fail "L17: the fixture is missing; the comparison below would prove nothing"
+    fi
+
+    # Downgrade to the old build first. `dnf` refuses a plain install of an
+    # older NEVRA over a newer one, which is why this is `downgrade`/`install
+    # --allow-downgrade` rather than `install`.
+    if [ "$FORMAT" = rpm ]; then
+        dnf -y remove omnibridge omnibridge-gui > /dev/null 2>&1 || true
+        dnf -y install /old/*.rpm > /tmp/old.log 2>&1
+    else
+        apt-get -y remove omnibridge omnibridge-gui > /dev/null 2>&1 || true
+        apt-get -y install /old/*.deb > /tmp/old.log 2>&1
+    fi
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        old_ver="$(rpm -q --qf '%{VERSION}-%{RELEASE}' omnibridge 2>/dev/null \
+                   || dpkg-query -W -f '${Version}' omnibridge 2>/dev/null)"
+        pass "L17: the older build installed ($old_ver)"
+    else
+        fail "L17: could not install the older build"
+        tail -15 /tmp/old.log | sed 's/^/        /'
+    fi
+
+    if [ "$FORMAT" = rpm ]; then
+        dnf -y upgrade /pkgs/*.rpm > /tmp/upgrade.log 2>&1
+    else
+        apt-get -y install /pkgs/*.deb > /tmp/upgrade.log 2>&1
+    fi
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        new_ver="$(rpm -q --qf '%{VERSION}-%{RELEASE}' omnibridge 2>/dev/null \
+                   || dpkg-query -W -f '${Version}' omnibridge 2>/dev/null)"
+        pass "L17: upgraded to $new_ver (exit 0)"
+    else
+        fail "L17: the upgrade failed (exit $rc)"
+        tail -20 /tmp/upgrade.log | sed 's/^/        /'
+    fi
+    if grep -qiE 'scriptlet (failed|error)' /tmp/upgrade.log; then
+        fail "L17: a scriptlet reported a problem during the upgrade"
+    else
+        pass "L17: no scriptlet error during the upgrade"
+    fi
+
+    after_up="$(sha256sum $UDATA/identity.key $UDATA/state.json 2>/dev/null; stat -c '%a %U %n' $UDATA $UDATA/identity.key $UDATA/state.json 2>/dev/null)"
+    if [ "$before_up" = "$after_up" ]; then
+        pass "L13/L17: the trust store is byte- and mode-identical across the upgrade"
+    else
+        fail "L13/L17: THE UPGRADE CHANGED THE USER'S TRUST STORE"
+        diff <(printf '%s\n' "$before_up") <(printf '%s\n' "$after_up") | sed 's/^/        /'
+    fi
+
+    # §4.9: an upgrade cannot restart a running user daemon, and must not try.
+    if pgrep -x omnibridged >/dev/null 2>&1; then
+        fail "L17: the upgrade started or left a daemon running"
+    else
+        pass "L17: the upgrade started no daemon (a root scriptlet cannot reach a user's service manager)"
+    fi
+fi
+
+# --------------------------------------------------------------------------
 group "User state survives remove and reinstall (audit §11, R6, gates L21-L23)"
 # --------------------------------------------------------------------------
 # A user who has paired a phone. The bytes are fake; the paths, modes and the
@@ -336,7 +440,9 @@ printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 INSIDE
 
 podman run --rm \
+    -e UPGRADE_REQUESTED="$([ "${#UPGRADE_FROM[@]}" -gt 0 ] && echo 1 || echo 0)" \
     -v "$STAGE/pkgs:/pkgs:ro,z" \
+    ${UPGRADE_FROM:+-v "$STAGE/old:/old:ro,z"} \
     -v "$STAGE/inside.sh:/inside.sh:ro,z" \
     -e DEBIAN_FRONTEND=noninteractive \
     "$IMAGE" bash /inside.sh "$FORMAT"
