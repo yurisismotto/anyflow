@@ -31,14 +31,20 @@ use common::TestBus;
 use omnibridge_linux::activation::{self, Activation, SessionBus};
 use omnibridge_linux::tray::model::DESKTOP_APP_ID;
 
-/// The premise, measured rather than assumed.
+/// The premise the self-heal rests on, measured rather than assumed.
 ///
-/// A service file written into a directory the running bus did not scan is
-/// invisible to it, and one `ReloadConfig` makes it visible. If this ever
-/// fails, the self-heal is solving a problem that no longer exists — which
-/// would be excellent news and should be read here first.
+/// One `ReloadConfig` makes a service file that is on disk activatable. That
+/// is the only bus behaviour OmniBridge depends on, and it is what this
+/// asserts. If a bus ever stopped honouring it, the self-heal would be solving
+/// a problem it can no longer solve, and this is where that shows up.
+///
+/// Whether the bus *also* notices the file unaided is recorded and **not**
+/// asserted: `dbus-daemon` watches its service directories with inotify and
+/// `dbus-broker` does not, and even on one implementation it is a race between
+/// the bus's rescan and this test. Asserting either side of that race is what
+/// made this flaky inside `mock`.
 #[tokio::test]
-async fn a_running_bus_does_not_see_a_service_file_it_never_scanned() {
+async fn one_reload_makes_an_installed_service_file_activatable() {
     let bus = TestBus::start_with_service_dir();
     let connection = bus.connect().await;
     let proxy = zbus::fdo::DBusProxy::new(&connection)
@@ -55,13 +61,11 @@ async fn a_running_bus_does_not_see_a_service_file_it_never_scanned() {
 
     bus.install_service_file(DESKTOP_APP_ID);
 
-    assert!(
-        !activatable(&proxy)
-            .await
-            .iter()
-            .any(|n| n == DESKTOP_APP_ID),
-        "the bus noticed the file on its own; the self-heal's premise no longer holds"
-    );
+    let noticed_unaided = activatable(&proxy)
+        .await
+        .iter()
+        .any(|n| n == DESKTOP_APP_ID);
+    println!("the bus noticed the new service file unaided: {noticed_unaided}");
 
     proxy.reload_config().await.expect("ReloadConfig");
 
@@ -124,6 +128,39 @@ async fn activatable(proxy: &zbus::fdo::DBusProxy<'_>) -> Vec<String> {
         .collect()
 }
 
+/// Runs the self-heal and insists only on what is true of every bus.
+///
+/// **Do not assert `HealedByReload` against a real bus.** Which path is taken
+/// depends on whether that implementation's own directory watching notices the
+/// file before OmniBridge asks — `dbus-daemon` watches with inotify,
+/// `dbus-broker` does not, and even on one implementation it is a race between
+/// the bus's rescan and this call. The *policy* — reload exactly once, and only
+/// when the name is missing — is asserted exhaustively and deterministically by
+/// the unit tests in `activation.rs` against a counting fake, which is where a
+/// claim about a code path belongs.
+///
+/// What a real bus can be held to is the outcome: the name ends up activatable,
+/// and the self-heal never claims a repair it did not make.
+async fn heal_and_expect_activatable(connection: &zbus::Connection) -> Activation {
+    let outcome = activation::self_heal_on(connection).await;
+    assert!(
+        matches!(
+            outcome,
+            Activation::AlreadyActivatable | Activation::HealedByReload
+        ),
+        "a bus with the file installed should end up activatable, got {outcome:?}"
+    );
+    let proxy = zbus::fdo::DBusProxy::new(connection).await.expect("proxy");
+    assert!(
+        activatable(&proxy)
+            .await
+            .iter()
+            .any(|n| n == DESKTOP_APP_ID),
+        "the outcome said {outcome:?} but the name is not activatable"
+    );
+    outcome
+}
+
 /// The case the feature exists for: install into a live session, healed.
 #[tokio::test]
 async fn a_package_installed_into_a_live_session_is_healed() {
@@ -133,15 +170,8 @@ async fn a_package_installed_into_a_live_session_is_healed() {
     // The package manager has just run, as root, and written the file.
     bus.install_service_file(DESKTOP_APP_ID);
 
-    let outcome = activation::self_heal_on(&connection).await;
-    assert_eq!(outcome, Activation::HealedByReload);
-
-    // And it is genuinely activatable afterwards, not merely reported so.
-    let proxy = zbus::fdo::DBusProxy::new(&connection).await.expect("proxy");
-    assert!(activatable(&proxy)
-        .await
-        .iter()
-        .any(|n| n == DESKTOP_APP_ID));
+    let outcome = heal_and_expect_activatable(&connection).await;
+    println!("install-into-a-live-session reported: {outcome:?}");
 }
 
 /// The second daemon start, and every one after it: nothing to do.
@@ -151,13 +181,13 @@ async fn a_session_that_already_knows_the_name_is_left_alone() {
     bus.install_service_file(DESKTOP_APP_ID);
     let connection = bus.connect().await;
 
-    // Heal once.
-    assert_eq!(
-        activation::self_heal_on(&connection).await,
-        Activation::HealedByReload
-    );
-    // Every subsequent start finds it already there and does nothing. The unit
-    // tests assert that "nothing" means no ReloadConfig call at all.
+    // Get to the activatable state, however this bus chooses to get there.
+    heal_and_expect_activatable(&connection).await;
+
+    // This is the actual claim of the test: once the name is known, every
+    // later daemon start finds it and does nothing. "Nothing" meaning no
+    // ReloadConfig at all is asserted by the unit tests against a counting
+    // fake; here it is the reported outcome that matters.
     for _ in 0..3 {
         assert_eq!(
             activation::self_heal_on(&connection).await,
@@ -212,10 +242,7 @@ async fn the_real_name_is_found_even_beside_a_near_miss() {
     bus.install_service_file(&format!("{DESKTOP_APP_ID}.Devel"));
     bus.install_service_file(DESKTOP_APP_ID);
 
-    assert_eq!(
-        activation::self_heal_on(&connection).await,
-        Activation::HealedByReload
-    );
+    heal_and_expect_activatable(&connection).await;
 }
 
 /// A bus that has gone away is a normal state, not an error.
@@ -249,9 +276,13 @@ async fn the_production_adapter_reuses_the_connection_it_is_given() {
     let control = SessionBus::on(&connection)
         .await
         .expect("building the adapter on an existing connection");
-    assert_eq!(
-        activation::ensure_activatable(&control, DESKTOP_APP_ID).await,
-        Activation::HealedByReload
+    let outcome = activation::ensure_activatable(&control, DESKTOP_APP_ID).await;
+    assert!(
+        matches!(
+            outcome,
+            Activation::AlreadyActivatable | Activation::HealedByReload
+        ),
+        "the adapter did not reach an activatable state: {outcome:?}"
     );
 }
 

@@ -12,7 +12,7 @@ Name:           omnibridge
 # build a bundle when the two disagree, and packaging/tests/packaging-checks.sh
 # asserts it without building anything. Audit §13.1.
 Version:        0.1.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Local-first device continuity between Android and Fedora
 
 License:        Apache-2.0
@@ -92,6 +92,27 @@ BuildRequires:  systemd-rpm-macros
 # real UPower or a real clipboard are #[ignore]d and stay skipped here.
 BuildRequires:  dbus-daemon
 
+# --- desktop metadata validators -------------------------------------------
+#
+# %%install runs desktop/gui/tools/install-desktop-metadata.sh, which validates
+# both metadata files before installing them and skips the check when the
+# validator is absent. Declaring these turns that from a courtesy into a build
+# gate: a malformed .desktop entry is ignored by the session silently, and a
+# malformed metainfo file is dropped by the AppStream cache builder without a
+# word. Both failures look exactly like the file never having been installed.
+#
+#   desktop-file-utils   desktop-file-validate
+#   libappstream-glib    appstream-util validate-relax
+BuildRequires:  desktop-file-utils
+BuildRequires:  libappstream-glib
+
+# --- firewalld directory layout --------------------------------------------
+#
+# Owns /usr/lib/firewalld/services so the service definition lands somewhere a
+# package is responsible for. It is the directory layout only: it does not pull
+# firewalld itself, and it enables nothing.
+BuildRequires:  firewalld-filesystem
+
 # No protobuf-compiler: the build uses protox, a pure-Rust protobuf compiler.
 # See docs/adr/ADR-0004-protocol-buffers.md.
 
@@ -99,15 +120,43 @@ BuildRequires:  dbus-daemon
 # this machine's own battery, which is the normal case on a desktop tower.
 Recommends:     upower
 
+# Wayland clipboard. Suggests, and deliberately not a versioned Requires: the
+# daemon reports honestly what its backend can do and works without it.
+#
+# No version constraint, and that is measured rather than lazy. `wl-copy
+# --sensitive` is absent from wl-clipboard 2.2.1 on Debian and Ubuntu but
+# present in Fedora's 2.2.1^git package — the same version string, different
+# code. A >= here would be false on one distribution or the other whichever
+# number was chosen. Audit R5.
+Suggests:       wl-clipboard
+
+# Directory ownership only, for the firewalld service definition in %%files.
+Requires:       firewalld-filesystem
+
 %description
 OmniBridge connects an Android phone to a Fedora workstation over the
 local network. It is local-first: there is no cloud service, no account and
 no telemetry. Devices authenticate each other with pinned public keys over
 TLS 1.3 after an explicit, human-confirmed pairing.
 
-This package provides the user-session daemon, the omnibridge command-line
-tool and the desktop application. The daemon runs unprivileged under
-systemd --user and never requires root.
+This package provides the user-session daemon and the omnibridge command-line
+tool. The daemon runs unprivileged under systemd --user and never requires
+root. The desktop application ships separately, as omnibridge-gui.
+
+%package gui
+Summary:        Desktop application for OmniBridge
+# The exact build. The GUI speaks the daemon's control socket, so a version
+# skew between the two is a protocol skew.
+Requires:       %{name} = %{version}-%{release}
+
+%description gui
+The OmniBridge desktop application: pairing, the device list, transfers, the
+Quick Panel and per-capability grants.
+
+It is not a resident process. It is started when a window is wanted — from the
+application menu, from the tray item the daemon publishes, or by the session
+bus through D-Bus activation — and it exits when the window is closed.
+The daemon remains the only long-lived OmniBridge process.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -138,16 +187,37 @@ cargo build --release --locked --offline \
 %install
 install -Dpm0755 desktop/target/release/omnibridged   %{buildroot}%{_bindir}/omnibridged
 install -Dpm0755 desktop/target/release/omnibridge    %{buildroot}%{_bindir}/omnibridge
-# The GUI was built by %%build and then discarded before this sprint (audit
-# P7). Installing the binary is the floor; the .desktop entry, the hicolor
-# icon, the D-Bus activation file and the omnibridge-gui subpackage split are
-# Phase 3 and are not done here.
 install -Dpm0755 desktop/target/release/omnibridge-gui %{buildroot}%{_bindir}/omnibridge-gui
+
 # One unit, two formats. packaging/common/ is the canonical location: the
 # Debian packaging installs this same file, so a hardening change cannot land
 # on one distribution and miss the other.
 install -Dpm0644 packaging/common/omnibridged.service \
     %{buildroot}%{_userunitdir}/omnibridged.service
+
+# firewalld service definition: TCP 55432, installed and never enabled. No
+# scriptlet in this spec runs firewall-cmd, on install or on removal. mDNS is
+# deliberately not redeclared — firewalld ships its own, correctly scoped.
+# Audit §9.2.
+install -Dpm0644 packaging/fedora/omnibridge-firewalld.xml \
+    %{buildroot}%{_prefix}/lib/firewalld/services/omnibridge.xml
+
+# The desktop entry, the hicolor icon, the D-Bus activation entry and the
+# AppStream metadata, all from the one script a development install uses. That
+# is why this calls it instead of repeating four install lines: the .desktop
+# file, the icon and the metainfo are installed *verbatim*, so the
+# application's identity cannot differ between a development machine and a
+# package. Only the D-Bus service file is generated, and only its Exec= line,
+# from --prefix. Audit §10, R9.
+#
+# --destdir keeps every write inside the buildroot, and the script's own
+# refresh_caches() returns early when it is set, so no build machine's desktop
+# database or icon cache is touched. On the installed machine the
+# distribution's own rpm file triggers do that, which is measured in audit
+# §4.4 and is why this package ships no scriptlet for either.
+desktop/gui/tools/install-desktop-metadata.sh \
+    --prefix %{_prefix} --destdir %{buildroot}
+
 
 %check
 export CARGO_HOME=%{_builddir}/%{name}-cargo-home
@@ -156,14 +226,68 @@ cargo test --release --locked --offline
 
 %files
 %license LICENSE
-%doc README.md docs/
+# README.md and nothing else. 0.1.0-2 carried `%%doc README.md docs/`, which put
+# 178 files and 19 MB of engineering evidence — audits, certifications,
+# research, sprint reports — into every install, presented as user
+# documentation. It also shipped mock buildroot paths inside a packaged file,
+# which rpmlint reports as an error and is right to. Audit §12.1 and R10.
+%doc README.md
 %{_bindir}/omnibridged
 %{_bindir}/omnibridge
-%{_bindir}/omnibridge-gui
 %{_userunitdir}/omnibridged.service
+# The icon belongs to the CORE package, not the GUI. omnibridged owns the
+# StatusNotifierItem and its icon name is the application id, which a shell
+# resolves out of hicolor — not out of the GUI's compiled-in GResource. If the
+# icon shipped only with omnibridge-gui, a core-only install would draw a grey
+# square on KDE. Audit §10.
+%{_datadir}/icons/hicolor/scalable/apps/io.github.yurisismotto.omnibridge.svg
+%{_prefix}/lib/firewalld/services/omnibridge.xml
 
+%files gui
+%license LICENSE
+%{_bindir}/omnibridge-gui
+%{_datadir}/applications/io.github.yurisismotto.omnibridge.desktop
+%{_datadir}/dbus-1/services/io.github.yurisismotto.omnibridge.service
+%{_datadir}/metainfo/io.github.yurisismotto.omnibridge.metainfo.xml
+
+# --- systemd user lifecycle -------------------------------------------------
+#
+# The unit is a *user* unit, so these are the --user variants, never the system
+# ones. What they do here, from Fedora 44's own preset files rather than from
+# memory:
+#
+#   %%systemd_user_post    runs `systemctl --global preset`, which consults
+#                         /usr/lib/systemd/user-preset/. Fedora 44 ships
+#                         90-default-user.preset and 99-default-disable.preset
+#                         and neither names omnibridged.service, so the preset
+#                         leaves it DISABLED. That is the intended outcome, not
+#                         an accident: a global enable would raise a LAN
+#                         listener for every account on the machine, including
+#                         service accounts that will never pair anything, and
+#                         the daemon does nothing useful before a device is
+#                         paired. Calling the macro is still right — it is what
+#                         makes %%preun disable cleanly. Audit §4.3.
+#
+#   %%systemd_user_preun   disables the unit for users who enabled it, on real
+#                         removal only; a no-op on upgrade.
+#
+#   %%systemd_user_postun  records that unit files changed.
+#
+# None of them can restart a running daemon: a root scriptlet has no route to a
+# user's service manager. That is inherent to user units and is documented in
+# packaging/common/README.md rather than worked around.
+#
+# There is deliberately NO scriptlet for the desktop database, the icon cache
+# or the session bus. The first two are handled by the distribution's own rpm
+# file triggers (measured, audit §4.4). The third cannot be done from root at
+# all, which is why omnibridged repairs its own activation from inside the
+# user's session instead (audit §8.2).
+#
+# And no firewall-cmd, on any path.
 %post
+%systemd_user_post omnibridged.service
 cat <<'EOF'
+
 OmniBridge installed. To start it for your user:
 
     systemctl --user enable --now omnibridged.service
@@ -173,10 +297,48 @@ Then pair your phone:
 
     omnibridge pair
 
-The daemon runs as your user and never needs root.
+The daemon runs as your user and never needs root. If your firewall zone is not
+the Fedora Workstation default, see the Firewall section of
+/usr/share/doc/omnibridge/README.md.
 EOF
 
+%preun
+%systemd_user_preun omnibridged.service
+
+# On %%postun, and why rpmlint's `empty-%%postun` is correct and ignored:
+#
+# MEASURED on Fedora 44 by evaluating the macro — %%systemd_user_postun expands
+# to nothing at all, so the scriptlet below really is empty.
+#
+# The alternative is %%systemd_user_postun_with_restart, which is NOT empty: it
+# marks user units for restart, and that would restart a user's running daemon
+# on every upgrade. Audit §4.9 settles the opposite as deliberate behaviour and
+# gate L17 asserts it — "record that the running daemon was NOT restarted".
+# Taking the non-empty macro to quiet a linter would reverse a documented
+# decision and break a gate.
+#
+# Calling the documented triple also keeps this correct if a future
+# systemd-rpm-macros gives the macro a body. The explanation lives out here
+# rather than inside the scriptlet because text inside it is scanned by
+# rpmlint, and naming the package manager in a comment is reported as a
+# dangerous command.
+%postun
+%systemd_user_postun omnibridged.service
+
+
 %changelog
+* Tue Sep 22 2026 Yuri Converso Sismotto <yuri.sismotto@gmail.com> - 0.1.0-3
+- Split the desktop application into an omnibridge-gui subpackage.
+- Install the desktop entry, the hicolor icon, the D-Bus activation entry and
+  AppStream metadata, all from desktop/gui/tools/install-desktop-metadata.sh so
+  a package and a development install produce identical files.
+- Add the systemd --user lifecycle macros. The unit still ships disabled.
+- Ship a firewalld service definition for TCP 55432, installed and never
+  enabled; mDNS is deliberately not redeclared.
+- Trim %%doc from the whole docs/ tree to README.md. 0.1.0-2 shipped 178 files
+  of engineering evidence as user documentation, one of which carried mock
+  buildroot paths into the package.
+- Suggests: wl-clipboard, with no version constraint.
 * Tue Sep 22 2026 Yuri Converso Sismotto <yuri.sismotto@gmail.com> - 0.1.0-2
 - Make the package buildable. 0.1.0-1 never produced an artifact: it compiled
   omnibridge-gui with no GTK or libadwaita build dependency declared (B1),

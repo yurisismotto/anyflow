@@ -64,6 +64,10 @@ DESKTOP_SRC="$TOOLS/../data/$APP_ID.desktop"
 # script was given. See the file's own header for why `DBusActivatable=true`
 # is not enough on its own.
 DBUS_SRC="$TOOLS/../data/$APP_ID.service.in"
+# AppStream metadata. Installed verbatim like the desktop entry: nothing in it
+# is derived from the prefix, and it is what makes OmniBridge visible in GNOME
+# Software and KDE Discover. Readiness audit §10, Q3.
+METAINFO_SRC="$TOOLS/../data/$APP_ID.metainfo.xml"
 # The canonical mark, from the one place the brand documentation points at.
 # build.rs derives the compiled-in copy from this same file.
 ICON_SRC="$TOOLS/../../../docs/design/assets/omnibridge-app-icon.svg"
@@ -97,9 +101,11 @@ esac
 apps_dir="$destdir$prefix/share/applications"
 dbus_dir="$destdir$prefix/share/dbus-1/services"
 icon_dir="$destdir$prefix/share/icons/hicolor/scalable/apps"
+metainfo_dir="$destdir$prefix/share/metainfo"
 desktop_dst="$apps_dir/$APP_ID.desktop"
 icon_dst="$icon_dir/$APP_ID.svg"
 dbus_dst="$dbus_dir/$APP_ID.service"
+metainfo_dst="$metainfo_dir/$APP_ID.metainfo.xml"
 bin_dst="$destdir$prefix/bin/omnibridge-gui"
 
 # Refreshing the caches is for a live session only. In DESTDIR mode the
@@ -134,7 +140,7 @@ refresh_caches() {
 
 if [ "$uninstall" -eq 1 ]; then
     removed=0
-    for f in "$desktop_dst" "$icon_dst" "$dbus_dst"; do
+    for f in "$desktop_dst" "$icon_dst" "$dbus_dst" "$metainfo_dst"; do
         if [ -e "$f" ]; then rm -f -- "$f"; printf 'removed  %s\n' "$f"; removed=1; fi
     done
     # Only ever a symlink this script made, never a real binary someone put
@@ -148,6 +154,7 @@ fi
 [ -f "$DESKTOP_SRC" ] || die "desktop entry not found at $DESKTOP_SRC"
 [ -f "$ICON_SRC" ] || die "application icon not found at $ICON_SRC"
 [ -f "$DBUS_SRC" ] || die "D-Bus activation template not found at $DBUS_SRC"
+[ -f "$METAINFO_SRC" ] || die "AppStream metadata not found at $METAINFO_SRC"
 
 # Validated before it is installed rather than after: a malformed entry is
 # ignored by the session silently, which looks exactly like this script not
@@ -156,15 +163,28 @@ if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$DESKTOP_SRC" || die "the desktop entry does not validate"
 fi
 
-install -d -- "$apps_dir" "$icon_dir" "$dbus_dir"
+# Same reasoning for the catalogue entry: a metainfo file that does not parse
+# is dropped by the AppStream cache builder without a word, which is
+# indistinguishable from this script never having run. `validate-relax` rather
+# than `validate` because OmniBridge ships no screenshots, which the strict
+# validator reports and which is a recorded debt, not a defect to be papered
+# over with a placeholder image.
+if command -v appstream-util >/dev/null 2>&1; then
+    appstream-util validate-relax --nonet "$METAINFO_SRC" >/dev/null \
+        || die "the AppStream metadata does not validate"
+fi
+
+install -d -- "$apps_dir" "$icon_dir" "$dbus_dir" "$metainfo_dir"
 # Verbatim, both of them. Rewriting either here is what would let a
 # development run and a package disagree about the application's identity.
 # The service file below is the one that is generated, and it is generated
 # from a prefix rather than from anything about this checkout.
 install -m 0644 -- "$DESKTOP_SRC" "$desktop_dst"
 install -m 0644 -- "$ICON_SRC" "$icon_dst"
+install -m 0644 -- "$METAINFO_SRC" "$metainfo_dst"
 printf 'installed %s\n' "$desktop_dst"
 printf 'installed %s\n' "$icon_dst"
+printf 'installed %s\n' "$metainfo_dst"
 
 # The one file that cannot be installed verbatim. `@BINDIR@` becomes the bin
 # directory of the prefix that was selected — never `$destdir`, which is a

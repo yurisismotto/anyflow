@@ -1253,3 +1253,85 @@ pub fn sha256_of(bytes: &[u8]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     Sha256::digest(bytes).into()
 }
+
+// ---------------------------------------------------------------------------
+// notifications.v1 fixtures.
+//
+// They live here rather than in `notifications.rs` because two test binaries
+// need them: that one, and `notification_log_privacy.rs`. The second exists
+// because a `tracing` capture cannot safely share a process with tests that do
+// not install a subscriber — see its header for the mechanism.
+// ---------------------------------------------------------------------------
+
+pub const ORIGIN: &str = "0123456789abcdef0123456789abcdef";
+pub fn id_bytes(seed: u16) -> Vec<u8> {
+    let mut out = vec![0u8; 16];
+    out[0] = (seed >> 8) as u8;
+    out[1] = (seed & 0xff) as u8;
+    out
+}
+pub fn content_hash(seed: u16, body: &str) -> Vec<u8> {
+    let mut out = vec![0u8; 32];
+    out[0] = (seed & 0xff) as u8;
+    for (index, byte) in body.bytes().enumerate() {
+        out[1 + index % 31] ^= byte;
+    }
+    out
+}
+pub fn upsert(seed: u16, title: &str, body: &str) -> clip_pb::NotificationUpsert {
+    clip_pb::NotificationUpsert {
+        notification_id: id_bytes(seed),
+        origin_device_id: ORIGIN.to_string(),
+        app_id: "com.example.chat".to_string(),
+        app_label: "Chat".to_string(),
+        title: title.to_string(),
+        body: body.to_string(),
+        posted_at_unix_ms: 1_700_000_000_000,
+        importance: clip_pb::NotificationImportance::Normal as i32,
+        privacy: clip_pb::NotificationPrivacy::Private as i32,
+        category: clip_pb::NotificationCategory::Message as i32,
+        content_hash: content_hash(seed, body),
+        ..clip_pb::NotificationUpsert::default()
+    }
+}
+pub fn roles_body(
+    roles: &[clip_pb::NotificationRole],
+    epoch: u32,
+) -> clip_pb::notification_control::Body {
+    clip_pb::notification_control::Body::Roles(clip_pb::NotificationRoles {
+        roles: roles.iter().map(|r| *r as i32).collect(),
+        epoch,
+    })
+}
+
+/// What the **desktop** negotiated for this peer's live session.
+///
+/// Deliberately not `ConnectedSession::negotiated_capabilities`, which is the
+/// dialling side's view and is the plain intersection of the two advertised
+/// sets. The grant filter lives on the answering side — it is the desktop that
+/// decides what this peer is allowed to do — so the desktop's vector is the
+/// one every test here is about. Reading the client's instead would have made
+/// the whole suite pass against no fix at all.
+/// How long the fixtures below wait for the daemon to catch up.
+///
+/// Private to this module: each test binary keeps its own `TIMEOUT` for its
+/// own assertions, and a `pub` one here would silently shadow-compete with
+/// them through `use common::*`.
+const FIXTURE_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub async fn desktop_negotiated(
+    server: &TestServer,
+    peer: omnibridge_core::Fingerprint,
+) -> Vec<String> {
+    let deadline = std::time::Instant::now() + FIXTURE_TIMEOUT;
+    loop {
+        if let Some(handle) = server.state.session_for(&peer).await {
+            return handle.negotiated_capabilities().to_vec();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the desktop never registered a session for this peer"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  firewalld service definition for OmniBridge. Installed as
+  /usr/lib/firewalld/services/omnibridge.xml by the `omnibridge` core package.
+
+  Shipped, never enabled
+  ======================
+  Installing this file adds nothing to any zone. It gives the user a service
+  named "omnibridge" to add with `firewall-cmd`, instead of a port number to
+  remember; the exact command is in packaging/fedora/README.md, because an XML
+  comment cannot contain a long option without breaking the parser. No
+  scriptlet in this package runs `firewall-cmd`, on install,
+  upgrade or removal: a package that silently opens a port is doing something
+  the user did not ask for, and one that silently closes a port on uninstall is
+  removing a rule the user added by hand. Readiness audit §9.2 and §9.4.
+
+  On Fedora Workstation nothing needs doing at all — the default zone already
+  permits both flows (MEASURED, audit §4.6). This file is for `public`,
+  `FedoraServer`, and anyone who has tightened their own zone.
+
+  TCP 55432 only
+  ==============
+  mDNS is deliberately absent. firewalld already ships `mdns.xml`, correctly
+  scoped to 224.0.0.251 and ff02::fb; redeclaring UDP 5353 here would be a
+  second definition to keep right and a broader rule than the stock one. The
+  description tells the user to enable firewalld's own service instead.
+
+  Nothing else is opened. No port range, no outbound rule, no forwarding.
+-->
+<service>
+  <short>OmniBridge</short>
+  <description>Local-first device continuity between this computer and your phone. Peer sessions arrive on TCP 55432. Discovery uses mDNS, which this service deliberately does not cover: enable firewalld's own "mdns" service for that.</description>
+  <port protocol="tcp" port="55432"/>
+</service>

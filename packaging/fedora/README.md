@@ -19,13 +19,101 @@ systemctl --user enable --now omnibridged.service
 
 ## RPM
 
-`omnibridge.spec` builds `omnibridged`, `omnibridge` and `omnibridge-gui`,
-installs all three and the user unit. `%check` runs the full test suite as
-part of the build, so a package that fails its own security tests does not
-get built.
+`omnibridge.spec` builds `omnibridged`, `omnibridge` and `omnibridge-gui` and
+produces **two** packages. `%check` runs the full test suite as part of the
+build, so a package that fails its own security tests does not get built.
 
 It does **not** need `protobuf-compiler` — the build compiles the schema with
 `protox` in pure Rust (ADR-0004).
+
+### What each package contains
+
+| `omnibridge` — core | |
+| --- | --- |
+| `/usr/bin/omnibridged` | the daemon |
+| `/usr/bin/omnibridge` | the CLI |
+| `/usr/lib/systemd/user/omnibridged.service` | the user unit, shipped **disabled** |
+| `/usr/share/icons/hicolor/scalable/apps/io.github.yurisismotto.omnibridge.svg` | the app icon |
+| `/usr/lib/firewalld/services/omnibridge.xml` | TCP 55432, installed and **not enabled** |
+| `/usr/share/doc/omnibridge/README.md` | this project's README, and nothing else |
+| `/usr/share/licenses/omnibridge/LICENSE` | |
+
+| `omnibridge-gui` — desktop application | |
+| --- | --- |
+| `/usr/bin/omnibridge-gui` | |
+| `/usr/share/applications/io.github.yurisismotto.omnibridge.desktop` | installed verbatim |
+| `/usr/share/dbus-1/services/io.github.yurisismotto.omnibridge.service` | `Exec=/usr/bin/omnibridge-gui --gapplication-service` |
+| `/usr/share/metainfo/io.github.yurisismotto.omnibridge.metainfo.xml` | GNOME Software / KDE Discover |
+
+`omnibridge-gui` requires `omnibridge = %{version}-%{release}` — the exact
+build, because the GUI speaks the daemon's control socket and a version skew
+between the two is a protocol skew.
+
+**The icon is in the core package, not the GUI.** `omnibridged` owns the
+StatusNotifierItem and its icon name is the application id, which a shell
+resolves out of `hicolor` rather than out of the GUI's compiled-in GResource.
+A core-only install would otherwise draw a grey square on KDE.
+
+**Four files, one installer.** The desktop entry, the icon, the D-Bus
+activation entry and the AppStream metadata all come from
+`desktop/gui/tools/install-desktop-metadata.sh`, which is also what a
+developer runs for a `~/.local` install. Three of the four are installed
+*verbatim*; only the D-Bus service file is generated, and only its `Exec=`
+line, from `--prefix`. That is what makes it impossible for a package and a
+development install to disagree about the application's identity.
+
+The package writes **no scriptlet** for the desktop database or the icon
+cache: Fedora's own rpm file triggers on `/usr/share/applications` and
+`/usr/share/icons/hicolor` already do both. It writes none for the session bus
+either, because root cannot reach a user's session bus — `omnibridged` repairs
+its own D-Bus activation from inside the session instead.
+
+### What the package does **not** contain
+
+`%doc` is `README.md` and nothing more. Release `0.1.0-2` shipped
+`%doc README.md docs/`, which put **178 files and 19 MB** of engineering
+evidence — audits, certifications, research and sprint reports — into every
+install and presented it as user documentation. It also shipped a document
+quoting `mock` buildroot paths, which `rpmlint` reports as an error and is
+right to. The evidence belongs in the repository, not on a user's disk.
+
+## Firewall
+
+The package installs a firewalld service definition and **never enables it**.
+No scriptlet in the spec runs `firewall-cmd`, on install, upgrade or removal:
+a package that silently opens a port is doing something the user did not ask
+for, and one that silently closes a port on removal is deleting a rule the
+user added by hand.
+
+**On Fedora Workstation nothing needs doing.** The default zone already
+permits both flows (MEASURED, audit §4.6). The rest of this section is for
+`public`, `FedoraServer`, and anyone who has tightened their own zone.
+
+```bash
+sudo firewall-cmd --permanent --add-service=omnibridge   # TCP 55432
+sudo firewall-cmd --permanent --add-service=mdns         # discovery
+sudo firewall-cmd --reload
+```
+
+Two services, because they are two different things and firewalld already
+ships the second. `mdns.xml` is correctly scoped to `224.0.0.251` and
+`ff02::fb`; redeclaring UDP 5353 in OmniBridge's own file would be a second
+definition to keep right and a broader rule than the stock one.
+
+Nothing else is opened. No port range, no outbound rule, no forwarding.
+
+### Removing it
+
+Package removal deletes `/usr/lib/firewalld/services/omnibridge.xml`. If you
+had added the service, firewalld keeps a permanent configuration naming a
+definition that no longer exists and warns about it. The package will not
+clean that up for you — removing a rule you added is the same violation as
+adding one you did not:
+
+```bash
+sudo firewall-cmd --permanent --remove-service=omnibridge
+sudo firewall-cmd --reload
+```
 
 ### The package is built from a source bundle, not from a checkout
 
@@ -179,12 +267,16 @@ script growing a reference to a user-state path.
 
 ### Not done yet
 
-This is the build foundation, not the finished package. Still open, and
-scheduled: the `omnibridge-gui` subpackage split, the `.desktop` entry, the
-hicolor icon and D-Bus activation file (all Phase 3, via
-`desktop/gui/tools/install-desktop-metadata.sh`, which already takes
-`--prefix` and `--destdir`); `%systemd_user_post`/`_preun`/`_postun`;
-firewalld metadata; and trimming `%doc` down from the whole of `docs/`.
-The unit file's own defects are **closed**: it moved to `packaging/common/`
-and gates S1, S2 and S3 passed against it —
-`docs/audits/packaging/PACKAGING-V1-SYSTEMD-UNIT.md`.
+| Open | Where it belongs |
+| --- | --- |
+| Man pages for `omnibridged` and `omnibridge` | Not in any phase of the plan. `--help` is complete for both; `rpmlint` reports the gap and the report records it. |
+| Screenshots in the AppStream metadata | Needs published images. The strict validator warns; `validate-relax` does not, and a placeholder would be worse than the gap. |
+| `-debuginfo` / `-debugsource` | Deliberately off for v1 — `%global debug_package %{nil}`, audit Q2. |
+| Debian and Ubuntu packages | Phase 4. They install the same unit from `packaging/common/`. |
+| Runtime certification on a real installed desktop | Phase 6. Gates L1–L26. |
+
+**Closed:** the unit's defects (`docs/audits/packaging/PACKAGING-V1-SYSTEMD-UNIT.md`,
+S1/S2/S3), the D-Bus activation self-heal
+(`docs/audits/packaging/PACKAGING-V1-DBUS-ACTIVATION.md`), and this sprint's
+desktop integration, lifecycle macros, firewall metadata and `%doc` trim
+(`docs/audits/packaging/PACKAGING-V1-FEDORA-INTEGRATION.md`).

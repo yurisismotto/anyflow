@@ -238,12 +238,20 @@ for required in \
     packaging/fedora/omnibridge.spec \
     packaging/common/omnibridged.service \
     packaging/fedora/cargo-vendor-config.toml \
+    packaging/fedora/omnibridge-firewalld.xml \
     protocol/proto \
     docs/design/assets/omnibridge-app-icon.svg \
+    desktop/gui/tools/install-desktop-metadata.sh \
+    desktop/gui/data/io.github.yurisismotto.omnibridge.desktop \
+    desktop/gui/data/io.github.yurisismotto.omnibridge.service.in \
+    desktop/gui/data/io.github.yurisismotto.omnibridge.metainfo.xml \
     LICENSE
 do
     [ -e "$STAGE/$required" ] || die "the bundle is missing $required"
 done
+[ -x "$STAGE/desktop/gui/tools/install-desktop-metadata.sh" ] || die \
+    "desktop/gui/tools/install-desktop-metadata.sh is not executable in the bundle; \
+%install runs it directly and rpmbuild would fail with Permission denied"
 note "required build inputs present"
 
 # --------------------------------------------------------------------------
