@@ -13,6 +13,37 @@
 
 ---
 
+> ## Superseded in part — 2026-09-22, `feature/release-peer-gates-closure-v1`
+>
+> The peer-gate results in **§4** and the outstanding work in **§7.1** were
+> superseded the same day by
+> [Release peer-gate closure v1](RELEASE-PEER-GATES-CLOSURE-V1.md), which ran
+> L12, L14, L15 and L16 on both Ubuntu guests and then **re-ran Debian 13**.
+> The original text below stands as written.
+>
+> Three claims made here did not survive re-measurement, and the reason in each
+> case is a harness defect this document could not have known about:
+>
+> * **§4.3 "L16 — notifications: CERTIFIED for mirroring"** rested on
+>   `mirrored now 3` — but §4's own captures show `3` both *before* and *after*
+>   the post, with the device reported `not connected`. `mirrored now` counts
+>   what is currently mirrored, not a running total. L16 is now certified on all
+>   three distributions against a cleared baseline and a `dbus-monitor` capture
+>   carrying the run's sentinels.
+> * **§4.2 "L15 — files: CERTIFIED guest → phone"** understated the result: the
+>   phone had not marked the file `Received` because the harness looked for the
+>   prompt on the wrong screen. L15 is now two-sided on all three.
+> * **§7.1's expected outcome for the Ubuntu guests** — "L14 PARTIAL, because
+>   both Ubuntu guests run GNOME with the same wl-clipboard 2.2.1, so L14 will
+>   classify identically" — is **wrong**. Both Ubuntu guests reach the Xwayland
+>   XFIXES fallback and report `auto-send supported on this session`; Debian 13
+>   does not. L14 is CERTIFIED on Ubuntu and PARTIAL only on Debian 13.
+>
+> **Finding F-2 (§4.4) is confirmed, not superseded**, and is now evidenced with
+> lock state read on both sides of the failing send.
+
+---
+
 ## 0. Executive summary
 
 Packaging v1 could not run eleven lifecycle gates. The
