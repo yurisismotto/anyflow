@@ -236,7 +236,7 @@ for required in \
     desktop/Cargo.toml \
     desktop/Cargo.lock \
     packaging/fedora/omnibridge.spec \
-    packaging/fedora/omnibridged.service \
+    packaging/common/omnibridged.service \
     packaging/fedora/cargo-vendor-config.toml \
     protocol/proto \
     docs/design/assets/omnibridge-app-icon.svg \

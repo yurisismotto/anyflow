@@ -2,61 +2,20 @@
 
 ## systemd user unit
 
-`omnibridged.service` runs the daemon in the user's session:
+The unit is **not** here. It is `packaging/common/omnibridged.service`, one
+file that the RPM and the Debian packaging both install, so a hardening change
+cannot land on one distribution and miss the other. `packaging/common/README.md`
+explains what it does and why each directive is there; `%install` copies it
+into `%{_userunitdir}`.
+
+The RPM ships it **disabled**. `systemctl --global preset` consults
+`/usr/lib/systemd/user-preset/`, Fedora 44 ships no line naming
+`omnibridged.service`, so the preset leaves it off — which is the intended
+outcome, not an accident (audit §4.3). The user turns it on:
 
 ```bash
 systemctl --user enable --now omnibridged.service
-journalctl --user -u omnibridged -f
 ```
-
-It is a **user** unit, not a system unit, and it must stay that way. The
-daemon's whole security posture assumes it runs as the user who owns the
-identity: the key file is 0600 in the user's `$XDG_DATA_HOME`, and the control
-socket lives in the user's `$XDG_RUNTIME_DIR`. Running it as root would
-achieve nothing and would put a network-facing parser in the wrong place.
-
-The unit applies the usual systemd hardening — `NoNewPrivileges`,
-`ProtectSystem=strict`, a syscall filter, and `RestrictAddressFamilies` limited
-to what a LAN daemon actually needs.
-
-### Lingering
-
-By default a user unit stops when the last session ends. To keep OmniBridge
-available while logged out:
-
-```bash
-loginctl enable-linger $USER
-```
-
-That is a deliberate choice, not a default: leaving a network service running
-after logout should be something the user opts into.
-
-### The unit still has open defects, and they are fixed in a different branch
-
-`omnibridged.service` as shipped here does **not** yet start on a fresh
-install. `docs/audits/packaging/PACKAGING-V1-READINESS-AUDIT.md` §4.2
-measured three things about
-it: there is no `RuntimeDirectory=`, so under `ProtectSystem=strict` the
-daemon cannot create `$XDG_RUNTIME_DIR/omnibridge` and has nowhere to bind
-its control socket; `ReadWritePaths=` names a path that does not exist yet
-and, without a `-` prefix, that refuses to start the unit; and
-`StateDirectory=` creates `~/.local/state/omnibridge`, which the daemon never
-opens.
-
-None of that is touched here, on purpose. The audit puts the unit fix in
-Phase 1 (§17) and in its own branch, `fix/systemd-user-unit-runtime-dir-v1`
-(§18 row 1), whose merge gates are S1, S2 and S3. This branch is §18 row 2 —
-the build. Rolling the unit into it would mean shipping an S1 decision
-without the S2/S3 measurements that are supposed to accompany it, and would
-make a packaging-build PR into a systemd-hardening review. The defects are
-not build-fatal: the unit is installed as data, so the RPM builds and the
-package file list is correct either way.
-
-Gate S1 has since been run and answered: the replacement grants
-`ReadWritePaths=%h/.local/share`, the parent rather than the leaf — the
-fallback the audit reserved in §7.2 for exactly the outcome that was measured.
-That decision is settled and waiting for its branch; `ProtectSystem=strict`
-and `ProtectHome=read-only` stay as they are.
 
 ## RPM
 
@@ -226,5 +185,6 @@ hicolor icon and D-Bus activation file (all Phase 3, via
 `desktop/gui/tools/install-desktop-metadata.sh`, which already takes
 `--prefix` and `--destdir`); `%systemd_user_post`/`_preun`/`_postun`;
 firewalld metadata; and trimming `%doc` down from the whole of `docs/`.
-The unit file's own defects are branch 1 of the audit's plan, not this one —
-see the note under **systemd user unit** above.
+The unit file's own defects are **closed**: it moved to `packaging/common/`
+and gates S1, S2 and S3 passed against it —
+`docs/audits/packaging/PACKAGING-V1-SYSTEMD-UNIT.md`.

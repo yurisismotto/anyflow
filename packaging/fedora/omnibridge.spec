@@ -143,7 +143,10 @@ install -Dpm0755 desktop/target/release/omnibridge    %{buildroot}%{_bindir}/omn
 # icon, the D-Bus activation file and the omnibridge-gui subpackage split are
 # Phase 3 and are not done here.
 install -Dpm0755 desktop/target/release/omnibridge-gui %{buildroot}%{_bindir}/omnibridge-gui
-install -Dpm0644 packaging/fedora/omnibridged.service \
+# One unit, two formats. packaging/common/ is the canonical location: the
+# Debian packaging installs this same file, so a hardening change cannot land
+# on one distribution and miss the other.
+install -Dpm0644 packaging/common/omnibridged.service \
     %{buildroot}%{_userunitdir}/omnibridged.service
 
 %check
