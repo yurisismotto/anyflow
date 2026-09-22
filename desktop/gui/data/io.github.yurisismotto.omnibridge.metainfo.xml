@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata for OmniBridge.
+
+  Why this file exists
+  ====================
+  Without it OmniBridge is invisible in GNOME Software and KDE Discover: both
+  build their catalogue from /usr/share/metainfo, not from .desktop entries.
+  Nothing about the product needs it — the application runs, launches and
+  activates identically whether or not it is here — which is why it is the one
+  file in the desktop-integration set that had to be *authored* rather than
+  derived. Readiness audit §10, open question Q3.
+
+  What is deliberately not here
+  =============================
+  <screenshots>. OmniBridge has no published screenshots, and a metainfo file
+  that pointed at URLs which do not resolve would make the catalogue entry
+  worse than no entry at all. `appstream-util validate-relax` accepts their
+  absence; the strict validator warns, and that warning is correct and is
+  recorded as a debt rather than silenced with a placeholder image.
+
+  <releases> carries the version from desktop/Cargo.toml. It is a literal for
+  the same reason the spec's Version: is — nothing reads TOML at this point in
+  the build — and packaging/tests/packaging-checks.sh asserts the two agree.
+-->
+<component type="desktop-application">
+  <id>io.github.yurisismotto.omnibridge</id>
+
+  <!-- The metadata's licence, not the program's. CC0 is what the AppStream
+       specification recommends so that distributors can redistribute the
+       catalogue entry without tracking a second set of terms. -->
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+
+  <name>OmniBridge</name>
+  <summary>Send files, clipboard and notifications between this computer and your phone</summary>
+
+  <description>
+    <p>
+      OmniBridge connects an Android phone to this computer over your own
+      local network. There is no cloud service, no account and no telemetry:
+      the two devices talk to each other directly, and to nothing else.
+    </p>
+    <p>
+      Devices authenticate each other with pinned public keys over TLS 1.3,
+      after a pairing you confirm by hand on both ends. A device that has been
+      discovered is not a device that is trusted, and each capability is
+      granted separately.
+    </p>
+    <p>What it does today:</p>
+    <ul>
+      <li>Send and receive files, either direction</li>
+      <li>Share the clipboard between the phone and the desktop</li>
+      <li>Mirror phone notifications to the desktop, and dismiss them from either side</li>
+      <li>Show the phone's battery level</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.yurisismotto.omnibridge.desktop</launchable>
+  <provides>
+    <binary>omnibridge-gui</binary>
+    <binary>omnibridge</binary>
+    <binary>omnibridged</binary>
+  </provides>
+
+  <url type="homepage">https://github.com/yurisismotto/omnibridge</url>
+  <url type="bugtracker">https://github.com/yurisismotto/omnibridge/issues</url>
+
+  <developer id="io.github.yurisismotto">
+    <name>Yuri Converso Sismotto</name>
+  </developer>
+
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+  </categories>
+
+  <keywords>
+    <keyword>phone</keyword>
+    <keyword>android</keyword>
+    <keyword>clipboard</keyword>
+    <keyword>transfer</keyword>
+    <keyword>notifications</keyword>
+  </keywords>
+
+  <!-- OARS. Every category is "none" and that is a statement about the
+       product, not a default that was left alone: OmniBridge has no chat, no
+       user-generated content it publishes, no advertising and no purchases.
+       It moves the user's own data between the user's own devices. -->
+  <content_rating type="oars-1.1"/>
+
+  <!-- Two things OmniBridge genuinely does that a catalogue should disclose. -->
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+
+  <releases>
+    <release version="0.1.0" date="2026-09-22">
+      <description>
+        <p>First packaged release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

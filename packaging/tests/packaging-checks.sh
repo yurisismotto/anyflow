@@ -23,13 +23,16 @@ SPEC="$ROOT/packaging/fedora/omnibridge.spec"
 VENDOR_CONFIG="$ROOT/packaging/fedora/cargo-vendor-config.toml"
 
 UNIT="$ROOT/packaging/common/omnibridged.service"
+FIREWALLD="$ROOT/packaging/fedora/omnibridge-firewalld.xml"
+GUI_DATA="$ROOT/desktop/gui/data"
+APP_ID="io.github.yurisismotto.omnibridge"
 
 BUNDLE_DIR=""
-RPM_FILE=""
+RPM_FILES=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --bundle) BUNDLE_DIR="${2:?--bundle needs a directory}"; shift 2 ;;
-        --rpm) RPM_FILE="${2:?--rpm needs a file}"; shift 2 ;;
+        --rpm) RPM_FILES+=("${2:?--rpm needs a file}"); shift 2 ;;
         -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
     esac
@@ -277,6 +280,170 @@ if [ -f "$UNIT" ]; then
 fi
 
 # --------------------------------------------------------------------------
+group "Desktop integration (audit §10; P4, P5, P7)"
+# --------------------------------------------------------------------------
+# One script installs the desktop entry, the icon, the D-Bus activation entry
+# and the AppStream metadata, so a package and a development install cannot
+# disagree about the application's identity (R9). The spec must call it rather
+# than repeat its four install lines.
+if grep -q 'install-desktop-metadata.sh' "$SPEC"; then
+    pass "the spec installs desktop metadata with the shared script"
+else
+    fail "the spec does not call install-desktop-metadata.sh (R9: identity can drift)"
+fi
+if grep -A2 'install-desktop-metadata\.sh' "$SPEC" | grep -q -- '--destdir'; then
+    pass "the metadata installer is given a --destdir"
+else
+    fail "the metadata installer may write outside the buildroot"
+fi
+
+# P5. `Exec` in a D-Bus service file must be absolute; the bus does not search
+# PATH. The template's placeholder is what makes that true after substitution,
+# and a template that lost it would install a relative Exec.
+dbus_template="$GUI_DATA/$APP_ID.service.in"
+if grep -qE '^Exec=@BINDIR@/omnibridge-gui' "$dbus_template"; then
+    pass "P5: the D-Bus template's Exec is built from @BINDIR@"
+else
+    fail "P5: $dbus_template does not derive Exec from @BINDIR@"
+fi
+if grep -qE '^Name='"$APP_ID"'$' "$dbus_template"; then
+    pass "the D-Bus template declares the application id verbatim"
+else
+    fail "the D-Bus template's Name= is not $APP_ID"
+fi
+
+# Q3. AppStream metadata exists and agrees with the workspace version. Without
+# it OmniBridge is invisible in GNOME Software and KDE Discover.
+metainfo="$GUI_DATA/$APP_ID.metainfo.xml"
+if [ -f "$metainfo" ]; then
+    pass "Q3: AppStream metadata is present"
+    meta_version="$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' "$metainfo" | head -1)"
+    if [ "$meta_version" = "$workspace_version" ]; then
+        pass "the metainfo release $meta_version matches the workspace version"
+    else
+        fail "the metainfo says ${meta_version:-<none>}, the workspace says $workspace_version"
+    fi
+else
+    fail "Q3: no AppStream metadata at $metainfo"
+fi
+
+# The distribution owns these two caches through its own file triggers
+# (MEASURED, audit §4.4). A scriptlet here would be a second, worse copy.
+for forbidden_scriptlet in update-desktop-database gtk-update-icon-cache; do
+    if grep -qE "^[^#]*$forbidden_scriptlet" "$SPEC"; then
+        fail "the spec runs $forbidden_scriptlet; the distro's file triggers already do"
+    else
+        pass "no $forbidden_scriptlet scriptlet (the distro's file trigger owns it)"
+    fi
+done
+
+# --------------------------------------------------------------------------
+group "Every shipped XML parses"
+# --------------------------------------------------------------------------
+# Cheap, and not theoretical: the first draft of both files below used '--' as
+# a comment underline, which is illegal inside an XML comment and made them
+# unparseable. A malformed metainfo file is dropped by the AppStream cache
+# builder in silence, and a malformed firewalld service is rejected at load.
+for xml in "$FIREWALLD" "$metainfo" ; do
+    [ -f "$xml" ] || continue
+    if python3 -c 'import sys,xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' "$xml" 2>/dev/null; then
+        pass "parses: ${xml#"$ROOT"/}"
+    else
+        fail "does not parse as XML: ${xml#"$ROOT"/}"
+    fi
+done
+
+# --------------------------------------------------------------------------
+group "Firewall: shipped, never enabled (audit §9)"
+# --------------------------------------------------------------------------
+if grep -q 'firewalld/services/omnibridge.xml' "$SPEC"; then
+    pass "the core package installs a firewalld service definition"
+else
+    fail "no firewalld service definition is installed"
+fi
+# The whole design in one assertion: a package that runs firewall-cmd is
+# opening or closing a port the user did not ask it to.
+if grep -nE '^[^#]*firewall-cmd' "$SPEC" > "$SCRATCH/fw" 2>/dev/null && [ -s "$SCRATCH/fw" ]; then
+    fail "the spec runs firewall-cmd outside a comment"
+    sed 's/^/        /' "$SCRATCH/fw"
+else
+    pass "no scriptlet runs firewall-cmd, on any path"
+fi
+if [ -f "$FIREWALLD" ]; then
+    # Parsed, not grepped. The file's own comment explains why UDP 5353 is
+    # absent, and a grep over the raw text reads that explanation as a
+    # declaration — which is exactly the false positive this replaced.
+    python3 - "$FIREWALLD" > "$SCRATCH/fw-ports" <<'PYEOF'
+import sys, xml.dom.minidom
+doc = xml.dom.minidom.parse(sys.argv[1])
+for el in doc.getElementsByTagName("port"):
+    print(f'{el.getAttribute("protocol")}/{el.getAttribute("port")}')
+PYEOF
+    declared="$(tr '\n' ' ' < "$SCRATCH/fw-ports" | sed 's/ $//')"
+    if [ "$declared" = "tcp/55432" ]; then
+        pass "the firewalld service declares exactly tcp/55432 and nothing else"
+    else
+        fail "the firewalld service declares '$declared'; OmniBridge needs exactly tcp/55432"
+    fi
+    if grep -q '^udp/5353$' "$SCRATCH/fw-ports"; then
+        fail "the firewalld service redeclares mDNS; firewalld ships its own, correctly scoped"
+    else
+        pass "mDNS is not redeclared (firewalld's own mdns service covers it)"
+    fi
+fi
+
+# --------------------------------------------------------------------------
+group "systemd user lifecycle (audit §7.3, §4.3)"
+# --------------------------------------------------------------------------
+for macro in systemd_user_post systemd_user_preun systemd_user_postun; do
+    if grep -qE "^%$macro omnibridged\.service" "$SPEC"; then
+        pass "%$macro is called"
+    else
+        fail "%$macro is missing; the unit will not be handled on install or removal"
+    fi
+done
+# R7. `systemctl --global enable` would raise a LAN listener for every account
+# on the machine. The preset leaves it disabled and that is the decision.
+if grep -qE '^[^#]*systemctl --global enable' "$SPEC"; then
+    fail "the spec globally enables the unit (R7)"
+else
+    pass "the unit is not globally enabled"
+fi
+
+# --------------------------------------------------------------------------
+group "%doc is documentation, not the evidence tree (audit R10)"
+# --------------------------------------------------------------------------
+doc_line="$(grep -E '^%doc ' "$SPEC" || true)"
+if [ -z "$doc_line" ]; then
+    fail "the spec ships no %doc at all"
+elif printf '%s' "$doc_line" | grep -qE '(^|[[:space:]])docs/?($|[[:space:]])'; then
+    fail "%doc ships the docs/ tree: $doc_line"
+else
+    pass "%doc is $doc_line"
+fi
+
+# --------------------------------------------------------------------------
+group "Subpackage split (audit §12)"
+# --------------------------------------------------------------------------
+if grep -q '^%package gui' "$SPEC"; then
+    pass "omnibridge-gui is its own subpackage"
+else
+    fail "the GUI is not split out"
+fi
+if grep -qE '^Requires:[[:space:]]*%\{name\} = %\{version\}-%\{release\}' "$SPEC"; then
+    pass "omnibridge-gui requires the exact core build"
+else
+    fail "omnibridge-gui does not pin the core package's exact version-release"
+fi
+if grep -qE '^Suggests:[[:space:]]*wl-clipboard$' "$SPEC"; then
+    pass "R5: Suggests wl-clipboard, with no version constraint"
+elif grep -qE '^Suggests:[[:space:]]*wl-clipboard' "$SPEC"; then
+    fail "R5: wl-clipboard carries a version constraint, which is false on one distro or the other"
+else
+    fail "wl-clipboard is not suggested"
+fi
+
+# --------------------------------------------------------------------------
 group "No maintainer script touches user state (audit R6)"
 # --------------------------------------------------------------------------
 # state.json and identity.key are the trust store. A scriptlet that removed
@@ -317,6 +484,11 @@ if [ -n "$src_tarball" ]; then
         packaging/fedora/omnibridge.spec \
         packaging/fedora/cargo-vendor-config.toml \
         packaging/common/omnibridged.service \
+        packaging/fedora/omnibridge-firewalld.xml \
+        desktop/gui/tools/install-desktop-metadata.sh \
+        desktop/gui/data/io.github.yurisismotto.omnibridge.desktop \
+        desktop/gui/data/io.github.yurisismotto.omnibridge.service.in \
+        desktop/gui/data/io.github.yurisismotto.omnibridge.metainfo.xml \
         docs/design/assets/omnibridge-app-icon.svg \
         docs/audits/linux-compat/LINUX-UBUNTU-DEBIAN-COMPAT-U2.md
     do
@@ -359,30 +531,111 @@ fi
 fi
 
 # --------------------------------------------------------------------------
-if [ -n "$RPM_FILE" ]; then
-group "Built package: $(basename "$RPM_FILE")"
+if [ "${#RPM_FILES[@]}" -gt 0 ]; then
+group "Built packages"
 # --------------------------------------------------------------------------
-if command -v rpm >/dev/null; then
-    rpm -qpl "$RPM_FILE" 2>/dev/null > "$SCRATCH/rpm.list"
-    for bin in omnibridged omnibridge omnibridge-gui; do
-        if grep -qE "/usr/bin/$bin$" "$SCRATCH/rpm.list"; then
-            pass "package contains /usr/bin/$bin"
+if ! command -v rpm >/dev/null; then
+    fail "rpm is not installed; cannot inspect the built packages"
+else
+    # One listing per package, plus a combined one. R8: the exact APP_ID paths
+    # are asserted, because packaging drifting from the application id installs
+    # a differently-named icon and every desktop draws a grey square.
+    : > "$SCRATCH/all.list"
+    core_list=""
+    gui_list=""
+    for rpm_file in "${RPM_FILES[@]}"; do
+        name="$(rpm -qp --qf '%{NAME}' "$rpm_file" 2>/dev/null || basename "$rpm_file")"
+        listing="$SCRATCH/$name.list"
+        rpm -qpl "$rpm_file" 2>/dev/null > "$listing"
+        cat "$listing" >> "$SCRATCH/all.list"
+        pass "read $name ($(wc -l < "$listing") files)"
+        case "$name" in
+            omnibridge-gui) gui_list="$listing" ;;
+            omnibridge)     core_list="$listing" ;;
+        esac
+    done
+
+    has() { grep -qxF "$2" "$1"; }
+
+    if [ -n "$core_list" ]; then
+        for path in \
+            /usr/bin/omnibridged \
+            /usr/bin/omnibridge \
+            /usr/lib/systemd/user/omnibridged.service \
+            "/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg" \
+            /usr/lib/firewalld/services/omnibridge.xml
+        do
+            if has "$core_list" "$path"; then
+                pass "core: $path"
+            else
+                fail "core package is missing $path"
+            fi
+        done
+        # The GUI binary moved out. If it is still here, the split did not
+        # happen and the two packages both own it.
+        if has "$core_list" /usr/bin/omnibridge-gui; then
+            fail "core package still contains /usr/bin/omnibridge-gui"
         else
-            fail "package is missing /usr/bin/$bin"
+            pass "core: the GUI binary is not here (it is in omnibridge-gui)"
+        fi
+        # R10. The evidence tree must not be in the package.
+        if grep -q '^/usr/share/doc/omnibridge/docs' "$core_list"; then
+            fail "R10: the docs/ evidence tree is in the package ($(grep -c '^/usr/share/doc/omnibridge/docs' "$core_list") files)"
+        else
+            pass "R10: no docs/ tree in the package"
+        fi
+        if has "$core_list" /usr/share/doc/omnibridge/README.md; then
+            pass "core: README.md is shipped"
+        else
+            fail "core package ships no README.md"
+        fi
+    fi
+
+    if [ -n "$gui_list" ]; then
+        for path in \
+            /usr/bin/omnibridge-gui \
+            "/usr/share/applications/$APP_ID.desktop" \
+            "/usr/share/dbus-1/services/$APP_ID.service" \
+            "/usr/share/metainfo/$APP_ID.metainfo.xml"
+        do
+            if has "$gui_list" "$path"; then
+                pass "gui: $path"
+            else
+                fail "omnibridge-gui is missing $path"
+            fi
+        done
+    fi
+
+    # P5, against the built package rather than the template: the bus does not
+    # search PATH, so a relative Exec here is a launcher that never starts.
+    for rpm_file in "${RPM_FILES[@]}"; do
+        if rpm -qpl "$rpm_file" 2>/dev/null | grep -q "dbus-1/services/$APP_ID.service"; then
+            exec_line="$(rpm2cpio "$rpm_file" 2>/dev/null \
+                | cpio -i --to-stdout "./usr/share/dbus-1/services/$APP_ID.service" 2>/dev/null \
+                | grep '^Exec=' || true)"
+            case "$exec_line" in
+                "Exec=/usr/bin/omnibridge-gui --gapplication-service")
+                    pass "P5: the packaged D-Bus Exec is the absolute installed path" ;;
+                Exec=/*)
+                    fail "P5: unexpected absolute Exec: $exec_line" ;;
+                *)
+                    fail "P5: the packaged D-Bus Exec is not absolute: ${exec_line:-<none>}" ;;
+            esac
         fi
     done
-    if grep -qE 'systemd/user/omnibridged\.service$' "$SCRATCH/rpm.list"; then
-        pass "the user unit landed in a real systemd user directory"
+
+    # Audit §12.3: no package may own a path under a user's home.
+    if grep -qE '^(/home|/root|/var/home)' "$SCRATCH/all.list"; then
+        fail "a package owns a path under a home directory"
+        grep -E '^(/home|/root|/var/home)' "$SCRATCH/all.list" | sed 's/^/        /'
     else
-        fail "omnibridged.service is not under a systemd user directory"
+        pass "no package owns anything under a home directory"
     fi
-    if grep -q '%{_userunitdir}' "$SCRATCH/rpm.list"; then
-        fail "an unexpanded %{_userunitdir} is in the package (B2 regression)"
+    if grep -q '%{_' "$SCRATCH/all.list"; then
+        fail "an unexpanded rpm macro is in a package (B2 regression)"
     else
-        pass "no unexpanded rpm macro in the file list"
+        pass "no unexpanded rpm macro in any file list"
     fi
-else
-    fail "rpm is not installed; cannot inspect $RPM_FILE"
 fi
 fi
 
