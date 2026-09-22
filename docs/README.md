@@ -50,6 +50,7 @@ docs/
 ├── audits/
 │   ├── linux-compat/           Ubuntu / Debian compatibility, U0 → U2 — see its README
 │   ├── packaging/              Linux packaging readiness, build foundation, systemd unit — see its README
+│   ├── release/                Release Readiness v1 — baseline, signing foundation, harness hardening
 │   └── rebrand/                remaining AnyFlow occurrences after the rename
 ├── certification/
 │   ├── foundation/             Wave 0 / POC-CORE-04 gates — see its README
