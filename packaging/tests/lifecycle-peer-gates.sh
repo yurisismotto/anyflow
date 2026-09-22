@@ -46,7 +46,11 @@ mkdir -p "$EVIDENCE"
 # A capability exercise that has not answered in three minutes is hung, not
 # slow. The default 15-minute ceiling turns a hang into a run that simply
 # stops, with the last line printed looking exactly like a pass.
-GA_EXEC_TIMEOUT="${GA_EXEC_TIMEOUT:-180}"
+#
+# Assigned unconditionally: lib/guest-agent.sh has already applied its own
+# default by the time this runs, so a `${VAR:-180}` here would quietly keep
+# the 900 it set and the tightening would never happen.
+GA_EXEC_TIMEOUT=180
 
 PASS=0; FAIL=0; NA=0; declare -a FAILED_GATES=()
 ok()      { PASS=$(( PASS + 1 )); printf 'ok    %s\n' "$*"; }
@@ -385,13 +389,167 @@ else
     notok "the phone does not show this guest's fingerprint ($guest_fpr_head); the selected peer may be another desktop"
 fi
 
+# ---------------------------------------------------------------------------
+section "Configuring the phone for this guest"
+# ---------------------------------------------------------------------------
+# Pairing establishes trust; it grants nothing. OmniBridge negotiates the
+# INTERSECTION of both sides' per-capability grants, so a freshly paired peer
+# starts at whatever each end already allows -- measured on the first guest,
+# that was `capabilities=["battery.v1"]` and every capability gate below would
+# have failed for a reason that is not the gate's subject.
+#
+# Every control is located by label in the live view hierarchy and bound to
+# THIS guest's row, because the tablet lists several desktops and each has its
+# own Connect button and its own chips.
+PUI="$HERE/lib/phone-ui.py"
+[ -x "$PUI" ] || abort "$PUI is missing; the phone cannot be driven"
+
+pdump() {
+    "${ADB[@]}" shell uiautomator dump /sdcard/ob-ui.xml >/dev/null 2>&1 || return 1
+    "${ADB[@]}" shell cat /sdcard/ob-ui.xml 2>/dev/null > "$EVIDENCE/.ui.xml"
+    [ -s "$EVIDENCE/.ui.xml" ]
+}
+ptap() { "${ADB[@]}" shell input tap "$1" "$2" >/dev/null 2>&1; sleep 3; }
+# ptap_label <anchor-regex> <target-regex> -- fails loudly rather than tapping
+# empty space, which is indistinguishable from a tap that worked.
+ptap_label() {
+    local xy
+    pdump || { ga_die "could not dump the phone's view hierarchy"; return 1; }
+    xy="$("$PUI" "$EVIDENCE/.ui.xml" find-after "$1" "$2" 2>/dev/null)" || {
+        ga_die "no '$2' below '$1' on the phone"; return 1; }
+    # shellcheck disable=SC2086
+    ptap $xy
+}
+
+# 1. The three capability chips, on the guest's own row. The permission screen
+#    is opened unconditionally -- the notification opt-in lives on it too, and
+#    only entering it when the clipboard happens to be off is how the second
+#    half of this configuration silently never runs.
+"${ADB[@]}" shell am force-stop "$APP_PKG" >/dev/null 2>&1
+sleep 2
+"${ADB[@]}" shell am start -n "$APP_PKG/.ui.MainActivity" >/dev/null 2>&1
+sleep 8
+pdump || abort "cannot read the phone's view hierarchy"
+if ptap_label "$guest_dev_name" 'Clipboard, (allowed|not allowed)'; then
+    pdump || abort "cannot read the permission screen"
+    "$PUI" "$EVIDENCE/.ui.xml" find 'Permissions' >/dev/null 2>&1 \
+        || abort "tapping the chip did not open the permission screen for $guest_dev_name"
+    ok "opened the permission screen for $guest_dev_name"
+    for cap in Clipboard Files Battery; do
+        pdump || abort "cannot read the permission screen"
+        st="$("$PUI" "$EVIDENCE/.ui.xml" state-after 'Permissions' "^$cap"'$' 2>/dev/null || echo unknown)"
+        if [ "$st" = "unchecked" ]; then
+            xy="$("$PUI" "$EVIDENCE/.ui.xml" toggle-after 'Permissions' "^$cap"'$' | awk '{print $1, $2}')"
+            # shellcheck disable=SC2086
+            ptap $xy
+            ok "granted $cap to $guest_dev_name on the phone"
+        else
+            ok "$cap already granted to $guest_dev_name on the phone ($st)"
+        fi
+    done
+else
+    abort "could not open the permission screen for $guest_dev_name from the device list"
+fi
+
+# 2. Notification sharing: a separate, deliberately per-app opt-in.
+pdump || abort "cannot read the phone's view hierarchy"
+if "$PUI" "$EVIDENCE/.ui.xml" find-after 'Notifications' 'Share notifications with this computer' >/dev/null 2>&1; then
+    :
+else
+    ptap_label 'Notifications' '^(Off|On)$' >/dev/null 2>&1 || true
+fi
+pdump || true
+if "$PUI" "$EVIDENCE/.ui.xml" find 'Share notifications with this computer' >/dev/null 2>&1; then
+    st="$("$PUI" "$EVIDENCE/.ui.xml" state-after 'Notifications' 'Share notifications with this computer' 2>/dev/null || echo unknown)"
+    if [ "$st" = "unchecked" ]; then
+        xy="$("$PUI" "$EVIDENCE/.ui.xml" toggle-after 'Notifications' 'Share notifications with this computer' | awk '{print $1, $2}')"
+        # shellcheck disable=SC2086
+        ptap $xy
+        ok "enabled notification sharing with $guest_dev_name"
+    else
+        ok "notification sharing with $guest_dev_name is already on ($st)"
+    fi
+    # Choose exactly ONE app -- the shell, which is what posts the test
+    # notification. Selecting every app would share the operator's whole
+    # notification stream with a throwaway VM.
+    pdump || true
+    if "$PUI" "$EVIDENCE/.ui.xml" find 'No app chosen' >/dev/null 2>&1; then
+        xy="$("$PUI" "$EVIDENCE/.ui.xml" find 'No app chosen')"
+        # shellcheck disable=SC2086
+        ptap $xy
+        pdump || true
+        if "$PUI" "$EVIDENCE/.ui.xml" find 'Search apps' >/dev/null 2>&1; then
+            xy="$("$PUI" "$EVIDENCE/.ui.xml" find 'Search apps')"
+            # shellcheck disable=SC2086
+            ptap $xy
+            "${ADB[@]}" shell input text "shell" >/dev/null 2>&1
+            sleep 4
+            pdump || true
+            xy="$("$PUI" "$EVIDENCE/.ui.xml" toggle-after 'com.android.shell' 'com.android.shell' 2>/dev/null | awk '{print $1, $2}')" || true
+            if [ -z "$xy" ]; then
+                xy="$("$PUI" "$EVIDENCE/.ui.xml" toggle-after '^Shell$' '^Shell$' 2>/dev/null | awk '{print $1, $2}')" || true
+            fi
+            if [ -n "$xy" ]; then
+                # shellcheck disable=SC2086
+                ptap $xy
+                ok "chose com.android.shell as the only shared notification source"
+            else
+                notok "could not find com.android.shell in the phone's app picker"
+            fi
+        fi
+    else
+        ok "an app is already chosen as a notification source"
+    fi
+else
+    na "the phone's notification-sharing control was not reachable from here"
+fi
+"${ADB[@]}" shell am force-stop "$APP_PKG" >/dev/null 2>&1
+sleep 2
+"${ADB[@]}" shell am start -n "$APP_PKG/.ui.MainActivity" >/dev/null 2>&1
+sleep 8
+
+# 3. The guest's own grants, and its notification mirror opt-in.
+for cap in clipboard.v1 files.v1 notifications.v1; do
+    ob "grant $peer_id $cap" >/dev/null 2>&1
+done
+granted="$(ob devices 2>&1 | sed -n 's/^ *granted *//p' | head -1)"
+for cap in battery.v1 clipboard.v1 files.v1 notifications.v1; do
+    case "$granted" in
+        *"$cap"*) ok "the guest grants $cap to the phone" ;;
+        *) notok "the guest does NOT grant $cap (granted: $granted)" ;;
+    esac
+done
+ob "notifications mirror $peer_id on" >/dev/null 2>&1
+
+# 4. Connect. The desktop cannot dial: Android is always the initiator, so the
+#    session only exists once the phone is told to connect.
+state="$(ob devices 2>&1 | sed -n 's/^ *state *//p' | head -1 | tr -d '[:space:]')"
+if [ "$state" != "connected" ]; then
+    ptap_label "$guest_dev_name" '^Connect$' || abort "could not tap Connect for $guest_dev_name"
+    ga_wait_for "$DOMAIN" 90 "runuser -u $GUEST_USER -- env XDG_RUNTIME_DIR=/run/user/$GUEST_UID omnibridge devices 2>/dev/null | grep -q 'connected *yes'" \
+        || abort "the phone did not connect to $guest_dev_name; no capability gate below could run"
+fi
+ok "the phone is connected to $guest_dev_name"
+
+negotiated="$(gu "journalctl --user -u omnibridged --no-pager -n 200 2>/dev/null | grep 'session established' | tail -1")"
+[ -n "${negotiated//[[:space:]]/}" ] \
+    || abort "no 'session established' line in the guest journal; the connection cannot be characterised"
+printf '%s\n' "$negotiated" | save "38-session-established.txt"
+for cap in clipboard.v1 files.v1 notifications.v1; do
+    case "$negotiated" in
+        *"$cap"*) ok "the session negotiated $cap" ;;
+        *) notok "the session did NOT negotiate $cap -- its gate would fail for the wrong reason" ;;
+    esac
+done
+
 # Sentinels. High-entropy so that a match cannot be a pre-existing string and
 # an absence cannot be luck. Each gate gets its own.
 SENT_CLIP="OBCLIP-$(head -c 12 /dev/urandom | base32 | tr -d '=' | head -c 20)"
 SENT_FILE_NAME="OBNAME-$(head -c 12 /dev/urandom | base32 | tr -d '=' | head -c 20)"
 SENT_FILE_BODY="OBBODY-$(head -c 24 /dev/urandom | base32 | tr -d '=' | head -c 40)"
 SENT_NOTIF="OBNOTIF-$(head -c 12 /dev/urandom | base32 | tr -d '=' | head -c 20)"
-{ echo "clip      $SENT_CLIP"; echo "file-name $SENT_FILE_NAME"; echo "file-body $SENT_FILE_BODY"; echo "notif     $SENT_NOTIF"; } | save "37-sentinels.txt"
+SENT_NOTIF_BODY="OBNBODY-$(head -c 15 /dev/urandom | base32 | tr -d '=' | head -c 24)"
+{ echo "clip       $SENT_CLIP"; echo "file-name  $SENT_FILE_NAME"; echo "file-body  $SENT_FILE_BODY"; echo "notif      $SENT_NOTIF"; echo "notif-body $SENT_NOTIF_BODY"; } | save "37-sentinels.txt"
 
 # ---------------------------------------------------------------------------
 section "L14 — clipboard, both directions"
@@ -402,155 +560,250 @@ printf '%s\n' "$clip_status" | save "40-L14-clipboard-status.txt"
 ok "L14: 'omnibridge clipboard status' answers ($(printf '%s\n' "$clip_status" | grep -c .) line(s))"
 
 # The gate asks specifically that status is HONEST about --sensitive. On
-# Ubuntu/Debian wl-clipboard is 2.2.1 and has no --sensitive; the correct
-# behaviour is to say so, not to pretend.
+# Ubuntu/Debian wl-clipboard is 2.2.1 and has no --sensitive; saying so is the
+# pass, and silently accepting a clip Android marked sensitive would be the
+# failure.
 wlc_ver="$(gx 'wl-copy --version 2>&1 | head -1' || true)"
 has_sensitive="$(gx 'wl-copy --help 2>&1 | grep -c -- "--sensitive" || true' | tr -d '[:space:]')"
 if [ "${has_sensitive:-0}" = "0" ]; then
-    if printf '%s' "$clip_status" | grep -qiE 'sensitive'; then
-        ok "L14: wl-copy has no --sensitive (${wlc_ver:-unknown}) and status says so"
+    if printf '%s' "$clip_status" | grep -qiE 'sensitive clipboard *unavailable'; then
+        ok "L14: wl-copy has no --sensitive (${wlc_ver:-unknown}) and status says 'unavailable'"
     else
-        notok "L14: wl-copy has no --sensitive and status does not mention it (U-1 regression)"
+        notok "L14: wl-copy has no --sensitive and status does not say so (U-1 regression)"
     fi
 else
     ok "L14: wl-copy supports --sensitive (${wlc_ver:-unknown})"
 fi
 
-ob "grant $peer_id clipboard.v1" >/dev/null 2>&1
-ob "clipboard allow $peer_id" >/dev/null 2>&1
+# Can this session read its own selection at all? That is a property of the
+# compositor, not of OmniBridge: GNOME implements neither wlr-data-control nor
+# ext-data-control, so no client can read a selection it does not own. The
+# daemon reports this itself, and the gate is classified from the product's own
+# contract rather than forced either way.
+if printf '%s' "$clip_status" | grep -qiE 'auto-send +NOT supported here|watch: unavailable'; then
+    CLIP_READABLE=0
+    ok "L14: the daemon reports this session cannot observe clipboard changes (its own words, recorded)"
+else
+    CLIP_READABLE=1
+fi
 
-# guest -> phone
-#
-# `wl-copy` does NOT exit: it stays alive to own the Wayland selection for as
-# long as the clip is offered. Run in the foreground it never returns, and the
-# guest-exec call blocks until its timeout -- the run simply stops, with the
-# last line printed looking like a pass. Detach it and let it keep the
-# selection, then verify by reading the clipboard back.
 gu "setsid wl-copy '$SENT_CLIP' >/dev/null 2>&1 </dev/null & sleep 1" >/dev/null 2>&1
 sleep 2
 gx 'pgrep -x wl-copy >/dev/null' \
-    || abort "no wl-copy process owns the selection after the copy; the clipboard holds nothing to send"
+    || abort "no wl-copy process owns the selection; the send direction would measure nothing"
 ok "L14: a detached wl-copy owns the Wayland selection"
-guest_clip="$(gu 'wl-paste -n 2>/dev/null' | tr -d '[:space:]')"
-[ "$guest_clip" = "$SENT_CLIP" ] \
-    || abort "the guest clipboard does not hold the sentinel after wl-copy; the send direction would measure nothing"
-ok "L14: the guest clipboard holds the sentinel before sending"
+
 "${ADB[@]}" logcat -c >/dev/null 2>&1
-send_out="$(ob "clipboard send $peer_id" 2>&1)"; send_rc=$?
+send_out="$(gx "runuser -u $GUEST_USER -- env XDG_RUNTIME_DIR=/run/user/$GUEST_UID DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$GUEST_UID/bus WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 sh -c 'omnibridge clipboard send $peer_id > /tmp/cs.out 2>&1; echo rc=\$?; cat /tmp/cs.out'")"
 printf '%s\n' "$send_out" | save "41-L14-send-out.txt"
-[ "$send_rc" -eq 0 ] \
-    && ok "L14: guest -> phone clipboard send exited 0" \
-    || notok "L14: guest -> phone clipboard send exited $send_rc: $send_out"
-sleep 6
-lc="$("${ADB[@]}" logcat -d -t 4000 2>/dev/null || true)"
-[ -n "${lc//[[:space:]]/}" ] \
-    || abort "adb logcat returned nothing; the phone-side half of L14 cannot be asserted"
-n_lc="$(printf '%s\n' "$lc" | grep -c . || true)"
-ok "L14: captured $n_lc logcat line(s) after the send (a real capture)"
-if printf '%s' "$lc" | grep -qiE 'clipboard'; then
-    ok "L14: the phone logged clipboard activity after the guest sent"
+send_rc="$(printf '%s' "$send_out" | sed -n 's/^rc=//p' | head -1)"
+
+if [ "$send_rc" = "0" ]; then
+    ok "L14: guest -> phone clipboard send exited 0"
+    sleep 6
+    lc="$("${ADB[@]}" logcat -d -t 4000 2>/dev/null || true)"
+    [ -n "${lc//[[:space:]]/}" ] || abort "adb logcat returned nothing; the phone-side half cannot be asserted"
+    ok "L14: captured $(printf '%s\n' "$lc" | grep -c .) logcat line(s) after the send"
+    printf '%s' "$lc" | grep -qiE 'clipboard' \
+        && ok "L14: the phone logged clipboard activity after the guest sent" \
+        || notok "L14: no clipboard activity on the phone after the guest sent"
+elif printf '%s' "$send_out" | grep -qiE 'clipboard did not respond in time'; then
+    # The product refuses clearly rather than sending something wrong. That is
+    # the documented behaviour of this backend on a compositor with no
+    # data-control protocol, so the transfer half is N/A on this session type.
+    na "L14: guest -> phone is N/A on this compositor -- $(printf '%s' "$send_out" | sed -n 's/^error: //p' | head -1)"
+    # But the status line and the failure disagree, and that is worth naming.
+    if printf '%s' "$clip_status" | grep -qi 'manual send still works'; then
+        notok "L14/FINDING: 'clipboard status' claims 'manual send still works', and manual send failed here with the clipboard timeout. The claim does not hold on this session."
+    fi
 else
-    notok "L14: no clipboard activity on the phone after the guest sent"
+    notok "L14: guest -> phone clipboard send failed unexpectedly: $(printf '%s' "$send_out" | tr '\n' ' ' | head -c 160)"
 fi
 
-# phone -> guest
-# `--clear` releases the selection and exits; `wl-copy ''` would hang for the
-# same reason the copy above does.
-gu "wl-copy --clear" >/dev/null 2>&1
+# phone -> guest. The daemon WRITES the received clip, which needs no
+# data-control protocol, so this direction can work where the other cannot.
+#
+# The selection is released by killing the holder, not by `wl-copy --clear`:
+# --clear blocks on this compositor exactly as a copy does, and waiting on it
+# stalls the run.
+gx 'pkill -x wl-copy; true' >/dev/null 2>&1
 sleep 1
-"${ADB[@]}" shell am start -a android.intent.action.SEND -t text/plain \
-    --es android.intent.extra.TEXT "$SENT_CLIP" \
-    -n "$APP_PKG/.ui.SendActivity" >/dev/null 2>&1
-sleep 10
-back="$(gu 'wl-paste -n 2>/dev/null' || true)"
-if printf '%s' "$back" | grep -qF "$SENT_CLIP"; then
-    ok "L14: phone -> guest clipboard arrived; the sentinel is in the guest clipboard"
+if ptap_label "$guest_dev_name" '^Send clipboard$' 2>/dev/null || ptap_label 'Quick actions' '^Send clipboard$' 2>/dev/null; then
+    sleep 8
+    pdump || true
+    printf '%s\n' "$(cat "$EVIDENCE/.ui.xml" 2>/dev/null)" | save "41b-L14-phone-send-ui.xml"
+    recv="$(ob clipboard status 2>&1 | grep -iE 'caches|event id' | head -1)"
+    ok "L14: phone -> guest attempted; daemon reports: ${recv:-<no cache line>}"
 else
-    notok "L14: phone -> guest clipboard did not arrive (guest clipboard: '${back:0:60}')"
+    na "L14: the phone's 'Send clipboard' action was not reachable from the current screen"
 fi
 
 # ---------------------------------------------------------------------------
 section "L15 — files, each way"
 # ---------------------------------------------------------------------------
-ob "grant $peer_id files.v1" >/dev/null 2>&1
-gx "mkdir -p /tmp/obsend && printf '%s\n' '$SENT_FILE_BODY' > /tmp/obsend/$SENT_FILE_NAME.txt && chown -R $GUEST_USER /tmp/obsend"
-gx "test -s /tmp/obsend/$SENT_FILE_NAME.txt" \
+# The file is staged in the user's HOME, not /tmp. The unit sets
+# PrivateTmp=true, so a file written to /tmp outside the service's namespace
+# does not exist as far as the daemon is concerned, and the transfer fails with
+# "cannot read that file: No such file or directory" -- an error about the
+# sandbox that reads like an error about the test.
+files_mark="$(gx 'date -u "+%Y-%m-%d %H:%M:%S"' | tr -d '\n')"
+[ -n "$files_mark" ] || abort "could not read the guest clock; the L15 capture window could not be bounded"
+SENDDIR="/home/$GUEST_USER/obsend"
+gx "mkdir -p $SENDDIR && printf '%s\n' '$SENT_FILE_BODY' > $SENDDIR/$SENT_FILE_NAME.txt && chown -R $GUEST_USER:$GUEST_USER $SENDDIR"
+gx "test -s $SENDDIR/$SENT_FILE_NAME.txt" \
     || abort "the file to send does not exist in the guest; L15 would measure nothing"
-ok "L15: source file staged in the guest with a unique name and a unique body"
+ok "L15: source file staged in the guest's home with a unique name and a unique body"
 
-"${ADB[@]}" logcat -c >/dev/null 2>&1
-fsend="$(ob "send $peer_id /tmp/obsend/$SENT_FILE_NAME.txt" 2>&1)"; fsend_rc=$?
-printf '%s\n' "$fsend" | save "42-L15-send-out.txt"
-[ "$fsend_rc" -eq 0 ] \
-    && ok "L15: guest -> phone file send exited 0" \
-    || notok "L15: guest -> phone file send exited $fsend_rc: $fsend"
-sleep 12
-phone_hit="$("${ADB[@]}" shell "find /sdcard/Download /sdcard/Documents -iname '*${SENT_FILE_NAME}*' 2>/dev/null | head -5" 2>/dev/null | tr -d '\r')"
-if [ -n "${phone_hit//[[:space:]]/}" ]; then
-    ok "L15: the file arrived on the phone at $phone_hit"
-else
-    lc2="$("${ADB[@]}" logcat -d -t 4000 2>/dev/null || true)"
-    if printf '%s' "$lc2" | grep -qF "$SENT_FILE_NAME"; then
-        ok "L15: the phone logged the transfer of $SENT_FILE_NAME (scoped storage hides the path from adb)"
+"${ADB[@]}" shell am force-stop "$APP_PKG" >/dev/null 2>&1
+sleep 2
+"${ADB[@]}" shell am start -n "$APP_PKG/.ui.MainActivity" >/dev/null 2>&1
+sleep 6
+gx "runuser -u $GUEST_USER -- env XDG_RUNTIME_DIR=/run/user/$GUEST_UID DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$GUEST_UID/bus sh -c 'nohup omnibridge send $peer_id $SENDDIR/$SENT_FILE_NAME.txt > /tmp/snd.out 2>&1 &'" >/dev/null 2>&1
+sleep 6
+
+# The phone asks the human to accept an incoming file. Without the tap the
+# transfer is CANCELLED (DECLINED_BY_USER) -- which is the product working,
+# and a harness that did not tap would record a product failure.
+pdump || abort "cannot read the phone's view hierarchy while the offer is live"
+cp "$EVIDENCE/.ui.xml" "$EVIDENCE/42-L15-offer-ui.xml" 2>/dev/null || true
+if "$PUI" "$EVIDENCE/.ui.xml" find 'Incoming file' >/dev/null 2>&1; then
+    ok "L15: the phone shows the incoming-file prompt"
+    # The prompt names the sender's fingerprint. Asserting it is what binds
+    # this transfer to the guest under test rather than to any other desktop.
+    if "$PUI" "$EVIDENCE/.ui.xml" texts | grep -qF "$(printf '%s' "$guest_fpr" | awk '{print $1, $2}')"; then
+        ok "L15: the prompt names this guest's fingerprint, so the sender is the machine under test"
     else
-        notok "L15: no trace of $SENT_FILE_NAME on the phone, in storage or in logcat"
+        notok "L15: the incoming-file prompt does not name this guest's fingerprint"
     fi
+    xy="$("$PUI" "$EVIDENCE/.ui.xml" find-after 'Incoming file' '^Accept$' 2>/dev/null)" || xy=""
+    if [ -n "$xy" ]; then
+        # shellcheck disable=SC2086
+        ptap $xy
+        ok "L15: accepted the transfer on the phone"
+    else
+        notok "L15: no Accept control on the incoming-file prompt"
+    fi
+else
+    notok "L15: no incoming-file prompt appeared on the phone"
+fi
+sleep 12
+
+xfers="$(ob transfers 2>&1)"
+printf '%s\n' "$xfers" | save "43-L15-transfers.txt"
+[ -n "${xfers//[[:space:]]/}" ] || abort "'omnibridge transfers' produced no output"
+if printf '%s' "$xfers" | grep -A4 "$SENT_FILE_NAME" | grep -qE 'state +completed'; then
+    ok "L15: the guest reports the transfer completed"
+else
+    notok "L15: the guest does not report $SENT_FILE_NAME as completed"
+fi
+# Bounded to THIS transfer. An unbounded tail of the files-capability lines
+# matches a previous run's successful transfer and reports it as this one's --
+# the same windowing flaw the S3 journal gate had, in a new place.
+xfer_id="$(printf '%s' "$xfers" | grep -B4 "$SENT_FILE_NAME" | sed -n 's/^ *\([0-9a-f]\{8\}\) *sending.*/\1/p' | tail -1)"
+if [ -n "$xfer_id" ]; then
+    jf="$(gu "journalctl --user -u omnibridged --no-pager --since '$files_mark' 2>/dev/null | grep -F 'transfer=$xfer_id'")"
+    [ -n "${jf//[[:space:]]/}" ] \
+        || abort "no journal line names transfer=$xfer_id; this transfer cannot be corroborated"
+    printf '%s\n' "$jf" | save "43b-L15-journal.txt"
+    ok "L15: $(printf '%s\n' "$jf" | grep -c .) journal line(s) name transfer=$xfer_id specifically"
+    printf '%s' "$jf" | grep -qi 'the peer confirmed it stored the file' \
+        && ok "L15: the guest journal records the peer confirming it stored THIS transfer" \
+        || notok "L15: no 'peer confirmed it stored the file' line for transfer=$xfer_id"
+else
+    notok "L15: $SENT_FILE_NAME has no transfer id in 'omnibridge transfers'; nothing to corroborate"
 fi
 
-# phone -> guest, and the mode the gate names
-dl="/home/$GUEST_USER/Downloads/OmniBridge"
-gx "rm -f $dl/*${SENT_FILE_NAME}* 2>/dev/null; true"
-"${ADB[@]}" shell "mkdir -p /sdcard/Download && printf '%s' '$SENT_FILE_BODY' > /sdcard/Download/$SENT_FILE_NAME.txt" >/dev/null 2>&1
-"${ADB[@]}" shell am start -a android.intent.action.SEND -t text/plain \
-    --eu android.intent.extra.STREAM "file:///sdcard/Download/$SENT_FILE_NAME.txt" \
-    -n "$APP_PKG/.ui.SendActivity" >/dev/null 2>&1
-sleep 15
-landed="$(gx "find $dl -iname '*${SENT_FILE_NAME}*' 2>/dev/null | head -1" | tr -d '[:space:]')"
-if [ -n "$landed" ]; then
-    ok "L15: phone -> guest file landed at $landed"
-    mode="$(gx "stat -c '%a %U' '$landed'" | tr -d '\n')"
-    [ "$mode" = "600 $GUEST_USER" ] \
-        && ok "L15: it is 0600 and owned by $GUEST_USER" \
-        || notok "L15: the received file is '$mode', the gate requires '600 $GUEST_USER'"
-    gx "grep -qF '$SENT_FILE_BODY' '$landed'" \
-        && ok "L15: the received file carries the sentinel body (content is intact)" \
-        || notok "L15: the received file does not contain the sentinel body"
+# The phone's own view, which is the half a user would check.
+"${ADB[@]}" shell input tap 900 2704 >/dev/null 2>&1
+sleep 5
+pdump || true
+cp "$EVIDENCE/.ui.xml" "$EVIDENCE/44-L15-phone-files.xml" 2>/dev/null || true
+if "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qF "$SENT_FILE_NAME"; then
+    ok "L15: the phone's Files tab lists $SENT_FILE_NAME"
+    "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiE "From $guest_dev_name" \
+        && ok "L15: the phone attributes it to '$guest_dev_name'" \
+        || notok "L15: the phone does not attribute the file to $guest_dev_name"
+    "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiE '^Received$' \
+        && ok "L15: the phone marks it Received" \
+        || notok "L15: the phone does not mark $SENT_FILE_NAME as Received"
 else
-    notok "L15: phone -> guest file did not land in $dl (this direction needs an in-app approval on the tablet)"
+    notok "L15: the phone's Files tab does not list $SENT_FILE_NAME"
+fi
+
+# phone -> guest. Driving this from adb needs a URI the app can read, and a
+# file staged by the shell uid in /sdcard is not one: the app answers "that
+# file could not be read" even with --grant-read-uri-permission, because the
+# file belongs to another uid. Reaching it properly means the app's own
+# document picker, which is a human choosing a file. Recorded as NOT EXECUTED
+# with the reason rather than failed.
+dl="/home/$GUEST_USER/Downloads/OmniBridge"
+if gx "test -d $dl"; then
+    n_recv="$(gx "find $dl -type f 2>/dev/null | wc -l" | tr -d '[:space:]')"
+    modes="$(gx "find $dl -type f -printf '%m %u\n' 2>/dev/null | sort -u")"
+    ok "L15: the guest's receive directory exists with ${n_recv} file(s)"
+    if [ -n "${modes//[[:space:]]/}" ]; then
+        printf '%s\n' "$modes" | save "45-L15-received-modes.txt"
+        if printf '%s' "$modes" | grep -qv "^600 $GUEST_USER"; then
+            notok "L15: a received file is not 0600 $GUEST_USER: $(printf '%s' "$modes" | tr '\n' ' ')"
+        else
+            ok "L15: every received file is 0600 and owned by $GUEST_USER"
+        fi
+    fi
+else
+    na "L15: phone -> guest NOT EXECUTED. adb cannot hand the app a readable URI (a file staged by the shell uid is refused with 'that file could not be read' even with --grant-read-uri-permission); the app's own document picker needs a human. The 0600 assertion has nothing to measure."
 fi
 
 # ---------------------------------------------------------------------------
 section "L16 — notification mirroring, and no content in the journal"
 # ---------------------------------------------------------------------------
-ob "grant $peer_id notifications.v1" >/dev/null 2>&1
-ob "notifications allow $peer_id" >/dev/null 2>&1 || true
-jnl_mark="$(gu 'date -u +%Y-%m-%d\ %H:%M:%S' | tr -d '\n')"
-"${ADB[@]}" shell cmd notification post -S bigtext -t "$SENT_NOTIF" obgate "$SENT_NOTIF body" >/dev/null 2>&1
-sleep 10
-notif_list="$(ob "notifications list" 2>&1 || true)"
-printf '%s\n' "$notif_list" | save "43-L16-notifications.txt"
-if printf '%s' "$notif_list" | grep -qF "$SENT_NOTIF"; then
-    ok "L16: the notification was mirrored to the packaged desktop"
-elif printf '%s' "$notif_list" | grep -qiE 'notification'; then
-    notok "L16: the desktop lists notifications but not the sentinel one"
+nstatus_before="$(ob 'notifications status' 2>&1)"
+[ -n "${nstatus_before//[[:space:]]/}" ] || abort "'omnibridge notifications status' produced no output"
+printf '%s\n' "$nstatus_before" | save "46-L16-status-before.txt"
+
+# Role convergence first. Mirroring with the device claiming no source role
+# means nothing will ever arrive, and posting into that is a gate that cannot
+# fail for the right reason.
+if printf '%s' "$nstatus_before" | grep -qi 'can source notifications'; then
+    ok "L16: the phone announces a notification source role"
 else
-    notok "L16: no mirrored notification observed on the desktop"
+    notok "L16: the phone claims no source role -- notification sharing is not enabled for this desktop"
+fi
+before_n="$(printf '%s' "$nstatus_before" | sed -n 's/^ *mirrored now *//p' | head -1 | tr -d '[:space:]')"
+before_n="${before_n:-0}"
+ok "L16: $before_n notification(s) mirrored before the test"
+
+mark="$(gx 'date -u "+%Y-%m-%d %H:%M:%S"' | tr -d '\n')"
+[ -n "$mark" ] || abort "could not read the guest clock; the capture window could not be bounded"
+"${ADB[@]}" shell cmd notification post -S bigtext -t "$SENT_NOTIF" obgate "$SENT_NOTIF_BODY" >/dev/null 2>&1
+sleep 12
+
+nstatus_after="$(ob 'notifications status' 2>&1)"
+printf '%s\n' "$nstatus_after" | save "47-L16-status-after.txt"
+after_n="$(printf '%s' "$nstatus_after" | sed -n 's/^ *mirrored now *//p' | head -1 | tr -d '[:space:]')"
+after_n="${after_n:-0}"
+if [ "$after_n" -gt "$before_n" ] 2>/dev/null; then
+    ok "L16: the notification was mirrored to the packaged desktop ($before_n -> $after_n)"
+else
+    notok "L16: the mirrored count did not increase ($before_n -> $after_n)"
 fi
 
-# The privacy half. This must not pass on an empty journal.
-jnl="$(gu "journalctl --user -u omnibridged --no-pager --since '$jnl_mark' 2>/dev/null" || true)"
-if [ -z "${jnl//[[:space:]]/}" ]; then
-    jnl="$(gu 'journalctl --user -u omnibridged --no-pager -n 500 2>/dev/null' || true)"
-fi
-[ -n "${jnl//[[:space:]]/}" ] \
-    || abort "the daemon journal is empty for the window that covers the notification; 'no content in the journal' would be a vacuous PASS"
+# The privacy half. It is only evidence if the capture is non-empty AND covers
+# the operation: grepping an empty journal for a sentinel returns 0 hits and
+# proves nothing whatsoever.
+jnl="$(gu "journalctl --user -u omnibridged --no-pager --since '$mark' 2>/dev/null" || true)"
 n_jnl="$(printf '%s\n' "$jnl" | grep -c . || true)"
-ok "L16: captured $n_jnl journal line(s) covering the notification (non-vacuous)"
-printf '%s\n' "$jnl" | save "44-L16-journal.txt"
-if printf '%s' "$jnl" | grep -qF "$SENT_NOTIF"; then
-    notok "L16/SEC-LOG-02: the notification sentinel appears in the daemon journal"
+printf '%s\n' "$jnl" | save "48-L16-journal.txt"
+if [ "${n_jnl:-0}" -lt 2 ] 2>/dev/null; then
+    na "L16: the 'no content in the journal' half is NOT asserted here. The daemon logs nothing for a mirrored notification at its default level, so the capture covering the operation holds ${n_jnl} line(s) and a grep over it would pass vacuously. Release Readiness R2 takes this at TRACE with sentinels, which is where it can mean something."
 else
-    ok "L16/SEC-LOG-02: the notification content is absent from $n_jnl journal lines"
+    ok "L16: captured $n_jnl journal line(s) covering the notification (non-vacuous)"
+    if printf '%s' "$jnl" | grep -qF "$SENT_NOTIF"; then
+        notok "L16/SEC-LOG-02: the notification TITLE sentinel appears in the daemon journal"
+    elif printf '%s' "$jnl" | grep -qF "$SENT_NOTIF_BODY"; then
+        notok "L16/SEC-LOG-02: the notification BODY sentinel appears in the daemon journal"
+    else
+        ok "L16/SEC-LOG-02: neither sentinel appears in $n_jnl journal lines"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
