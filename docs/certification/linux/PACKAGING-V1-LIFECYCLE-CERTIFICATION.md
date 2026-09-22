@@ -368,6 +368,20 @@ remains **build-supported**, and for Fedora 44 **partially runtime-certified**.
 
 ## 9. Verdict
 
+> **⚠ SUPERSEDED for the blocked gates — 2026-09-22, `feature/release-lifecycle-closure-v1`.**
+> Eight of the eleven blocked gates — L1, L2, L3, L6, L8, L9, L19, L20 — are
+> now **CERTIFIED on Ubuntu 24.04, Ubuntu 26.04 and Debian 13**, and L10 and
+> L12 are no longer PARTIAL. See
+> [`RELEASE-LIFECYCLE-CLOSURE-V1.md`](RELEASE-LIFECYCLE-CLOSURE-V1.md).
+>
+> Running them found that `omnibridged.service` **could not start at all** on
+> either Ubuntu (`218/CAPABILITIES`) — a release blocker these gates had been
+> hiding, fixed in PR #60.
+>
+> **Every measurement in this document stands.** What changed is what could be
+> measured, and the verdict below was correct for the evidence available on
+> the day.
+
 **PACKAGING V1 LIFECYCLE: PARTIAL — NOT CERTIFIED.**
 
 Thirteen gates pass on real evidence: install, manifest, daemon ownership,

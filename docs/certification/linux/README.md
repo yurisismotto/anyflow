@@ -8,6 +8,7 @@ per desktop environment. Both were run on real hosts; neither was simulated.
 | GNOME | [GNOME AppIndicator compatibility v1](gnome/GNOME-APPINDICATOR-V1.md) | PASS — no GNOME-specific backend needed, and no product code changed |
 | KDE Plasma | [KDE Plasma real host certification v1](kde/KDE-PLASMA-REAL-CERTIFICATION-V1.md) | PASS — Part I tray/shell, Part II the six Android↔KDE capability debts |
 | Packaging lifecycle | [Packaging v1 lifecycle certification](PACKAGING-V1-LIFECYCLE-CERTIFICATION.md) | **PARTIAL — 13 of 26 gates certified, 11 BLOCKED, 2 partial.** Not a runtime certification |
+| Lifecycle closure | [Release lifecycle closure v1](RELEASE-LIFECYCLE-CLOSURE-V1.md) | **20 of 26 gates CERTIFIED on Ubuntu 24.04, Ubuntu 26.04 and Debian 13** — and the first gate that ran found the unit could not start on either Ubuntu |
 | Packaging v1, final | [Packaging v1 final certification](PACKAGING-V1-FINAL-CERTIFICATION.md) | **CERTIFIED WITH EXPLICIT NON-BLOCKING DEBTS** — the packages, not the desktop runtime |
 
 The GNOME document's finding is the reason there is one tray implementation
