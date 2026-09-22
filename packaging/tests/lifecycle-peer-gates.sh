@@ -50,7 +50,7 @@ mkdir -p "$EVIDENCE"
 # Assigned unconditionally: lib/guest-agent.sh has already applied its own
 # default by the time this runs, so a `${VAR:-180}` here would quietly keep
 # the 900 it set and the tightening would never happen.
-GA_EXEC_TIMEOUT=180
+export GA_EXEC_TIMEOUT=180
 
 PASS=0; FAIL=0; NA=0; declare -a FAILED_GATES=()
 ok()      { PASS=$(( PASS + 1 )); printf 'ok    %s\n' "$*"; }
@@ -581,10 +581,7 @@ fi
 # daemon reports this itself, and the gate is classified from the product's own
 # contract rather than forced either way.
 if printf '%s' "$clip_status" | grep -qiE 'auto-send +NOT supported here|watch: unavailable'; then
-    CLIP_READABLE=0
     ok "L14: the daemon reports this session cannot observe clipboard changes (its own words, recorded)"
-else
-    CLIP_READABLE=1
 fi
 
 gu "setsid wl-copy '$SENT_CLIP' >/dev/null 2>&1 </dev/null & sleep 1" >/dev/null 2>&1

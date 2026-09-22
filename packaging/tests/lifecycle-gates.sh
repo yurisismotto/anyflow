@@ -29,13 +29,12 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/guest-agent.sh
 . "$HERE/lib/guest-agent.sh"
 
-DOMAIN=""; DISTRO=""; PKGDIR=""; PHONE_IP=""; EVIDENCE=""; PHASES="all"
+DOMAIN=""; DISTRO=""; PKGDIR=""; PHONE_IP=""; EVIDENCE=""
 GUEST_USER="${GUEST_USER:-anyflow}"; GUEST_UID="${GUEST_UID:-1000}"
 
 usage() {
     cat >&2 <<USAGE
-usage: $0 --domain DOM --distro NAME --pkgdir DIR --evidence DIR
-          [--phone IP] [--phases all|install|session|lan]
+usage: $0 --domain DOM --distro NAME --pkgdir DIR --evidence DIR [--phone IP]
 
   --domain    libvirt domain, already running, with a guest agent
   --distro    ubuntu2404 | ubuntu2604 | debian13 | fedora44
@@ -52,7 +51,6 @@ while [ $# -gt 0 ]; do
         --pkgdir) PKGDIR="$2"; shift 2 ;;
         --evidence) EVIDENCE="$2"; shift 2 ;;
         --phone) PHONE_IP="$2"; shift 2 ;;
-        --phases) PHASES="$2"; shift 2 ;;
         *) usage ;;
     esac
 done
