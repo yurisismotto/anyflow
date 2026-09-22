@@ -316,7 +316,7 @@ if grep -q 'install-desktop-metadata.sh' "$SPEC"; then
 else
     fail "the spec does not call install-desktop-metadata.sh (R9: identity can drift)"
 fi
-if grep -A2 'install-desktop-metadata\.sh' "$SPEC" | grep -q -- '--destdir'; then
+if grep -q -- '--destdir' <<<"$(grep -A2 'install-desktop-metadata\.sh' "$SPEC")"; then
     pass "the metadata installer is given a --destdir"
 else
     fail "the metadata installer may write outside the buildroot"
@@ -441,7 +441,7 @@ group "%doc is documentation, not the evidence tree (audit R10)"
 doc_line="$(grep -E '^%doc ' "$SPEC" || true)"
 if [ -z "$doc_line" ]; then
     fail "the spec ships no %doc at all"
-elif printf '%s' "$doc_line" | grep -qE '(^|[[:space:]])docs/?($|[[:space:]])'; then
+elif grep -qE '(^|[[:space:]])docs/?($|[[:space:]])' <<<"$doc_line"; then
     fail "%doc ships the docs/ tree: $doc_line"
 else
     pass "%doc is $doc_line"
@@ -528,7 +528,7 @@ fi
 
 # Runtime must not require Rust: rustc/cargo are build dependencies only.
 depends_block="$(awk '/^Package: /{p=1} p' "$DEBIAN/control" | grep -E '^(Depends|Recommends|Suggests):' || true)"
-if printf '%s' "$depends_block" | grep -qE '\b(rustc|cargo)\b'; then
+if grep -qE '\b(rustc|cargo)\b' <<<"$depends_block"; then
     fail "a runtime relation names rustc or cargo"
 else
     pass "no runtime relation names rustc or cargo"
@@ -753,7 +753,7 @@ else
     # P5, against the built package rather than the template: the bus does not
     # search PATH, so a relative Exec here is a launcher that never starts.
     for rpm_file in "${RPM_FILES[@]}"; do
-        if rpm -qpl "$rpm_file" 2>/dev/null | grep -q "dbus-1/services/$APP_ID.service"; then
+        if grep -q "dbus-1/services/$APP_ID.service" <<<"$(rpm -qpl "$rpm_file" 2>/dev/null)"; then
             exec_line="$(rpm2cpio "$rpm_file" 2>/dev/null \
                 | cpio -i --to-stdout "./usr/share/dbus-1/services/$APP_ID.service" 2>/dev/null \
                 | grep '^Exec=' || true)"
@@ -782,6 +782,48 @@ else
     fi
 fi
 fi
+
+# ---------------------------------------------------------------------------
+# H1 — no harness may pipe into `grep -q`
+# ---------------------------------------------------------------------------
+# `grep -q` exits the moment it matches. Under `set -o pipefail` -- which every
+# harness here sets -- the producer on the left then dies of SIGPIPE, exit 141,
+# and the PIPELINE reports failure although the pattern was found.
+#
+# Measured, not theorised: piping a 33 KB journal capture into `grep -qE mdns`
+# missed a match that was present in **225 of 300 runs**. The same three
+# hundred runs missed none at all with `grep -q PATTERN <<<"$var"` or with the
+# pattern applied to a file.
+#
+# It is worse than flaky. A privacy gate is written the unsafe way round --
+#
+#     if grep -qF "$SENTINEL" <<<"$capture"; then notok "leaked"; else ok "absent"; fi
+#
+# -- so a lost match is a PASS on a real leak, which is the exact failure this
+# whole wave exists to stop, arriving through the matcher rather than through
+# the measurement.
+#
+# Host-side pipelines only. A `| grep -q` inside a quoted guest command runs
+# under the guest's `/bin/sh -c`, which does not set pipefail, so the pipeline
+# status is grep's own and the hazard does not arise.
+printf '\n== H1: no host-side `| grep -q` in the harnesses ==\n'
+h1_bad=0
+for h in "$ROOT"/packaging/tests/*.sh; do
+    while IFS= read -r hit; do
+        # Strip the line number, then ignore comments and this check's own
+        # description of the pattern it is looking for.
+        body="${hit#*:}"
+        case "$body" in
+            [[:space:]]*'#'*|'#'*) continue ;;
+        esac
+        case "$hit" in
+            *ga_wait_for*|*'gx "'*|*'gu "'*|*runuser*|*'H1'*) continue ;;
+        esac
+        fail "H1: host-side pipe into grep -q in $(basename "$h"): $(printf '%s' "$hit" | sed 's/^[[:space:]]*//' | cut -c1-90)"
+        h1_bad=$((h1_bad + 1))
+    done < <(grep -nE '\| *grep -q' "$h" || true)
+done
+[ "$h1_bad" -eq 0 ] && pass "H1: no harness pipes into grep -q on the host side"
 
 printf '\n%s\n' "-----------------------------------------------"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"

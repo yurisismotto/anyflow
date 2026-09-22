@@ -206,7 +206,7 @@ printf '%s\n' "$install_out" | save "01-L1-install.txt"
 # would make this grep pass while measuring nothing.
 [ -n "${install_out//[[:space:]]/}" ] \
     || abort "the install produced no output at all; nothing can be asserted about scriptlets"
-if printf '%s' "$install_out" | grep -qiE 'scriptlet failed|error in (PREIN|POSTIN|PREUN|POSTUN)|dpkg: error|subprocess installed .* returned error'; then
+if grep -qiE 'scriptlet failed|error in (PREIN|POSTIN|PREUN|POSTUN)|dpkg: error|subprocess installed .* returned error' <<<"$install_out"; then
     notok "L1: a scriptlet/maintainer-script error appears in the install output"
 else
     ok "L1: no scriptlet or maintainer-script error in ${#install_out} bytes of install output"
@@ -251,7 +251,7 @@ ok "L2: core owns $n_core file(s), gui owns $n_gui file(s)"
 for f in /usr/bin/omnibridged /usr/bin/omnibridge \
          /usr/lib/systemd/user/omnibridged.service \
          /usr/share/icons/hicolor/scalable/apps/io.github.yurisismotto.omnibridge.svg; do
-    printf '%s\n' "$core_files" | grep -qx "$f" \
+    grep -qx "$f" <<<"$core_files" \
         && ok "L2: core owns $f" \
         || notok "L2: core does NOT own $f"
 done
@@ -259,7 +259,7 @@ for f in /usr/bin/omnibridge-gui \
          /usr/share/applications/io.github.yurisismotto.omnibridge.desktop \
          /usr/share/dbus-1/services/io.github.yurisismotto.omnibridge.service \
          /usr/share/metainfo/io.github.yurisismotto.omnibridge.metainfo.xml; do
-    printf '%s\n' "$gui_files" | grep -qx "$f" \
+    grep -qx "$f" <<<"$gui_files" \
         && ok "L2: gui owns $f" \
         || notok "L2: gui does NOT own $f"
 done
@@ -293,10 +293,10 @@ n_harden="$(printf '%s\n' "$inst_unit" | grep -cE '^(NoNewPrivileges|PrivateTmp|
 [ "$n_harden" -ge 15 ] \
     && ok "L2: the installed unit carries $n_harden hardening directives" \
     || notok "L2: the installed unit carries only $n_harden hardening directives, expected at least 15"
-printf '%s\n' "$inst_unit" | grep -qx 'ProtectSystem=strict' \
+grep -qx 'ProtectSystem=strict' <<<"$inst_unit" \
     && ok "L2: ProtectSystem=strict survived packaging" \
     || notok "L2: the installed unit does not carry ProtectSystem=strict"
-if printf '%s\n' "$inst_unit" | grep -qE '^(ProtectKernelModules|CapabilityBoundingSet|AmbientCapabilities)='; then
+if grep -qE '^(ProtectKernelModules|CapabilityBoundingSet|AmbientCapabilities)=' <<<"$inst_unit"; then
     notok "L2: the installed unit carries a capability-set directive; it cannot start where unprivileged user namespaces are restricted"
 else
     ok "L2: the installed unit carries no capability-set directive (the Ubuntu 218/CAPABILITIES defect is not in this artifact)"
@@ -324,7 +324,7 @@ activatable="$(gu 'busctl --user list --activatable --no-pager 2>/dev/null' || t
 n_act="$(printf '%s\n' "$activatable" | grep -c . || true)"
 ok "L8: the session bus reports $n_act activatable name(s)"
 
-if printf '%s\n' "$activatable" | grep -q 'io.github.yurisismotto.omnibridge'; then
+if grep -q 'io.github.yurisismotto.omnibridge' <<<"$activatable"; then
     ok "L8: io.github.yurisismotto.omnibridge is activatable with NO logout"
 else
     notok "L8: the name is NOT activatable in the live session after install"
@@ -381,7 +381,7 @@ jnl="$(gu "journalctl --user _SYSTEMD_INVOCATION_ID=$invocation --no-pager 2>/de
 [ -n "${jnl//[[:space:]]/}" ] \
     || abort "the journal for invocation $invocation is empty; the S3 grep would pass on an empty stream"
 printf '%s\n' "$jnl" | save "06-S3-journal.txt"
-if printf '%s' "$jnl" | grep -qiE 'Operation not permitted|ProtectSystem|ReadWritePaths|seccomp|Permission denied'; then
+if grep -qiE 'Operation not permitted|ProtectSystem|ReadWritePaths|seccomp|Permission denied' <<<"$jnl"; then
     notok "S3: a sandbox/namespace/seccomp denial appears in the daemon journal"
 else
     ok "S3: no sandbox, namespace or seccomp denial in $(printf '%s\n' "$jnl" | grep -c .) journal line(s)"
@@ -431,9 +431,9 @@ ok "L7: no omnibridge-gui process before activation (the cold case)"
 
 act_out="$(gu 'gdbus call --session --dest io.github.yurisismotto.omnibridge --object-path /io/github/yurisismotto/omnibridge --method org.freedesktop.DBus.Peer.Ping 2>&1' || true)"
 printf '%s\n' "$act_out" | save "09-L7-activation.txt"
-if printf '%s' "$act_out" | grep -q 'ServiceUnknown\|NameHasNoOwner'; then
+if grep -q 'ServiceUnknown\|NameHasNoOwner' <<<"$act_out"; then
     notok "L7: activation failed — $act_out"
-elif printf '%s' "$act_out" | grep -q '()'; then
+elif grep -q '()' <<<"$act_out"; then
     ok "L7: the bus activated the name from cold; Peer.Ping returned ()"
 else
     notok "L7: unexpected activation result: ${act_out:-<empty>}"
@@ -646,7 +646,7 @@ active_after="$(gu 'systemctl --user is-active omnibridged.service' | tr -d '[:s
 gu 'pkill -x omnibridge-gui' >/dev/null 2>&1; sleep 2
 act2="$(gu 'gdbus call --session --dest io.github.yurisismotto.omnibridge --object-path /io/github/yurisismotto/omnibridge --method org.freedesktop.DBus.Peer.Ping 2>&1' || true)"
 printf '%s\n' "$act2" | save "15-L19-activation.txt"
-printf '%s' "$act2" | grep -q '()' \
+grep -q '()' <<<"$act2" \
     && ok "L19: D-Bus cold activation still works in the new session" \
     || notok "L19: cold activation after relogin returned: ${act2:-<empty>}"
 
@@ -684,7 +684,7 @@ st_sock="$(gx "stat -c '%a %U' $rt_dir/control.sock 2>&1")"
 gu 'pkill -x omnibridge-gui' >/dev/null 2>&1; sleep 2
 act3="$(gu 'gdbus call --session --dest io.github.yurisismotto.omnibridge --object-path /io/github/yurisismotto/omnibridge --method org.freedesktop.DBus.Peer.Ping 2>&1' || true)"
 printf '%s\n' "$act3" | save "16-L20-activation.txt"
-printf '%s' "$act3" | grep -q '()' \
+grep -q '()' <<<"$act3" \
     && ok "L20/L7: D-Bus cold activation works after the reboot" \
     || notok "L20/L7: cold activation after reboot returned: ${act3:-<empty>}"
 

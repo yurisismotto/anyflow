@@ -90,7 +90,7 @@ phone_rel="$("${ADB[@]}" shell getprop ro.build.version.release 2>/dev/null | tr
 [ -n "$phone_model" ] || abort "adb returned no device model"
 ok "physical Android attached: $phone_model, Android $phone_rel"
 
-"${ADB[@]}" shell pm list packages 2>/dev/null | grep -qx "package:$APP_PKG" \
+grep -qx "package:$APP_PKG" <<<"$("${ADB[@]}" shell pm list packages 2>/dev/null)" \
     || abort "$APP_PKG is not installed on the phone"
 ok "$APP_PKG is installed on the phone"
 
@@ -98,10 +98,10 @@ ok "$APP_PKG is installed on the phone"
 # Without the fixture the gate cannot be measured at all, so this is a
 # precondition and not a gate: failing here is honest, and reporting L16 against
 # a peer that announces no source role is not.
-"${ADB[@]}" shell pm list packages 2>/dev/null | grep -qx "package:$FIXTURE_PKG" \
+grep -qx "package:$FIXTURE_PKG" <<<"$("${ADB[@]}" shell pm list packages 2>/dev/null)" \
     || abort "$FIXTURE_PKG is not installed on the phone; L16 has no notification source it can choose (android/fixture/README.md)"
-"${ADB[@]}" shell dumpsys package "$FIXTURE_PKG" 2>/dev/null \
-    | grep -q 'android.permission.POST_NOTIFICATIONS: granted=true' \
+grep -q 'android.permission.POST_NOTIFICATIONS: granted=true' \
+    <<<"$("${ADB[@]}" shell dumpsys package "$FIXTURE_PKG" 2>/dev/null)" \
     || abort "$FIXTURE_PKG does not hold POST_NOTIFICATIONS; it cannot post the notification L16 mirrors"
 ok "$FIXTURE_PKG is installed and holds POST_NOTIFICATIONS"
 
@@ -161,7 +161,7 @@ fi
 # trust store, before anything on the phone is inspected, so a re-run after a
 # successful scan does not trip the "must be absent" baseline below.
 ALREADY_PAIRED=0
-if printf '%s\n' "$phone_pairs_before" | grep -qi "$phone_model"; then
+if grep -qi "$phone_model" <<<"$phone_pairs_before"; then
     ALREADY_PAIRED=1
 fi
 
@@ -194,10 +194,10 @@ n_texts="$(ui_texts "$ui_before" | grep -c . || true)"
 ok "L12: the phone's UI dump is real ($n_texts distinct text nodes)"
 
 if [ "$ALREADY_PAIRED" = "1" ]; then
-    printf '%s' "$ui_before" | grep -qi "$guest_dev_name" \
+    grep -qi "$guest_dev_name" <<<"$ui_before" \
         && ok "L12: the phone is already paired with '$guest_dev_name' from an earlier run of this script, and lists it" \
         || abort "the guest's trust store names the phone, but the phone does not list '$guest_dev_name'; the two disagree about who is paired"
-elif printf '%s' "$ui_before" | grep -qi "$guest_dev_name"; then
+elif grep -qi "$guest_dev_name" <<<"$ui_before"; then
     abort "the phone lists '$guest_dev_name' but the guest's trust store has no pairing for $phone_model; a stale entry would make every gate below unattributable"
 else
     ok "L12: the phone does NOT list '$guest_dev_name' yet — the baseline is clean"
@@ -205,7 +205,7 @@ fi
 
 # The host Fedora daemon's pairing is the one this wave must never disturb.
 # It is recorded here and checked again at the end.
-if printf '%s' "$ui_before" | grep -qi 'fedora'; then
+if grep -qi 'fedora' <<<"$ui_before"; then
     HOST_PAIRING_PRESENT=1
     ok "L12: the tablet's existing pairing with the host 'fedora' daemon is present before this run"
 else
@@ -327,10 +327,10 @@ OPERATOR ACTION REQUIRED — scan the pairing QR
 OPBLOCK
     waited=0
     while [ "$waited" -lt "$PAIR_TTL" ]; do
-        if ob devices 2>/dev/null | grep -qi "$phone_model"; then break; fi
+        if grep -qi "$phone_model" <<<"$(ob devices 2>/dev/null)"; then break; fi
         sleep 5; waited=$(( waited + 5 ))
     done
-    if ob devices 2>/dev/null | grep -qi "$phone_model"; then
+    if grep -qi "$phone_model" <<<"$(ob devices 2>/dev/null)"; then
         ok "the phone paired with $guest_dev_name after ${waited}s"
     else
         printf '\nPAIRING NOT COMPLETED within %ss. L14, L15 and L16 are left BLOCKED rather than marked passing.\n' "$PAIR_TTL" >&2
@@ -385,7 +385,7 @@ sel_ui="$(dump_ui || true)"
 [ -n "${sel_ui//[[:space:]]/}" ] || abort "uiautomator returned an empty hierarchy; the selected peer cannot be verified"
 printf '%s\n' "$sel_ui" | save "37-phone-ui-after-pair.xml"
 
-if printf '%s' "$sel_ui" | grep -qi "$guest_dev_name"; then
+if grep -qi "$guest_dev_name" <<<"$sel_ui"; then
     ok "L12: the packaged desktop '$guest_dev_name' now appears on the phone, and did not before"
 else
     abort "the phone's UI does not name '$guest_dev_name'; it is not pointed at the guest under test"
@@ -393,7 +393,7 @@ fi
 
 # "existing pairing untouched" -- the other half of L12.
 if [ "${HOST_PAIRING_PRESENT:-0}" = "1" ]; then
-    if printf '%s' "$sel_ui" | grep -qi 'fedora'; then
+    if grep -qi 'fedora' <<<"$sel_ui"; then
         ok "L12: the tablet's pairing with the host 'fedora' daemon survived pairing with the guest"
     else
         notok "L12: the tablet's existing 'fedora' pairing is no longer listed after pairing with the guest"
@@ -404,7 +404,7 @@ fi
 # it is what distinguishes "a desktop called anyflow-d13 is listed" from "the
 # desktop this run is testing is the selected one".
 guest_fpr_head="$(printf '%s' "$guest_fpr" | awk '{print $1, $2}')"
-if printf '%s' "$sel_ui" | grep -qF "$guest_fpr_head"; then
+if grep -qF "$guest_fpr_head" <<<"$sel_ui"; then
     ok "the phone shows this guest's fingerprint ($guest_fpr_head), so the selected peer is the guest under test"
 else
     notok "the phone does not show this guest's fingerprint ($guest_fpr_head); the selected peer may be another desktop"
@@ -457,7 +457,7 @@ ptap_label() {
 # capability operation, and it aborts rather than letting a gate run unconnected.
 ensure_connected() {
     local why="$1" xy
-    if ob devices 2>/dev/null | grep -q 'connected *yes'; then return 0; fi
+    if grep -q 'connected *yes' <<<"$(ob devices 2>/dev/null)"; then return 0; fi
     # Bring the list forward WITHOUT a force-stop -- that is the thing that
     # broke the session in the first place.
     "${ADB[@]}" shell am start -n "$APP_PKG/.ui.MainActivity" >/dev/null 2>&1
@@ -498,8 +498,8 @@ rebind_listener() {
     after="$("${ADB[@]}" shell settings get secure enabled_notification_listeners 2>/dev/null | tr -d '\r')"
     [ "$after" = "$before" ] \
         || abort "the phone's approved-listener list changed across the rebind; it must be restored exactly (before: $before / after: $after)"
-    "${ADB[@]}" shell dumpsys notification 2>/dev/null \
-        | grep -q "ComponentInfo{$APP_PKG/$APP_PKG.notifications.OmniBridgeNotificationListener}" \
+    grep -q "ComponentInfo{$APP_PKG/$APP_PKG.notifications.OmniBridgeNotificationListener}" \
+        <<<"$("${ADB[@]}" shell dumpsys notification 2>/dev/null)" \
         || abort "OmniBridge's notification listener is not among the live listeners after the rebind"
     ok "the notification listener is bound again, and the approval list is byte-identical"
 }
@@ -726,7 +726,7 @@ ok "L14: 'omnibridge clipboard status' answers ($(printf '%s\n' "$clip_status" |
 wlc_ver="$(gx 'wl-copy --version 2>&1 | head -1' || true)"
 has_sensitive="$(gx 'wl-copy --help 2>&1 | grep -c -- "--sensitive" || true' | tr -d '[:space:]')"
 if [ "${has_sensitive:-0}" = "0" ]; then
-    if printf '%s' "$clip_status" | grep -qiE 'sensitive clipboard *unavailable'; then
+    if grep -qiE 'sensitive clipboard *unavailable' <<<"$clip_status"; then
         ok "L14: wl-copy has no --sensitive (${wlc_ver:-unknown}) and status says 'unavailable'"
     else
         notok "L14: wl-copy has no --sensitive and status does not say so (U-1 regression)"
@@ -740,7 +740,7 @@ fi
 # ext-data-control, so no client can read a selection it does not own. The
 # daemon reports this itself, and the gate is classified from the product's own
 # contract rather than forced either way.
-if printf '%s' "$clip_status" | grep -qiE 'auto-send +NOT supported here|watch: unavailable'; then
+if grep -qiE 'auto-send +NOT supported here|watch: unavailable' <<<"$clip_status"; then
     ok "L14: the daemon reports this session cannot observe clipboard changes (its own words, recorded)"
 fi
 
@@ -766,7 +766,7 @@ clip_mark="$(gx 'date -u "+%Y-%m-%d %H:%M:%S"' | tr -d '\n')"
 "${ADB[@]}" shell am start -n "$APP_PKG/.ui.MainActivity" >/dev/null 2>&1
 sleep 6
 pdump || abort "cannot read the phone's view hierarchy before the clipboard send"
-if "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiF "Clipboard from"; then
+if grep -qiF "Clipboard from" <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)"; then
     if xy="$("$PUI" "$EVIDENCE/.ui.xml" find-after 'Clipboard from' '^Dismiss$' 2>/dev/null)"; then
         # shellcheck disable=SC2086
         ptap $xy
@@ -774,7 +774,7 @@ if "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiF "Clipboard from"; th
     fi
 fi
 cp "$EVIDENCE/.ui.xml" "$EVIDENCE/41c-L14-phone-before.xml" 2>/dev/null || true
-"$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiF "Clipboard from $guest_dev_name" \
+grep -qiF "Clipboard from $guest_dev_name" <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)" \
     && abort "a clipboard receipt from $guest_dev_name is still on the phone before this send; its reappearance afterwards would prove nothing" \
     || ok "L14: the phone carries no clipboard receipt from $guest_dev_name before the send"
 sleep 1
@@ -789,10 +789,10 @@ if [ "$send_rc" = "0" ]; then
     # The CLI's own report must name THIS peer and THIS clip's length. "sent"
     # with no byte count and no fingerprint would be true of any send.
     clip_len="${#SENT_CLIP}"
-    printf '%s' "$send_out" | grep -qF "$peer_fpr" \
+    grep -qF "$peer_fpr" <<<"$send_out" \
         && ok "L14: the send names the peer under test ($peer_fpr)" \
         || notok "L14: the send does not name the peer's fingerprint; it cannot be attributed"
-    printf '%s' "$send_out" | grep -qE "sent +$clip_len +bytes" \
+    grep -qE "sent +$clip_len +bytes" <<<"$send_out" \
         && ok "L14: the send reports exactly $clip_len bytes, the length of this run's sentinel" \
         || notok "L14: the send does not report $clip_len bytes (sentinel length); the payload is not bound to this run"
 
@@ -801,7 +801,7 @@ if [ "$send_rc" = "0" ]; then
     [ -n "${jc//[[:space:]]/}" ] \
         || abort "no 'clipboard update sent' line in the journal window opened at $clip_mark; the send cannot be corroborated"
     printf '%s\n' "$jc" | save "41d-L14-journal.txt"
-    printf '%s' "$jc" | grep -qF "bytes=$clip_len" \
+    grep -qF "bytes=$clip_len" <<<"$jc" \
         && ok "L14: the guest journal records this send (bytes=$clip_len) inside the bracketing window" \
         || notok "L14: the journal line does not carry bytes=$clip_len"
 
@@ -815,21 +815,21 @@ if [ "$send_rc" = "0" ]; then
     sleep 6
     pdump || abort "cannot read the phone's view hierarchy to check the clipboard receipt"
     cp "$EVIDENCE/.ui.xml" "$EVIDENCE/41f-L14-phone-receipt.xml" 2>/dev/null || true
-    if "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiF "Clipboard from $guest_dev_name"; then
+    if grep -qiF "Clipboard from $guest_dev_name" <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)"; then
         ok "L14: the phone shows 'Clipboard from $guest_dev_name' -- receipt attributed to the guest under test"
-        "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qE "^$clip_len bytes$" \
+        grep -qE "^$clip_len bytes$" <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)" \
             && ok "L14: the phone reports $clip_len bytes, matching this run's sentinel exactly" \
             || notok "L14: the phone does not report $clip_len bytes for the received clip"
     else
         notok "L14: the phone does not show a clipboard receipt from $guest_dev_name"
     fi
-elif printf '%s' "$send_out" | grep -qiE 'clipboard did not respond in time'; then
+elif grep -qiE 'clipboard did not respond in time' <<<"$send_out"; then
     # The product refuses clearly rather than sending something wrong. That is
     # the documented behaviour of this backend on a compositor with no
     # data-control protocol, so the transfer half is N/A on this session type.
     na "L14: guest -> phone is N/A on this compositor -- $(printf '%s' "$send_out" | sed -n 's/^error: //p' | head -1)"
     # But the status line and the failure disagree, and that is worth naming.
-    if printf '%s' "$clip_status" | grep -qi 'manual send still works'; then
+    if grep -qi 'manual send still works' <<<"$clip_status"; then
         notok "L14/FINDING: 'clipboard status' claims 'manual send still works', and manual send failed here with the clipboard timeout. The claim does not hold on this session."
     fi
 else
@@ -858,7 +858,7 @@ if ptap_label "$guest_dev_name" '^Send clipboard$' 2>/dev/null || ptap_label 'Qu
     cp "$EVIDENCE/.ui.xml" "$EVIDENCE/41b-L14-phone-send-ui.xml" 2>/dev/null || true
     sheet="$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null || true)"
 
-    if printf '%s' "$sheet" | grep -qiF 'There is nothing to send'; then
+    if grep -qiF 'There is nothing to send' <<<"$sheet"; then
         # The product's own answer, and it is the correct one: this harness
         # cannot put anything on the Android clipboard. There is no `cmd
         # clipboard` in this build, and the only other way in is a human
@@ -895,7 +895,7 @@ if ptap_label "$guest_dev_name" '^Send clipboard$' 2>/dev/null || ptap_label 'Qu
         sleep 2
     fi
     pdump || abort "cannot read the phone's view hierarchy after closing the clipboard sheet"
-    "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiF 'Send to ' \
+    grep -qiF 'Send to ' <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)" \
         && abort "the 'Send clipboard' sheet is still open; L15's prompt would be drawn behind it" \
         || ok "L14: the clipboard sheet is closed, so L15 can see the phone's own screens"
 else
@@ -954,7 +954,7 @@ files_tab="$("$PUI" "$EVIDENCE/.ui.xml" nav '^Files$' 2>/dev/null)" || files_tab
 ptap $files_tab
 sleep 4
 pdump || abort "cannot read the phone's view hierarchy after opening the Files tab"
-"$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qE '^(Active|Received|No files yet)$' \
+grep -qE '^(Active|Received|No files yet)$' <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)" \
     || abort "the Files tab did not open (no Active/Received section); the offer would be looked for on another screen"
 ok "L15: the phone's Files tab is open, which is where an incoming offer is drawn"
 
@@ -963,11 +963,11 @@ ok "L15: the phone's Files tab is open, which is where an incoming offer is draw
 # and a harness that did not tap would record a product failure.
 pdump || abort "cannot read the phone's view hierarchy while the offer is live"
 cp "$EVIDENCE/.ui.xml" "$EVIDENCE/42-L15-offer-ui.xml" 2>/dev/null || true
-if "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qF "$SENT_FILE_NAME"; then
+if grep -qF "$SENT_FILE_NAME" <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)"; then
     ok "L15: the phone shows an incoming-file prompt naming THIS run's file"
     # The prompt names the sender. Asserting it is what binds this transfer to
     # the guest under test rather than to any other desktop the tablet knows.
-    if "$PUI" "$EVIDENCE/.ui.xml" texts | grep -qiE "from $guest_dev_name"; then
+    if grep -qiE "from $guest_dev_name" <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts)"; then
         ok "L15: the prompt attributes the offer to $guest_dev_name, the machine under test"
     else
         notok "L15: the incoming-file prompt does not attribute the offer to $guest_dev_name"
@@ -991,7 +991,8 @@ sleep 12
 xfers="$(ob transfers 2>&1)"
 printf '%s\n' "$xfers" | save "43-L15-transfers.txt"
 [ -n "${xfers//[[:space:]]/}" ] || abort "'omnibridge transfers' produced no output"
-if printf '%s' "$xfers" | grep -A4 "$SENT_FILE_NAME" | grep -qE 'state +completed'; then
+xfer_ctx="$(grep -A4 "$SENT_FILE_NAME" <<<"$xfers")"
+if grep -qE 'state +completed' <<<"$xfer_ctx"; then
     ok "L15: the guest reports the transfer completed"
 else
     notok "L15: the guest does not report $SENT_FILE_NAME as completed"
@@ -1006,7 +1007,7 @@ if [ -n "$xfer_id" ]; then
         || abort "no journal line names transfer=$xfer_id; this transfer cannot be corroborated"
     printf '%s\n' "$jf" | save "43b-L15-journal.txt"
     ok "L15: $(printf '%s\n' "$jf" | grep -c .) journal line(s) name transfer=$xfer_id specifically"
-    printf '%s' "$jf" | grep -qi 'the peer confirmed it stored the file' \
+    grep -qi 'the peer confirmed it stored the file' <<<"$jf" \
         && ok "L15: the guest journal records the peer confirming it stored THIS transfer" \
         || notok "L15: no 'peer confirmed it stored the file' line for transfer=$xfer_id"
 else
@@ -1024,12 +1025,12 @@ if files_xy="$("$PUI" "$EVIDENCE/.ui.xml" nav '^Files$' 2>/dev/null)"; then
 fi
 pdump || true
 cp "$EVIDENCE/.ui.xml" "$EVIDENCE/44-L15-phone-files.xml" 2>/dev/null || true
-if "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qF "$SENT_FILE_NAME"; then
+if grep -qF "$SENT_FILE_NAME" <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)"; then
     ok "L15: the phone's Files tab lists $SENT_FILE_NAME"
-    "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiE "From $guest_dev_name" \
+    grep -qiE "From $guest_dev_name" <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)" \
         && ok "L15: the phone attributes it to '$guest_dev_name'" \
         || notok "L15: the phone does not attribute the file to $guest_dev_name"
-    "$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null | grep -qiE '^Received$' \
+    grep -qiE '^Received$' <<<"$("$PUI" "$EVIDENCE/.ui.xml" texts 2>/dev/null)" \
         && ok "L15: the phone marks it Received" \
         || notok "L15: the phone does not mark $SENT_FILE_NAME as Received"
 else
@@ -1049,7 +1050,7 @@ if gx "test -d $dl"; then
     ok "L15: the guest's receive directory exists with ${n_recv} file(s)"
     if [ -n "${modes//[[:space:]]/}" ]; then
         printf '%s\n' "$modes" | save "45-L15-received-modes.txt"
-        if printf '%s' "$modes" | grep -qv "^600 $GUEST_USER"; then
+        if grep -qv "^600 $GUEST_USER" <<<"$modes"; then
             notok "L15: a received file is not 0600 $GUEST_USER: $(printf '%s' "$modes" | tr '\n' ' ')"
         else
             ok "L15: every received file is 0600 and owned by $GUEST_USER"
@@ -1072,7 +1073,7 @@ printf '%s\n' "$nstatus_before" | save "46-L16-status-before.txt"
 # fail for the right reason. It is a PRECONDITION and not a check: the phone
 # announces the source role only once an app has been chosen and the listener
 # is bound, and both of those are this harness's own doing.
-printf '%s' "$nstatus_before" | grep -qi 'can source notifications' \
+grep -qi 'can source notifications' <<<"$nstatus_before" \
     || abort "the phone announces no notification source role; the app choice or the listener binding above did not take, and L16 would measure that rather than mirroring"
 ok "L16: the phone announces a notification source role"
 
@@ -1113,7 +1114,7 @@ sleep 15
 gx 'pkill -f "dbus-monitor --session"; true' >/dev/null 2>&1
 
 # The fixture must actually have posted, or nothing downstream means anything.
-"${ADB[@]}" shell dumpsys notification 2>/dev/null | grep -q "pkg=$FIXTURE_PKG" \
+grep -q "pkg=$FIXTURE_PKG" <<<"$("${ADB[@]}" shell dumpsys notification 2>/dev/null)" \
     || abort "the fixture posted nothing to the phone's own shade; L16 has no source notification to mirror"
 ok "L16: the fixture's notification is on the phone's shade"
 
@@ -1137,7 +1138,7 @@ if [ "${n_cap:-0}" -lt 2 ] 2>/dev/null; then
     notok "L16: the D-Bus capture holds ${n_cap} line(s); the mirrored notification cannot be bound to its content"
 else
     ok "L16: captured $n_cap line(s) of Notify traffic bracketing the post"
-    if printf '%s' "$notify_cap" | grep -qF "$SENT_NOTIF" && printf '%s' "$notify_cap" | grep -qF "$SENT_NOTIF_BODY"; then
+    if grep -qF "$SENT_NOTIF" <<<"$notify_cap" && grep -qF "$SENT_NOTIF_BODY" <<<"$notify_cap"; then
         ok "L16: the desktop's Notify call carries BOTH this run's sentinels -- the notification shown on the guest is the one the phone posted"
     else
         notok "L16: the Notify traffic does not carry this run's sentinels; what was mirrored is not this notification"
@@ -1154,9 +1155,9 @@ if [ "${n_jnl:-0}" -lt 2 ] 2>/dev/null; then
     na "L16: the 'no content in the journal' half is NOT asserted here. The daemon logs nothing for a mirrored notification at its default level, so the capture covering the operation holds ${n_jnl} line(s) and a grep over it would pass vacuously. Release Readiness R2 takes this at TRACE with sentinels, which is where it can mean something."
 else
     ok "L16: captured $n_jnl journal line(s) covering the notification (non-vacuous)"
-    if printf '%s' "$jnl" | grep -qF "$SENT_NOTIF"; then
+    if grep -qF "$SENT_NOTIF" <<<"$jnl"; then
         notok "L16/SEC-LOG-02: the notification TITLE sentinel appears in the daemon journal"
-    elif printf '%s' "$jnl" | grep -qF "$SENT_NOTIF_BODY"; then
+    elif grep -qF "$SENT_NOTIF_BODY" <<<"$jnl"; then
         notok "L16/SEC-LOG-02: the notification BODY sentinel appears in the daemon journal"
     else
         ok "L16/SEC-LOG-02: neither sentinel appears in $n_jnl journal lines"
