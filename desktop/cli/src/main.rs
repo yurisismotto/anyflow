@@ -534,6 +534,26 @@ fn print_clipboard_status(report: &ClipboardStatusReport) {
             "NOT supported here — this session cannot detect clipboard changes"
         }
     );
+    // Its own line, because until finding F-2 the product asserted this one
+    // rather than printing it: four places said "manual send still works"
+    // whenever auto-send did not, and on a compositor with no data-control and
+    // no reachable Xwayland it does not. Both read a selection this process
+    // does not own; if the watcher cannot, neither can a send.
+    //
+    // Derived from the same flag rather than probed, deliberately: probing
+    // would mean a real `wl-paste`, which on exactly the session in question
+    // blocks for the backend timeout — `clipboard status` would hang for the
+    // length of its own diagnosis.
+    println!(
+        "  manual send          {}",
+        if report.watch_available {
+            "supported on this session"
+        } else {
+            "NOT supported here — sending reads the selection the same way \
+             auto-send watches it"
+        }
+    );
+    println!("  receiving            supported — writing a clip needs no data-control protocol");
     // Printed so the bounded-growth property is observable rather than merely
     // documented. Neither cache holds content.
     println!(

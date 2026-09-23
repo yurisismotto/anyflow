@@ -477,10 +477,25 @@ fn detect_watch_source() -> WatchSource {
 
     match super::x11::probe() {
         Ok(()) => WatchSource::X11Fixes,
+        // NOT "manual send still works". It does not, and saying so was
+        // finding F-2.
+        //
+        // Both paths read a selection this process does not own: the watcher
+        // needs it continuously, `clipboard send` needs it once. Neither
+        // data-control nor the Xwayland bridge is available in this branch, so
+        // `wl-paste` waits for a seat the compositor will not grant and the
+        // read ends in BackendError::TimedOut. Measured on Debian 13 trixie
+        // with GNOME 48 Wayland, the session provably unlocked.
+        //
+        // Receiving is genuinely unaffected, and that is worth saying, because
+        // it is the half that still works: writing a clip with `wl-copy` needs
+        // no data-control protocol.
         Err(why) => WatchSource::None(format!(
             "the compositor does not implement the wlr/ext data-control \
              protocol, and the Xwayland fallback is not usable either ({why}). \
-             Clipboard auto-send cannot run; manual send still works."
+             This session cannot read a selection it does not own, so neither \
+             automatic nor manual sending can work here. Receiving a clipboard \
+             from a paired device is unaffected."
         )),
     }
 }

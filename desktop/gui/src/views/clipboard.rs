@@ -78,7 +78,8 @@ pub fn render(container: &gtk::Box, state: &DaemonState, pages: &Pages) {
          is available."
     } else {
         "Clipboard changes cannot be detected on this computer, so automatic \
-         sending is unavailable. Sending by hand still works."
+         sending is unavailable. Sending by hand needs the same access and is \
+         usually unavailable too. Receiving is unaffected."
     }));
 
     // Sensitive marking is its own row, and it is here rather than only in a
