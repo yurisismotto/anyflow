@@ -322,8 +322,24 @@ The primary is **certify-only**; releases are signed by its `sign`-only subkey
 against the **primary** fingerprint above — that is the long-term anchor, and
 the verifier resolves the subkey for you.
 
+**Where the key is.** The armoured public key is
+[`packaging/release/omnibridge-release-pubkey.asc`](packaging/release/omnibridge-release-pubkey.asc)
+in this repository, which gives it a stable URL that does not change with the
+release:
+
+```
+https://raw.githubusercontent.com/yurisismotto/omnibridge/main/packaging/release/omnibridge-release-pubkey.asc
+```
+
+It is also attached to every release page as `omnibridge-release-pubkey.asc`.
+Both copies are the same key, and neither is a substitute for checking the
+fingerprint printed above — a key fetched over HTTPS from a repository is
+still a key somebody could have replaced, and the fingerprint is what makes
+the check mean something.
+
 ```bash
 # 1. import the published public key into a keyring of its own
+curl -fsSLO https://raw.githubusercontent.com/yurisismotto/omnibridge/main/packaging/release/omnibridge-release-pubkey.asc
 gpg --homedir ./ob-verify --import omnibridge-release-pubkey.asc
 gpg --homedir ./ob-verify --export > ob-release.gpg
 
