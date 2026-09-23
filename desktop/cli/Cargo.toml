@@ -29,10 +29,10 @@ path = "src/main.rs"
 # The control contract and the platform transport, not the agent. Before
 # Wave 0 this was `omnibridge-daemon`, which meant the CLI inherited mDNS, the
 # capability crates and UPower to obtain some `serde` structs (audit C1).
-omnibridge-control = { version = "0.1.0", path = "../control" }
+omnibridge-control = { version = "1.0.0", path = "../control" }
 # `default-features = false` turns off the crate's `tray` feature. A command
 # that runs and exits has no use for a tray icon.
-omnibridge-linux = { version = "0.1.0", path = "../platform-linux", default-features = false }
+omnibridge-linux = { version = "1.0.0", path = "../platform-linux", default-features = false }
 tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "io-std", "signal"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }

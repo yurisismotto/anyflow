@@ -38,8 +38,8 @@ unwrap_used = "warn"
 # `omnibridge-core`, never its Unix filesystem adapter. Leaving the default on
 # would drag `unix-fs` into every build through feature unification, and the
 # portability gate would then pass for the wrong reason.
-omnibridge-core = { version = "0.1.0", path = "../../core", default-features = false }
-omnibridge-proto = { version = "0.1.0", path = "../../proto" }
+omnibridge-core = { version = "1.0.0", path = "../../core", default-features = false }
+omnibridge-proto = { version = "1.0.0", path = "../../proto" }
 async-trait = "0.1"
 prost = "0.14"
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }

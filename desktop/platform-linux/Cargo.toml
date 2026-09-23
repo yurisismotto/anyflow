@@ -47,9 +47,9 @@ tray = ["dep:zbus", "dep:futures-lite"]
 desktop-activation = ["dep:zbus", "tray"]
 
 [dependencies]
-omnibridge-core = { version = "0.1.0", path = "../core", features = ["unix-fs"] }
-omnibridge-control = { version = "0.1.0", path = "../control" }
-omnibridge-proto = { version = "0.1.0", path = "../proto" }
+omnibridge-core = { version = "1.0.0", path = "../core", features = ["unix-fs"] }
+omnibridge-control = { version = "1.0.0", path = "../control" }
+omnibridge-proto = { version = "1.0.0", path = "../proto" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["net", "io-util", "rt"] }
 tracing = "0.1"

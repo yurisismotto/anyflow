@@ -68,7 +68,7 @@ repository, and the lockfile it is generated from is what is authoritative.
 Building
 --------
 
-    ./packaging/release/make-source-bundle.sh --rev v0.1.0 --output dist
+    ./packaging/release/make-source-bundle.sh --rev v1.0.0 --output dist
     ./packaging/debian/build-deb.sh --image docker.io/library/debian:trixie dist
 
 `build-deb.sh` does the whole thing in a disposable container: installs the

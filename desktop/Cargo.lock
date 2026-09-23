@@ -1251,7 +1251,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-capability-battery"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "omnibridge-core",
@@ -1264,7 +1264,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-capability-clipboard"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "omnibridge-core",
@@ -1282,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-capability-files"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "hmac",
@@ -1300,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-capability-notifications"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "futures-lite",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1327,7 +1327,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-control"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1363,7 +1363,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-daemon"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1393,7 +1393,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-gui"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-linux"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "futures-lite",
@@ -1424,7 +1424,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-proto"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "prost",
  "prost-build",
@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "omnibridge-runtime"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
