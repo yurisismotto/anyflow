@@ -544,8 +544,9 @@ async fn the_watcher_reports_every_local_change() {
                 // nor Xwayland. Reported, not silently passed.
                 panic!(
                     "this session cannot report clipboard changes: {why}\n\n\
-                     Auto-send is unavailable here; manual send still works. \
-                     Record FEDORA-WAYLAND accordingly."
+                     Neither auto-send nor MANUAL send can work here — both \
+                     read the selection the same way (finding F-2). Receiving \
+                     is unaffected. Record FEDORA-WAYLAND accordingly."
                 );
             }
             Err(e) => panic!("could not start the watcher: {}", explain(&e)),

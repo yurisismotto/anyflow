@@ -114,18 +114,31 @@ choosing one:
 | Distribution | Status | What that means |
 | --- | --- | --- |
 | **Fedora 41+** (developed and certified on 44) | **Runtime certified** | Every capability has been exercised on real hardware in a real GNOME Wayland session, through six certification waves |
-| **Ubuntu 24.04 LTS** | **Build-supported** — compatibility target | Daemon, CLI and GUI compile against the distribution's own GTK stack, proved in CI on every change. **Not yet certified in a real session** |
-| **Ubuntu 26.04 LTS** | **Build-supported** — compatibility target | same |
-| **Debian 13 trixie** | **Build-supported** — compatibility target | same |
+| **Ubuntu 24.04 LTS** | **Runtime certified** | The packages CI publishes, installed on a real desktop with a real GNOME Wayland session, and paired with a physical Android phone over the LAN |
+| **Ubuntu 26.04 LTS** | **Runtime certified** | same |
+| **Debian 13 trixie** | **Runtime certified**, with one documented exception | same, except that manual clipboard **sending** cannot work on its compositor — see [Known limitations](#known-limitations) |
 
-"Build-supported" is a deliberately narrower word than "supported". It means
-the code compiles and its portable logic passes its tests on that
-distribution, which is what
-[`.github/workflows/linux-distro-compat.yml`](.github/workflows/linux-distro-compat.yml)
-checks. It does **not** mean discovery, pairing, clipboard, notifications or
-lock detection have been observed working there — those need a real graphical
-session, and until that certification runs the honest word is
-"build-supported".
+These three moved from "build-supported" to "runtime certified" in
+[lifecycle closure](docs/certification/linux/RELEASE-LIFECYCLE-CLOSURE-V1.md)
+and [peer-gate closure](docs/certification/linux/RELEASE-PEER-GATES-CLOSURE-V1.md).
+**23 of 26 lifecycle gates are certified on all three** — clean install, the
+installed file manifest, autostart, the launcher, D-Bus activation into a live
+session, the tray, mDNS, the listening port, restart, logout/login, reboot,
+remove, reinstall, purge and the trust store surviving all of it — plus
+Android discovery, file transfer and notification mirroring against a physical
+SM-X620 on the same LAN. Two gates are N/A with a stated reason (there is one
+published build per target, so there is nothing to upgrade *from*), and one is
+partial on Debian 13 alone.
+
+The first gate that ran found a defect that made the packages **unusable** on
+both Ubuntu releases — `omnibridged.service` could not start at all — and it
+was fixed before certification continued. That is the argument for doing this
+rather than shipping on a green build matrix.
+
+What is still **not** claimed, on any distribution: sending a file or a
+clipboard **from** the phone to the desktop is untested end to end, because
+driving it needs a human at the phone's document picker. The code paths are
+exercised by the in-process suite; they have not been measured on hardware.
 
 **Ubuntu 22.04 LTS and Debian 12 bookworm cannot run the GUI** and are not
 targets: their libadwaita (1.2) and GTK (4.8) predate the APIs the interface is
@@ -357,10 +370,23 @@ implementations cannot drift apart silently:
   action: the Send clipboard button, the Quick Settings tile, or sharing text
   to OmniBridge. Verified on an SM-X620 (Android 16): background read REFUSED,
   focused read ALLOWED, background `setPrimaryClip` APPLIED.
-* **The desktop clipboard needs an unlocked session.** On GNOME Wayland,
+* **Sending the desktop clipboard needs a session that can read it, and some
+  cannot.** Reading a selection this process does not own requires either the
+  `wlr`/`ext-data-control` protocol or a reachable Xwayland. GNOME implements
+  neither protocol, so it depends on the Xwayland fallback — which is present
+  on Ubuntu 24.04 and 26.04, where sending works, and **not usable on Debian 13
+  trixie**, where it does not. Both automatic *and* manual sending are affected,
+  because both read the selection the same way. **Receiving a clipboard from the
+  phone is unaffected** on every distribution: writing a clip needs no such
+  protocol. `omnibridge clipboard status` reports `auto-send`, `manual send` and
+  `receiving` separately, so the answer for your session is printed rather than
+  guessed.
+* **The desktop clipboard also needs an unlocked session.** On GNOME Wayland,
   `wl-copy` and `wl-paste` block behind the lock screen rather than failing.
   Every call is bounded by a timeout and reported as such, so nothing hangs —
-  but clipboard sync does not work while the screen is locked.
+  but clipboard sync does not work while the screen is locked. A lock is one
+  cause of that timeout and the bullet above is another; the error names both
+  rather than assuming.
 * **Sensitive clips are refused where `wl-copy` cannot mark them.** A clip the
   phone marks as a password or other secret is written with `wl-copy
   --sensitive`, which tells clipboard managers to keep it out of their
@@ -375,9 +401,12 @@ implementations cannot drift apart silently:
   and Debian's `2.2.1` does not, with the same version string.
 * **Clipboard auto-send needs a compositor that can report clipboard changes.**
   GNOME implements neither wlr- nor ext-data-control, so OmniBridge watches via
-  XFIXES on the Xwayland `CLIPBOARD` selection instead (ADR-0014). Without
-  Xwayland there is no watcher and `auto-send` degrades to manual sending,
-  which `omnibridge clipboard status` reports.
+  XFIXES on the Xwayland `CLIPBOARD` selection instead (ADR-0014). Without a
+  reachable Xwayland there is no watcher — and, as the bullet above says,
+  **no manual send either**, because both read the selection the same way.
+  This bullet used to claim auto-send "degrades to manual sending"; it does
+  not, and `omnibridge clipboard status` now reports the two separately
+  instead of inferring one from the other.
 * The desktop private key is protected by filesystem permissions, not by
   hardware. TPM2 sealing is the top security debt
   ([ADR-0006](docs/adr/ADR-0006-device-identity-and-pairing.md)).

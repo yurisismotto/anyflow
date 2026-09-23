@@ -65,9 +65,17 @@ pub enum WatchSource {
     /// XFIXES on the Xwayland `CLIPBOARD` selection. See
     /// [`super::x11`] and ADR-0014.
     X11Fixes,
-    /// No event-driven source. The reason is shown in
-    /// `omnibridge clipboard status`; the capability degrades to manual sending
-    /// rather than polling.
+    /// No event-driven source, and — finding F-2 — **no manual send either**.
+    ///
+    /// It does not "degrade to manual sending": `clipboard send` reads the
+    /// selection through the same path the watcher does, so a session that
+    /// cannot watch cannot read on demand. `wl-paste` waits for a seat the
+    /// compositor will not grant and the read times out.
+    ///
+    /// Receiving is unaffected — writing a clip with `wl-copy` needs no
+    /// data-control protocol. The reason is shown in
+    /// `omnibridge clipboard status`, which reports `auto-send`, `manual send`
+    /// and `receiving` separately for exactly this distinction.
     None(String),
 }
 
