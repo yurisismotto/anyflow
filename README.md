@@ -302,6 +302,59 @@ Needs JDK 21 and Android SDK platform 35. See
 Afterwards the phone reconnects on its own using the stored identities. A
 network change does not require re-pairing.
 
+## Verifying a release download
+
+Every OmniBridge release ships a `SHA256SUMS` covering all fourteen artifacts,
+and a detached OpenPGP signature over that manifest. Checking the signature
+first and the digests second is the only order that helps: checking digests
+first is checking a download against itself.
+
+**The key to trust.** One fingerprint, and it does not change when the
+maintainer's email does:
+
+```
+OmniBridge Release Signing Key
+primary  F545DC184E909192C3FB6F6E64963019E731BE07
+```
+
+The primary is **certify-only**; releases are signed by its `sign`-only subkey
+`E8EDE4706F067739A8D3A8B74C48CB81694FD134`, which expires 2028-09-22. Verify
+against the **primary** fingerprint above — that is the long-term anchor, and
+the verifier resolves the subkey for you.
+
+```bash
+# 1. import the published public key into a keyring of its own
+gpg --homedir ./ob-verify --import omnibridge-release-pubkey.asc
+gpg --homedir ./ob-verify --export > ob-release.gpg
+
+# 2. check the signature, then the files
+./packaging/release/verify-release.sh \
+    --dir <the downloaded release directory> \
+    --keyring ob-release.gpg \
+    --fingerprint F545DC184E909192C3FB6F6E64963019E731BE07
+```
+
+A run that succeeds prints `VERIFIED` and the number of files checked. Anything
+else is a failure — in particular a **missing** `SHA256SUMS.asc` is a failure,
+not a skip, because anyone who can substitute an artifact can also delete the
+signature. `--allow-unsigned` exists, says exactly what it is not checking, and
+reports its result as `CHECKED (UNSIGNED)`.
+
+The releases also carry SLSA build provenance, which is a different claim and
+not a substitute:
+
+```bash
+gh attestation verify <artifact> -R yurisismotto/omnibridge
+```
+
+Provenance answers *"was this built by OmniBridge's CI, from which commit?"*.
+The signature answers *"does the maintainer stand behind this release?"*. A
+green provenance check is not a maintainer signature.
+
+The evidence behind this identity — custody, the signed set, independent
+verification and the negative tests — is in
+[docs/certification/release/RELEASE-SIGNING-CLOSURE-V1.md](docs/certification/release/RELEASE-SIGNING-CLOSURE-V1.md).
+
 ## Security
 
 Read [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md).

@@ -85,11 +85,59 @@ else
     GPG=(gpg --batch --status-fd 3)
     if [ -n "$KEYRING" ]; then
         [ -f "$KEYRING" ] || die "--keyring '$KEYRING' does not exist"
-        # A keyring holding only the expected key, and no access to the user's
-        # own: --no-default-keyring is what makes "trusted by this keyring"
-        # mean something narrower than "in my web of trust".
-        GPG+=(--no-default-keyring --keyring "$KEYRING")
-        say "checking against the keyring $KEYRING"
+        [ -s "$KEYRING" ] || die "--keyring '$KEYRING' is empty; it holds no key to check against"
+
+        # WHY THIS IMPORTS INTO A PRIVATE KEYRING INSTEAD OF PASSING
+        # `--no-default-keyring --keyring FILE`
+        # ----------------------------------------------------------
+        # Those two options are SILENTLY IGNORED when gpg is configured with
+        # `use-keyboxd` -- one line in ~/.gnupg/common.conf, present by default
+        # on Fedora 44. gpg prints only
+        #
+        #     Note: Specified keyrings are ignored due to option "use-keyboxd"
+        #
+        # on stderr, exits normally, and answers out of the user's OWN keyring
+        # instead. Both directions were measured on gpg 2.4.9 before this was
+        # changed:
+        #
+        #   * FALSE PASS -- a release verified `VERIFIED` against a --keyring
+        #     that did not contain the signing key at all, because the user's
+        #     own keyring did. The narrowing this flag advertises never
+        #     happened, and the script said "checking against <file>" while it
+        #     was doing nothing of the kind;
+        #   * FALSE FAIL -- a genuine release, with the CORRECT keyring, on a
+        #     keyboxd host that had not imported the key, was reported as
+        #     "This is what a substituted release looks like". That is how a
+        #     verifier teaches people to ignore it.
+        #
+        # There is no way to switch keyboxd back off for one invocation: gpg
+        # rejects `--no-use-keyboxd` as an invalid option. A private GNUPGHOME
+        # is therefore the only construction that makes "checked against
+        # exactly this keyring" a true statement -- and it carries the property
+        # release evidence needs anyway: the verifier provably holds no secret
+        # key.
+        ISOHOME="$(mktemp -d)" || die "could not create a private keyring directory"
+        chmod 700 "$ISOHOME"
+        trap 'GNUPGHOME="$ISOHOME" gpgconf --kill gpg-agent >/dev/null 2>&1; rm -rf "$ISOHOME"' EXIT INT TERM
+        gpg --homedir "$ISOHOME" --batch --quiet --import <"$KEYRING" >/dev/null 2>&1 \
+            || die "nothing could be imported from --keyring '$KEYRING'; gpg cannot read it as a keyring"
+
+        # An empty import must not be mistaken for a strict check. A keyring
+        # holding no key rejects every signature, which looks identical to
+        # catching a bad one and means nothing.
+        n_keys="$(gpg --homedir "$ISOHOME" --batch --with-colons --list-keys 2>/dev/null | grep -c '^pub:' || true)"
+        [ "${n_keys:-0}" -ge 1 ] \
+            || die "--keyring '$KEYRING' yielded no public key. Verifying against an empty keyring rejects everything, which is not the same as checking anything."
+
+        # A verifier must hold no secret. If the keyring carried any, the
+        # person running this is about to publish evidence that proves the
+        # opposite of what they think.
+        n_sec="$(find "$ISOHOME/private-keys-v1.d" -type f -name '*.key' 2>/dev/null | wc -l)"
+        [ "${n_sec:-0}" -eq 0 ] \
+            || die "--keyring '$KEYRING' carried secret key material; a verifier must hold none"
+
+        GPG+=(--homedir "$ISOHOME")
+        say "checking against $n_keys key(s) imported from $KEYRING, in a private keyring holding no secret material"
     fi
 
     status="$("${GPG[@]}" --verify "$SIG" "$MANIFEST" 3>&1 1>/dev/null 2>/dev/null)" || true

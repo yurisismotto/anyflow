@@ -468,9 +468,18 @@ jobs:
             echo "::error::an OpenSSH private key is present under release/"
             exit 1
           fi
-          if find release -name '*.gpg' -o -name 'secring*' -o -name '*.key' | grep -q .; then
+          # NOT `find ... | grep -q .`. grep -q exits on the first match, find
+          # then dies of SIGPIPE, and `pipefail` turns that into "no match" --
+          # this guard reporting "no key material" while key material is there.
+          # Measured on this call site: 0 misses in 100 runs with one leaked
+          # key, and 100 misses in 100 runs with 500 of them. One leaked key is
+          # the realistic case and it is caught today, so this is a latent
+          # defect rather than a live one -- but it is the exact form AGENTS.md
+          # forbids, and the fix is to capture the output and test it.
+          keyshaped="$(find release \( -name '*.gpg' -o -name 'secring*' -o -name '*.key' \) -print)"
+          if [ -n "$keyshaped" ]; then
             echo "::error::a key-shaped file is present under release/:"
-            find release \( -name '*.gpg' -o -name 'secring*' -o -name '*.key' \) -print
+            printf '%s\n' "$keyshaped"
             exit 1
           fi
           echo "ok  no private key material and no key-shaped file under release/"

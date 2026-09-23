@@ -375,6 +375,17 @@ fingerprint to put in it.
 
 ## 7. State of the three gates
 
+> **SUPERSEDED — 2026-09-23, branch `feature/release-signing-provisioning-v1`.**
+> All three gates below are now **CLOSED**. The key was provisioned, a real
+> artifact set from commit `14e958d` was signed with it, the signature was
+> verified independently against a public-only keyring, and the negative tests
+> pass against that real set. `RELEASE_SIGNING_KEY` was **not** created — §5's
+> recommended Option 1 was not the option taken, and the table below still
+> describes the pre-decision state. See
+> [RELEASE-SIGNING-CLOSURE-V1.md](../../certification/release/RELEASE-SIGNING-CLOSURE-V1.md).
+> The original assessment stands below.
+
+
 | Gate | Before | Now | Remaining |
 | --- | --- | --- | --- |
 | **RC-SIGN-01** a maintainer key exists, public half published | OPEN | **OPEN** | §6 — the decision, then six commands |
@@ -503,6 +514,60 @@ key is lost or compromised, then follow §8.4's rotation for a new primary.
 
 ### 8.6 The exact commands — run these only after approving §8.1 and §8.2
 
+> **SUPERSEDED — 2026-09-23, branch `feature/release-signing-provisioning-v1`.**
+>
+> The production identity was provisioned on 2026-09-23. **The procedure below
+> is not the procedure that was run**, and it should not be run as written.
+>
+> What it gets wrong is step 6. It exports, encrypts and restore-tests the
+> secret key — and then leaves the primary's secret half sitting in
+> `~/.gnupg` on the workstation. §8.3 of this same document says the primary
+> "lives offline, used only to manage the key". Generating both halves into
+> the operational keyring and stopping there does not implement that; it
+> describes a custody model the commands never establish. Nothing downstream
+> would have noticed: `sign-release.sh` works either way, and so does every
+> test in the foundation suite, because a workstation holding the master signs
+> exactly as well as one holding only the subkey.
+>
+> It also stages the secret through `/tmp/omnibridge-secret.asc` before
+> encrypting it. `shred -u` follows, but on a `tmpfs` or a copy-on-write
+> filesystem that is a hope rather than an erasure, and the plaintext master
+> need never touch a filesystem at all.
+>
+> **What was actually run** was an offline-master / operational-subkey
+> procedure: the encrypted backup and the revocation certificate were written
+> to two separate offline media, the backup was restore-tested, the primary's
+> secret half was then **removed from the workstation** leaving only the
+> signing subkey's, and the temporary keyring used to hold the master was
+> destroyed. The operator confirmed the master never touched CI and is no
+> longer present operationally.
+>
+> Measured after the fact, on the real key — `sec#` against the primary and a
+> keygrip with no file behind it, which is the fact the `#` is only a label
+> for:
+>
+> ```console
+> $ gpg --list-secret-keys F545DC184E909192C3FB6F6E64963019E731BE07
+> sec#  ed25519 2026-09-23 [C]
+>       F545DC184E909192C3FB6F6E64963019E731BE07
+> uid           OmniBridge Release Signing Key
+> ssb   ed25519 2026-09-23 [S] [expires: 2028-09-22]
+>       E8EDE4706F067739A8D3A8B74C48CB81694FD134
+> ```
+>
+> The custody model in §8.3, §8.4 and §8.5 is **unchanged and was followed**.
+> Only the commands in §8.6 are superseded. The gap is now also a test:
+> `packaging/tests/release-signing-tests.sh` builds an operational keyring
+> holding only the signing subkey and requires that certification and expiry
+> changes **fail** from it, so a keyring that still held the master would be
+> caught rather than assumed.
+>
+> The provisioned identity, the signed artifact set and the verification
+> evidence are in
+> [RELEASE-SIGNING-CLOSURE-V1.md](../../certification/release/RELEASE-SIGNING-CLOSURE-V1.md).
+> The original text stands below, unedited.
+
+
 Run on your workstation. **Nothing below has been run.** `<FPR>` is the primary
 fingerprint printed by step 2.
 
@@ -596,6 +661,26 @@ have failed, and the first user to check a fingerprint would have been told the
 release was tampered with.
 
 ### 8.9 Gate status after this decision
+
+> **SUPERSEDED — 2026-09-23, branch `feature/release-signing-provisioning-v1`.**
+> **All four conditions below are now measured and hold, and D-2 is PASS.**
+>
+> | | Condition | Evidence |
+> | --- | --- | --- |
+> | 1 | the production signing identity is provisioned | closure §1 — primary `F545DC18…E731BE07` certify-only, subkey `E8EDE470…694FD134` sign-only to 2028-09-22, primary secret absent from the workstation |
+> | 2 | a **real** release artifact set is signed with it | closure §2–§3 — 14 artifacts from commit `14e958d`, run 35815768243, `SHA256SUMS.asc` produced locally |
+> | 3 | those signatures are verified **independently** of the signing step | closure §4 — public-only keyring holding zero secret key files, primary fingerprint pinned, re-verified from a keyring that had never seen the key |
+> | 4 | the negative tests pass against that real signed set | closure §5 — SIGN-NEG-01…07, **47 passed, 0 failed** |
+>
+> RC-SIGN-01 and RC-SIGN-03 are **CLOSED**. RC-SIGN-02 closed in the form this
+> section itself defined — *"every release carries a valid `SHA256SUMS.asc`,
+> produced locally"* — and **not** by CI holding a key, because it does not.
+> The production-signing gate is no longer open. The original text stands
+> below.
+>
+> Full evidence:
+> [RELEASE-SIGNING-CLOSURE-V1.md](../../certification/release/RELEASE-SIGNING-CLOSURE-V1.md).
+
 
 | Gate | Status | Blocked on |
 | --- | --- | --- |
