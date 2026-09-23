@@ -49,6 +49,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The tracked-tree private-armour scanner, held in a variable so the shell
+# never has to nest one heredoc inside another.
+OMNIBRIDGE_SCANNER_PY='import os, re, sys
+root = sys.argv[1]
+hdr = re.compile(r'\''-----BEGIN (?:PGP |OPENSSH |ENCRYPTED |RSA |EC |DSA )?PRIVATE KEY(?: BLOCK)?-----'\'')
+b64 = re.compile(r'\''^[A-Za-z0-9+/=]{40,}$'\'')
+for raw in sys.stdin.buffer.read().split(b'\''\0'\''):
+    if not raw:
+        continue
+    rel = raw.decode('\''utf-8'\'', '\''replace'\'')
+    fp = os.path.join(root, rel)
+    try:
+        if os.path.getsize(fp) > 16 * 1024 * 1024:
+            continue
+        lines = open(fp, encoding='\''utf-8'\'', errors='\''replace'\'').read().splitlines()
+    except (OSError, ValueError):
+        continue
+    for i, line in enumerate(lines):
+        if hdr.search(line) and any(b64.match(x.strip()) for x in lines[i + 1:i + 7]):
+            print(rel)
+            break
+'
+
 TEST_UID="OmniBridge TEST KEY -- DO NOT TRUST <test-key@invalid.example>"
 WRONG_UID="OmniBridge WRONG TEST KEY -- DO NOT TRUST <wrong-key@invalid.example>"
 
@@ -259,105 +282,125 @@ if [ -n "${pp_hits//[[:space:]]/}" ]; then
 else
     ok "sign-release.sh contains no passphrase-handling code at all; the gpg agent or the secret store holds it"
 fi
-# Nothing test-only may be committed. The keys live in $WORK and nowhere else.
+# Nothing test-only may be committed, and nothing key-shaped either. The keys
+# live in $WORK and nowhere else.
 #
-# ONE FILE IS ALLOWED, AND IT IS OPENED RATHER THAN TRUSTED
-# ---------------------------------------------------------
-# The armoured PUBLIC release key is committed on purpose:
-# RELEASE-SIGNING-FOUNDATION-V1.md §8.7 decided that publication means "a
-# release asset, and a stable URL", and a stable URL means version control.
-# Renaming it to something this check does not match would be the wrong fix
-# twice over -- `.asc` is what `gpg --import` expects and what README.md
-# documents -- so the exception is named here and it is the only one.
+# NO EXCEPTIONS -- THIS CHECK USED TO HAVE ONE
+# --------------------------------------------
+# v1.0.0 briefly tracked the armoured PUBLIC release key at
+# `packaging/release/omnibridge-release-pubkey.asc`, so that it would have a
+# stable raw URL, and this check carried a named exemption for that one path.
+# The key is published as a GitHub Release asset instead, the file is gone,
+# and the exemption went with it: any tracked `.gpg`/`.asc`/`.key`/`.pem` is a
+# failure again, with nothing carved out.
 #
-# A NAME IS NOT A WARRANT. As written before v1.0.0 this check proved nothing
-# about content: it matched an extension, so a secret key committed as
-# `notes.txt` passed it and a public key named `.asc` failed it. The allowed
-# file is now opened, and is required to be a public block holding no private
-# armour of any form and to carry the identity README.md tells users to
-# trust. That is strictly more than the old form established about any file.
+# A NAME IS NOT A WARRANT, and that half is kept
+# ----------------------------------------------
+# The exemption is gone; the lesson that produced it is not. A name rule on its
+# own proves nothing about content -- a secret key committed as `notes.txt`
+# passes it. So the tracked tree is ALSO read, and no tracked file may carry
+# private-key armour whatever it is named. That is strictly more than this
+# check established before v1.0.0, and, unlike the exemption, it needs no
+# special case to be true.
 #
 # A here-string, not a pipe: `git ls-files` is long, `grep -q` exits on its
 # first match, and under pipefail the SIGPIPE turns a match into a miss -- the
 # defect packaging-checks.sh H1 exists to catch, which caught this line.
-PUBKEY_REL='packaging/release/omnibridge-release-pubkey.asc'
-PUBKEY="$ROOT/$PUBKEY_REL"
 tracked="$(git -C "$ROOT" ls-files)"
 [ -n "${tracked//[[:space:]]/}" ] || die "git ls-files returned nothing; this scan would be vacuous"
 key_shaped="$(grep -E '\.(gpg|asc|key|pem)$' <<<"$tracked" || true)"
-unexpected="$(grep -vxF -- "$PUBKEY_REL" <<<"$key_shaped" || true)"
-if [ -n "${unexpected//[[:space:]]/}" ]; then
-    notok "a key-shaped file is committed to the repository: $(head -3 <<<"$unexpected" | tr '\n' ' ')"
+if [ -n "${key_shaped//[[:space:]]/}" ]; then
+    notok "a key-shaped file is committed to the repository: $(head -3 <<<"$key_shaped" | tr '\n' ' ')"
 else
-    ok "no key-shaped file is committed to the repository beyond the published public key"
+    ok "no key-shaped file is committed to the repository"
 fi
 
-# The published key must BE there. README.md hands users a URL for it, and a
-# documented URL that 404s is a verification recipe with no first step.
-if grep -qxF -- "$PUBKEY_REL" <<<"$tracked"; then
-    ok "the published public key is committed at $PUBKEY_REL"
+# --- and no tracked file carries private key armour, whatever it is called ---
+#
+# A HEADER IS NOT A KEY. Every guard that looks for leaked key material has to
+# CONTAIN the string it looks for, so this file, sign-release.sh,
+# release-signing-production-tests.sh and the release workflow all carry
+# `-----BEGIN PGP PRIVATE KEY BLOCK-----` as a pattern literal. Matching the
+# header alone would report several leaked keys in a tree that has none -- a
+# FAIL about the test rather than the product, which is the half of the
+# AGENTS.md rule that is easy to miss. A hit therefore requires a long base64
+# payload within six lines of the header.
+if ! command -v python3 >/dev/null 2>&1; then
+    skip "python3 is absent, so the tracked tree was NOT scanned for private key armour"
 else
-    notok "$PUBKEY_REL is not committed, but README.md publishes a URL for it"
-fi
-
-if [ -s "$PUBKEY" ]; then
-    # The detector is shown to work before its silence is worth anything: the
-    # same discipline as SIGN-NEG-06. The control is a REAL exported secret
-    # key, planted in scratch space; nothing of any production key is touched.
+    # The detector proves itself before its silence is worth anything: a
+    # scanner that finds nothing has two explanations and only one is good
+    # news. The control is a REAL exported secret key -- the ephemeral per-run
+    # test identity, never a production one.
     priv_re='-----BEGIN (PGP |OPENSSH |ENCRYPTED |RSA |EC |DSA )?PRIVATE KEY( BLOCK)?-----'
-    CANARY_KEY="$WORK/pubkey-check-canary.asc"
+    CANARY_KEY="$WORK/tracked-scan-canary.asc"
     gpg --batch --pinentry-mode loopback --passphrase '' \
         --armor --export-secret-keys "$FPR" > "$CANARY_KEY" 2>/dev/null
     if grep -qE -- "$priv_re" "$CANARY_KEY"; then
-        ok "published-key precondition: the private-armour detector FINDS a real exported secret key"
+        ok "tracked-tree precondition: a REAL armoured private key ($(wc -c <"$CANARY_KEY") bytes) is available as a control"
     else
-        die "the private-armour detector missed a real secret key; its verdict on $PUBKEY_REL would mean nothing"
+        die "could not export a real secret key for the control; the verdict below would mean nothing"
     fi
 
-    if grep -qE -- "$priv_re" "$PUBKEY"; then
-        notok "$PUBKEY_REL carries private key armour; it must be public material only"
+    SCANPY="$WORK/scan-tracked.py"
+    printf '%s' "$OMNIBRIDGE_SCANNER_PY" > "$SCANPY"
+
+    # The controls run through the SAME scanner, on a scratch tree, so a
+    # scanner broken in a way that reports nothing cannot pass this file.
+    CTL="$WORK/tracked-scan-control"; rm -rf "$CTL"; mkdir -p "$CTL"
+    cp "$CANARY_KEY" "$CTL/planted.asc"
+    printf 'guard pattern with no payload: %s\n' \
+        '-----BEGIN PGP PRIVATE KEY BLOCK-----' > "$CTL/guard-shaped.sh"
+    ctl_hits="$(printf 'planted.asc\0guard-shaped.sh\0' | python3 "$SCANPY" "$CTL")"
+    if grep -qxF 'planted.asc' <<<"$ctl_hits"; then
+        ok "tracked-scan control: the scanner FINDS a planted armoured private key"
     else
-        ok "$PUBKEY_REL carries no private key armour of any form"
+        die "the tracked-tree scanner did not find a key it was handed; its silence would mean nothing"
     fi
-    if grep -qF -- '-----BEGIN PGP PUBLIC KEY BLOCK-----' "$PUBKEY"; then
-        ok "$PUBKEY_REL is an armoured public key block"
+    if grep -qxF 'guard-shaped.sh' <<<"$ctl_hits"; then
+        notok "the tracked-tree scanner mistakes a guard's own pattern literal for a key"
     else
-        notok "$PUBKEY_REL is not an armoured public key block"
+        ok "tracked-scan control: a header with no payload is NOT mistaken for a key"
     fi
 
-    # Imported into a home of its own, because what gpg makes of the bytes is
-    # the fact, and the host keyring cannot answer for it.
-    PUBHOME="$WORK/pubkey-check"; rm -rf "$PUBHOME"; mkdir -p "$PUBHOME"; chmod 700 "$PUBHOME"
-    if GNUPGHOME="$PUBHOME" gpg --batch --quiet --import "$PUBKEY" >/dev/null 2>&1; then
-        n_secret="$(find "$PUBHOME/private-keys-v1.d" -type f 2>/dev/null | wc -l)"
-        if [ "${n_secret:-0}" -eq 0 ]; then
-            ok "importing $PUBKEY_REL yields zero secret key files"
-        else
-            notok "importing $PUBKEY_REL yielded $n_secret secret key file(s)"
-        fi
-
-        # README.md is where a user reads the fingerprint to trust. Taking it
-        # from there rather than repeating a literal means the two cannot
-        # drift apart without this failing.
-        readme_fpr="$(sed -n 's/^primary  *\([0-9A-Fa-f]\{40\}\) *$/\1/p' "$ROOT/README.md" | head -1)"
-        if [ -n "$readme_fpr" ]; then
-            ok "README.md publishes a primary fingerprint to check against"
-            got_fpr="$(GNUPGHOME="$PUBHOME" gpg --batch --with-colons --list-keys 2>/dev/null \
-                       | awk -F: '/^fpr:/ { print $10; exit }')"
-            if [ "$got_fpr" = "$readme_fpr" ]; then
-                ok "the committed public key is the identity README.md publishes ($readme_fpr)"
-            else
-                notok "the committed public key is ${got_fpr:-<unreadable>}, but README.md publishes $readme_fpr"
-            fi
-        else
-            notok "no 'primary <FPR>' line in README.md, so the committed key's identity is unchecked"
-        fi
-        GNUPGHOME="$PUBHOME" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+    n_tracked="$(grep -c . <<<"$tracked" || true)"
+    [ "${n_tracked:-0}" -ge 100 ] \
+        || die "only ${n_tracked:-0} tracked file(s); the scan below would be vacuous"
+    armoured="$(git -C "$ROOT" ls-files -z | python3 "$SCANPY" "$ROOT")"
+    if [ -n "${armoured//[[:space:]]/}" ]; then
+        notok "tracked file(s) carry private key armour: $(head -3 <<<"$armoured" | tr '\n' ' ')"
     else
-        notok "gpg cannot import $PUBKEY_REL; a user following README.md would fail at step 1"
+        ok "no tracked file carries private key armour ($n_tracked files scanned)"
     fi
+fi
+
+# --- the documented verification recipe keeps its anchor --------------------
+#
+# The key now lives only on the release page, so what the repository still
+# owes the reader is the fingerprint to compare it against and a recipe that
+# actually pins it. A recipe that dropped `--fingerprint` would accept any key
+# its keyring happens to trust -- the failure SIGN-NEG-03b exists for.
+readme_fpr="$(sed -n 's/^primary  *\([0-9A-Fa-f]\{40\}\) *$/\1/p' "$ROOT/README.md" | head -1)"
+if [ -n "$readme_fpr" ]; then
+    ok "README.md publishes a primary fingerprint to compare against ($readme_fpr)"
 else
-    notok "$PUBKEY_REL is missing or empty"
+    notok "README.md publishes no 'primary <fingerprint>' line; the recipe has no anchor"
+fi
+if grep -q -- '--fingerprint' "$ROOT/README.md"; then
+    ok "README.md's verification recipe pins the key with --fingerprint"
+else
+    notok "README.md's verification recipe does not pass --fingerprint"
+fi
+if grep -qE 'releases/[^ )]*omnibridge-release-pubkey\.asc' "$ROOT/README.md"; then
+    ok "README.md tells the reader to obtain the key from the release page"
+else
+    notok "README.md does not say where to obtain the public key"
+fi
+# And it must not send them back to a repository copy that no longer exists.
+if grep -q 'raw\.githubusercontent\.com.*omnibridge-release-pubkey' "$ROOT/README.md"; then
+    notok "README.md still points at a repository copy of the public key, which is not tracked"
+else
+    ok "README.md does not point at a repository copy of the public key"
 fi
 
 # ---------------------------------------------------------------------------
