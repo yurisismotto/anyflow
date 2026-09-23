@@ -171,6 +171,25 @@ qualified. None is a blocker and none is new.
 
 ## 4. What this does not authorise
 
+> ### Followed up — 2026-09-23, `feature/rc-certification-v1`
+>
+> One bullet below has since been overtaken by events: **"RC certification has
+> not begun"** was true when this document was written and is no longer. RC
+> certification ran on 2026-09-23 against candidate `ed7c17a`, and its verdict
+> is [RC Certification v1](RC-CERTIFICATION-V1.md) — **RC V1: CERTIFIED WITH
+> EXPLICIT NON-BLOCKING DEBTS**.
+>
+> **Every other bullet below still holds**, and the RC wave asserts them again
+> in its own §13: no merge to `main`, no `v1.0.0` tag, no GitHub Release, no
+> Play Console release, no Android production signing material, and no claim of
+> General Availability.
+>
+> The eleven debts D-4 … D-14 listed in §3 were carried into RC and **all
+> eleven remain non-blocking**; none was resolved and none was promoted.
+>
+> The original text stands unchanged beneath this note.
+
+
 This document ends at RC **readiness**. It is not permission to release, and
 none of the following has happened or is implied:
 
