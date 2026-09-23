@@ -326,19 +326,73 @@ PK_MARK='-----BEGIN PRIVATE KEY-----'
 ENC_MARK='-----BEGIN ENCRYPTED PRIVATE KEY-----'
 SSH_MARK='-----BEGIN OPENSSH PRIVATE KEY-----'
 
-scan_tree() {  # prints every path under $1 holding a private-key header
-    grep -rlZ --binary-files=text \
-        -e "$PGP_MARK" -e "$PK_MARK" -e "$ENC_MARK" -e "$SSH_MARK" \
-        -- "$1" 2>/dev/null | tr '\0' '\n'
+# A HEADER IS NOT A KEY
+# ---------------------
+# Searching for the header alone is wrong in this repository, and wrong in the
+# direction that wastes a person's afternoon. Every guard that looks for leaked
+# key material must CONTAIN the string it looks for, so
+# packaging/release/sign-release.sh, packaging/tests/release-signing-tests.sh,
+# this file and .github/workflows/release-artifacts.yml all carry
+# `-----BEGIN PGP PRIVATE KEY BLOCK-----` as a grep pattern. A header-only scan
+# reports four leaked keys in a tree that has none, and a FAIL that is about
+# the test rather than the product sends someone hunting a defect that is not
+# there -- the second half of the AGENTS.md rule.
+#
+# What makes an armoured block a KEY is the base64 payload after the header. So
+# a hit requires a long base64 line within six lines of the header. Measured
+# both ways below: the guards' pattern literals are not reported, and a real
+# exported key is.
+scan_tree() {  # prints every path under $1 that holds a real armoured private key
+    python3 - "$1" <<'PYEOF'
+import os, re, sys
+root = sys.argv[1]
+hdr = re.compile(r'-----BEGIN (?:PGP |OPENSSH |ENCRYPTED |RSA |EC |DSA )?PRIVATE KEY(?: BLOCK)?-----')
+b64 = re.compile(r'^[A-Za-z0-9+/=]{40,}$')
+for dirpath, dirnames, filenames in os.walk(root):
+    dirnames[:] = [d for d in dirnames if d != '.git']
+    for fn in filenames:
+        fp = os.path.join(dirpath, fn)
+        try:
+            if os.path.getsize(fp) > 64 * 1024 * 1024:
+                continue
+            with open(fp, encoding='utf-8', errors='replace') as fh:
+                lines = fh.read().splitlines()
+        except (OSError, ValueError):
+            continue
+        for i, line in enumerate(lines):
+            if hdr.search(line) and any(b64.match(x.strip()) for x in lines[i + 1:i + 7]):
+                print(fp)
+                break
+PYEOF
 }
 
+# The positive control is a REAL exported private key, not a mock-up. The
+# throwaway identity generated for NEG-03 is exported here in full and planted
+# in a scratch tree; nothing of the production key is touched. A scanner that
+# cannot find an actual armoured secret key has nothing to say about the trees
+# it calls clean.
 CANARY="$WORK/canary"; mkdir -p "$CANARY/nested"
-printf '%s\nnot a real key\n-----END PGP PRIVATE KEY BLOCK-----\n' "$PGP_MARK" > "$CANARY/nested/planted.asc"
+gpg --homedir "$STRANGER" --batch --pinentry-mode loopback --passphrase '' \
+    --armor --export-secret-keys "$STRANGER_FPR" > "$CANARY/nested/planted.asc" 2>/dev/null
+if ! grep -qF -- "$PGP_MARK" "$CANARY/nested/planted.asc"; then
+    die "the canary is not a real armoured private key, so the positive control below would prove nothing"
+fi
+ok "NEG-06 precondition: a REAL armoured private key ($(wc -c <"$CANARY/nested/planted.asc") bytes) was planted in a scratch tree"
 canary_hits="$(scan_tree "$CANARY")"
 if need_nonempty "the canary scan" "$canary_hits" && contains "$canary_hits" "planted.asc"; then
-    ok "NEG-06 positive control: the scanner FINDS a planted private key block"
+    ok "NEG-06 positive control: the scanner FINDS a real planted private key"
 else
-    die "the scanner did not find a key it was handed; its silence on the real targets would mean nothing"
+    die "the scanner did not find a real key it was handed; its silence on the real targets would mean nothing"
+fi
+# And the other half of the control: the guards' own pattern literals, which
+# are headers with no payload, must NOT be reported. Without this, the scan
+# would be useless in exactly this repository.
+GUARDFILE="$WORK/guard-shaped"; mkdir -p "$GUARDFILE"
+printf "if grep -rlq -- '%s' release; then echo leak; fi\n" "$PGP_MARK" > "$GUARDFILE/guard.sh"
+if [ -z "$(scan_tree "$GUARDFILE")" ]; then
+    ok "NEG-06 negative control: a guard's own pattern literal is NOT mistaken for a key"
+else
+    notok "NEG-06: the scanner reports a header with no payload as a key; every tree below would fail spuriously"
 fi
 
 scan_and_report() {  # label, tree
@@ -388,30 +442,37 @@ fi
 scan_and_report "the published source archive" "$SRC"
 
 # The workflow log. This is where a key would show up if CI had ever held one.
-log_hits=""
-for mark in "$PGP_MARK" "$PK_MARK" "$ENC_MARK" "$SSH_MARK"; do
-    if grep -qF -- "$mark" "$RUNLOG"; then log_hits="$log_hits $mark"; fi
-done
+LOGDIR="$WORK/logscan"; mkdir -p "$LOGDIR"; cp "$RUNLOG" "$LOGDIR/run.log"
+log_hits="$(scan_tree "$LOGDIR")"
 if [ -z "${log_hits//[[:space:]]/}" ]; then
     ok "SIGN-NEG-06: no private key header in the workflow log ($(wc -l <"$RUNLOG") lines)"
 else
-    notok "SIGN-NEG-06: the workflow log carries:$log_hits"
+    notok "SIGN-NEG-06: the workflow log carries armoured private key material"
 fi
 
 # ---------------------------------------------------------------------------
 section "SIGN-NEG-07 — the production private key never entered CI"
 # ---------------------------------------------------------------------------
-runlog="$(cat "$RUNLOG")"
-if need_nonempty "the workflow log" "$runlog" 200; then
-    ok "NEG-07 precondition: the workflow log is $(wc -l <"$RUNLOG") lines, so an 'absent' result over it is not vacuous"
+# THE LOG IS GREPPED AS A FILE, NOT SLURPED INTO A VARIABLE
+# ---------------------------------------------------------
+# A CI log is megabytes -- 1.4 MB for this run. `need_nonempty` starts with
+# `${text//[[:space:]]/}`, and bash's pattern substitution over a string that
+# size does not finish in any useful time: MEASURED at over ten minutes with no
+# result before it was killed. The primitive is right for the few-KB journal
+# captures it was written for and wrong here, so this section greps the file
+# instead. That is also the form AGENTS.md endorses -- `grep -q P <<<"$var"`
+# **or grep the file** -- and it cannot lose a match to SIGPIPE either.
+log_lines="$(wc -l <"$RUNLOG")"
+if [ "${log_lines:-0}" -ge 200 ]; then
+    ok "NEG-07 precondition: the workflow log is $log_lines lines, so an 'absent' result over it is not vacuous"
 else
-    die "the workflow log is too short to search; every 'absent' claim below would be vacuous"
+    die "the workflow log holds only ${log_lines:-0} lines; every 'absent' claim below would be vacuous"
 fi
 # The anchor. Before claiming anything is missing from this log, prove the log
 # is the build of THIS commit -- AGENTS.md's window rule. A log from some other
 # run would answer "absent" to every question below, including the ones whose
 # true answer is "present".
-if need_window_covers "the workflow log" "$runlog" "resolved  : $COMMIT"; then
+if grep -qF -- "resolved  : $COMMIT" "$RUNLOG"; then
     ok "NEG-07 anchor: the log is the build that resolved $COMMIT, the commit under test"
 else
     die "the log does not record a build of $COMMIT, so nothing can be concluded from what it lacks"
@@ -420,25 +481,25 @@ fi
 # echoed into the log verbatim, so a plain search for the message would match
 # the un-run `echo` that produces it; only the rendered notice proves the
 # branch was taken.
-if contains "$runlog" "##[notice]No RELEASE_SIGNING_KEY secret is configured"; then
+if grep -qF -- '##[notice]No RELEASE_SIGNING_KEY secret is configured' "$RUNLOG"; then
     ok "SIGN-NEG-07: CI emitted the runtime notice that no signing key was configured"
 else
     notok "SIGN-NEG-07: the log carries no rendered 'no signing key' notice; CI may have taken the signing path"
 fi
 # And the consequence, printed by a later step at runtime rather than echoed.
-if contains "$runlog" "SHA256SUMS is NOT signed. Signing needs a private key this"; then
+if grep -qF -- 'SHA256SUMS is NOT signed. Signing needs a private key this' "$RUNLOG"; then
     ok "SIGN-NEG-07: the run's Signing status step reported the release unsigned"
 else
     notok "SIGN-NEG-07: the run did not report the release unsigned"
 fi
-if absent "$runlog" "imported a signing key"; then
+if ! grep -qF -- 'imported a signing key' "$RUNLOG"; then
     ok "SIGN-NEG-07: CI never imported a signing key"
 else
     notok "SIGN-NEG-07: the log says CI imported a signing key"
 fi
 # The production fingerprint itself must not appear: neither the primary nor
 # the signing subkey was ever known to CI.
-if absent "$runlog" "$FPR"; then
+if ! grep -qF -- "$FPR" "$RUNLOG"; then
     ok "SIGN-NEG-07: the production primary fingerprint does not appear in the CI log"
 else
     notok "SIGN-NEG-07: the production primary fingerprint appears in the CI log"

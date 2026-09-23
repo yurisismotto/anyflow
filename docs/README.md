@@ -58,7 +58,7 @@ docs/
 │   ├── notifications/          notifications.v1 N6 final certification
 │   ├── security/               Security Certification v1 — the SEC gates
 │   ├── linux/                  real-host desktop certification, gnome/ and kde/ — see its README
-│   └── release/                Release Readiness v1 — the RC verdict over everything above
+│   └── release/                Release Readiness v1 final + signing closure — the RC verdict
 ├── reports/
 │   ├── android/                Android sprint reports
 │   ├── branding/               visual identity, Quick Panel, rebrand closure

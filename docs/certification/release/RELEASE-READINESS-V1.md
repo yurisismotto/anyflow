@@ -11,6 +11,43 @@
 
 ---
 
+## 0a. Closure — 2026-09-23
+
+> **DATED CLOSURE NOTE — 2026-09-23, branch `feature/release-signing-provisioning-v1`.**
+>
+> **D-2 is now PASS, and this document's verdict of BLOCKED is superseded.**
+> Everything below it stands unedited, because it was true when it was written
+> and the reason it was true is worth keeping: on 2026-09-22 no production key
+> existed, and this audit refused to reclassify the gate to make the wave look
+> finished.
+>
+> What changed is not a reclassification. The production identity was
+> provisioned on 2026-09-23, a real fourteen-artifact set built by CI from the
+> immutable commit `14e958d` was signed with it, the signature was verified
+> independently against a public-only keyring, and the negative tests pass
+> against that real signed set. Those are the four conditions §3.6 and
+> foundation §8.9 set, measured rather than argued.
+>
+> | Condition 6 — signing | then | now |
+> | --- | --- | --- |
+> | foundation implemented | ✅ | ✅ |
+> | a release actually signed | ❌ | ✅ `SHA256SUMS.asc` over 14 artifacts, by subkey `E8EDE470…` of primary `F545DC18…` |
+>
+> The other twelve conditions were re-evaluated narrowly rather than re-run:
+> nothing in this closure touched hardware, lifecycle or peer certification.
+> **13 / 13 now hold.**
+>
+> Successor documents:
+> [RELEASE-SIGNING-CLOSURE-V1.md](RELEASE-SIGNING-CLOSURE-V1.md) for the
+> signing evidence, and
+> [RELEASE-READINESS-V1-FINAL.md](RELEASE-READINESS-V1-FINAL.md) for the final
+> verdict.
+>
+> **The historical fact is preserved deliberately: Release Readiness v1 was
+> BLOCKED on D-2, and it was blocked for a day.**
+
+---
+
 ## 0. Executive summary
 
 Twelve of the thirteen RC conditions hold, and are measured rather than

@@ -375,6 +375,17 @@ fingerprint to put in it.
 
 ## 7. State of the three gates
 
+> **SUPERSEDED — 2026-09-23, branch `feature/release-signing-provisioning-v1`.**
+> All three gates below are now **CLOSED**. The key was provisioned, a real
+> artifact set from commit `14e958d` was signed with it, the signature was
+> verified independently against a public-only keyring, and the negative tests
+> pass against that real set. `RELEASE_SIGNING_KEY` was **not** created — §5's
+> recommended Option 1 was not the option taken, and the table below still
+> describes the pre-decision state. See
+> [RELEASE-SIGNING-CLOSURE-V1.md](../../certification/release/RELEASE-SIGNING-CLOSURE-V1.md).
+> The original assessment stands below.
+
+
 | Gate | Before | Now | Remaining |
 | --- | --- | --- | --- |
 | **RC-SIGN-01** a maintainer key exists, public half published | OPEN | **OPEN** | §6 — the decision, then six commands |
@@ -650,6 +661,26 @@ have failed, and the first user to check a fingerprint would have been told the
 release was tampered with.
 
 ### 8.9 Gate status after this decision
+
+> **SUPERSEDED — 2026-09-23, branch `feature/release-signing-provisioning-v1`.**
+> **All four conditions below are now measured and hold, and D-2 is PASS.**
+>
+> | | Condition | Evidence |
+> | --- | --- | --- |
+> | 1 | the production signing identity is provisioned | closure §1 — primary `F545DC18…E731BE07` certify-only, subkey `E8EDE470…694FD134` sign-only to 2028-09-22, primary secret absent from the workstation |
+> | 2 | a **real** release artifact set is signed with it | closure §2–§3 — 14 artifacts from commit `14e958d`, run 35815768243, `SHA256SUMS.asc` produced locally |
+> | 3 | those signatures are verified **independently** of the signing step | closure §4 — public-only keyring holding zero secret key files, primary fingerprint pinned, re-verified from a keyring that had never seen the key |
+> | 4 | the negative tests pass against that real signed set | closure §5 — SIGN-NEG-01…07, **47 passed, 0 failed** |
+>
+> RC-SIGN-01 and RC-SIGN-03 are **CLOSED**. RC-SIGN-02 closed in the form this
+> section itself defined — *"every release carries a valid `SHA256SUMS.asc`,
+> produced locally"* — and **not** by CI holding a key, because it does not.
+> The production-signing gate is no longer open. The original text stands
+> below.
+>
+> Full evidence:
+> [RELEASE-SIGNING-CLOSURE-V1.md](../../certification/release/RELEASE-SIGNING-CLOSURE-V1.md).
+
 
 | Gate | Status | Blocked on |
 | --- | --- | --- |
