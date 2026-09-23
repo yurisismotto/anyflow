@@ -27,9 +27,12 @@ ROOT="$(cd -- "$HERE/../.." && pwd)"
 SIGN="$ROOT/packaging/release/sign-release.sh"
 VERIFY="$ROOT/packaging/release/verify-release.sh"
 
-PASS=0; FAIL=0; declare -a FAILED=()
+PASS=0; FAIL=0; declare -a FAILED=(); declare -a SKIPPED=()
 ok()    { PASS=$(( PASS + 1 )); printf 'ok    %s\n' "$*"; }
 notok() { FAIL=$(( FAIL + 1 )); FAILED+=("$*"); printf 'not ok  %s\n' "$*"; }
+# `n/a` with a reason is evidence; a green tick over nothing is not. A case
+# whose precondition this host cannot provide is recorded here, never passed.
+skip()  { SKIPPED+=("$*"); printf 'not run  %s\n' "$*"; }
 section(){ printf '\n== %s ==\n' "$*"; }
 die()   { printf '\nPRECONDITION FAILED: %s\n' "$*" >&2; exit 3; }
 
@@ -326,7 +329,166 @@ T11="$WORK/t11"; cp -r "$SR" "$T11"
 printf 'tampered\n' >> "$T11/ubuntu2404/omnibridge_0.0.0-test_amd64.deb"
 refute "a modified artifact under a master+subkey signature"     "$VERIFY" --dir "$T11" --keyring "$WORK/subkey-pub.gpg" --fingerprint "$MFPR"
 
+# ---------------------------------------------------------------------------
+section "A --keyring that gpg silently ignores"
+# ---------------------------------------------------------------------------
+# `--no-default-keyring --keyring FILE` is IGNORED whenever gpg runs with
+# `use-keyboxd` -- one line in ~/.gnupg/common.conf, and the configuration this
+# project's own maintainer workstation (Fedora 44, gpg 2.4.9) ships with. gpg
+# prints a Note on stderr, exits 0, and answers out of the user's OWN keyring.
+#
+# Measured on gpg 2.4.9 before the fix, in both directions:
+#
+#   FALSE PASS  a release reported VERIFIED against a --keyring that did not
+#               contain the signing key at all, because the user's own keyring
+#               did -- while the script printed "checking against <file>";
+#   FALSE FAIL  a genuine release, correct --keyring, on a keyboxd host that
+#               had not imported the key: "This is what a substituted release
+#               looks like".
+#
+# The fix imports the given keyring into a private GNUPGHOME and verifies
+# there. The first two checks below are host-independent and encode the fix
+# itself; the behavioural ones need keyboxd and say so when they cannot run.
+
+# Comment lines are stripped first: this file and verify-release.sh both
+# DISCUSS the flags that lie, and a grep over prose would report the defect
+# present forever after it was fixed.
+verify_code="$(grep -v '^[[:space:]]*#' "$VERIFY")"
+if grep -q -e '--no-default-keyring' <<<"$verify_code"; then
+    notok "verify-release.sh still passes --no-default-keyring in code, which keyboxd silently ignores"
+else
+    ok "verify-release.sh's code does not rely on --no-default-keyring/--keyring, which keyboxd silently ignores"
+fi
+if grep -q -e '--homedir "$ISOHOME"' <<<"$verify_code"; then
+    ok "verify-release.sh verifies inside a private GNUPGHOME it built from --keyring"
+else
+    notok "verify-release.sh does not isolate --keyring into a private GNUPGHOME"
+fi
+
+gpg --batch --export "$WRONG_FPR" > "$WORK/stranger-pub.gpg" 2>/dev/null
+
+KBX="$WORK/kbx-holder"; mkdir -p "$KBX"; chmod 700 "$KBX"
+printf 'use-keyboxd\n' > "$KBX/common.conf"
+gpg --homedir "$KBX" --batch --quiet --import < "$WORK/subkey-pub.gpg" >/dev/null 2>&1
+
+# Is keyboxd actually in effect here? If this host cannot enable it, the defect
+# cannot manifest and the two cases below measure nothing. They are then
+# recorded as not executed, with the reason, rather than passing.
+kbx_probe="$(gpg --homedir "$KBX" --batch --no-default-keyring --keyring "$WORK/stranger-pub.gpg" --list-keys 2>&1)"
+case "$kbx_probe" in
+    *use-keyboxd*) KBX_ACTIVE=1 ;;
+    *)             KBX_ACTIVE=0 ;;
+esac
+
+if [ "$KBX_ACTIVE" = "1" ]; then
+    ok "a keyboxd-configured fixture keyring is in effect, so the regression is measurable here"
+
+    # The positive control comes FIRST. Without it, the refutation below would
+    # also pass on a verifier that rejects everything.
+    if env GNUPGHOME="$KBX" "$VERIFY" --dir "$SR" --keyring "$WORK/subkey-pub.gpg" --fingerprint "$MFPR" >/dev/null 2>&1; then
+        ok "positive control: on that keyboxd host, the CORRECT keyring verifies"
+    else
+        notok "the correct keyring failed on a keyboxd host; the refutation below would be vacuous"
+    fi
+
+    refute "FALSE PASS: a keyring without the signer, on a keyboxd host whose own keyring has it" \
+        env GNUPGHOME="$KBX" "$VERIFY" --dir "$SR" --keyring "$WORK/stranger-pub.gpg" --fingerprint "$MFPR"
+
+    KBX2="$WORK/kbx-empty"; mkdir -p "$KBX2"; chmod 700 "$KBX2"
+    printf 'use-keyboxd\n' > "$KBX2/common.conf"
+    if env GNUPGHOME="$KBX2" "$VERIFY" --dir "$SR" --keyring "$WORK/subkey-pub.gpg" --fingerprint "$MFPR" >/dev/null 2>&1; then
+        ok "FALSE FAIL: a genuine release verifies on a keyboxd host that never imported the key"
+    else
+        notok "FALSE FAIL regression: a genuine release was rejected on a keyboxd host"
+    fi
+    env GNUPGHOME="$KBX2" gpgconf --kill keyboxd >/dev/null 2>&1 || true
+else
+    skip "keyboxd could not be enabled in a fixture keyring on this host, so the two keyboxd regressions were NOT EXECUTED"
+fi
+env GNUPGHOME="$KBX" gpgconf --kill keyboxd >/dev/null 2>&1 || true
+
+# A keyring that holds no key must be refused, not treated as a strict check:
+# it rejects every signature, which is indistinguishable from catching a bad one.
+printf 'this is not a keyring\n' > "$WORK/garbage-keyring.gpg"
+refute "a --keyring file that yields no public key" \
+    "$VERIFY" --dir "$SR" --keyring "$WORK/garbage-keyring.gpg" --fingerprint "$MFPR"
+
+# A verifier must hold no secret. A keyring carrying one makes every later
+# claim about "no secret key present" false.
+gpg --batch --pinentry-mode loopback --passphrase '' --export-secret-keys "$MFPR" > "$WORK/secret-keyring.gpg" 2>/dev/null
+refute "a --keyring carrying secret key material" \
+    "$VERIFY" --dir "$SR" --keyring "$WORK/secret-keyring.gpg" --fingerprint "$MFPR"
+rm -f "$WORK/secret-keyring.gpg"
+
+# ---------------------------------------------------------------------------
+section "An operational keyring holding only the signing subkey"
+# ---------------------------------------------------------------------------
+# The custody model in RELEASE-SIGNING-FOUNDATION-V1.md §8.3: the certify-only
+# master lives offline, and only the signing subkey's secret is on the machine
+# that makes releases. Generating both into ~/.gnupg and leaving them there --
+# which §8.6 originally instructed -- does not implement it.
+OPS="$WORK/ops-gnupg"; mkdir -p "$OPS"; chmod 700 "$OPS"
+gpg --batch --pinentry-mode loopback --passphrase '' --export-secret-subkeys "$MFPR" 2>/dev/null \
+  | gpg --homedir "$OPS" --batch --pinentry-mode loopback --passphrase '' --import >/dev/null 2>&1
+
+ops_list="$(gpg --homedir "$OPS" --list-secret-keys 2>/dev/null)"
+case "$ops_list" in
+    *"sec#"*) ok "the operational keyring lists the primary as 'sec#' — its secret half is absent" ;;
+    *)        notok "the operational keyring does not show 'sec#'; the master secret may be present" ;;
+esac
+case "$ops_list" in
+    *ssb*) ok "the operational keyring holds the signing subkey's secret ('ssb')" ;;
+    *)     notok "the operational keyring holds no signing secret" ;;
+esac
+
+# The listing is a label; the keygrip files are the fact.
+ops_pri_grp="$(gpg --homedir "$OPS" --with-colons --with-keygrip --list-keys "$MFPR" | awk -F: '$1=="pub"{f=1} f&&$1=="grp"{print $10; exit}')"
+if [ -n "$ops_pri_grp" ] && [ -e "$OPS/private-keys-v1.d/$ops_pri_grp.key" ]; then
+    notok "the primary's secret key file $ops_pri_grp.key is present in the operational keyring"
+else
+    ok "the primary's keygrip has no secret key file in the operational keyring"
+fi
+ops_nsec="$(find "$OPS/private-keys-v1.d" -type f -name '*.key' 2>/dev/null | wc -l)"
+if [ "${ops_nsec:-0}" -eq 1 ]; then
+    ok "exactly one secret key file — the signing subkey — in the operational keyring"
+else
+    notok "$ops_nsec secret key files in the operational keyring (expected exactly 1)"
+fi
+
+OSR="$WORK/ops-release"
+mkrelease "$OSR"
+if env GNUPGHOME="$OPS" "$SIGN" --dir "$OSR" --key "$MFPR" >"$WORK/ops-sign.log" 2>&1; then
+    ok "sign-release.sh signs by the PRIMARY fingerprint although the primary's secret is absent"
+else
+    notok "signing failed with only the subkey secret present: $(tail -1 "$WORK/ops-sign.log")"
+fi
+if "$VERIFY" --dir "$OSR" --keyring "$WORK/subkey-pub.gpg" --fingerprint "$MFPR" >/dev/null 2>&1; then
+    ok "a subkey-only signature verifies against the published primary fingerprint"
+else
+    notok "a subkey-only signature did not verify against the published primary fingerprint"
+fi
+
+# Certification is what the offline master is FOR. If it can be done here, the
+# master is not offline.
+if env GNUPGHOME="$OPS" gpg --batch --pinentry-mode loopback --passphrase '' \
+        --quick-add-uid "$MFPR" "Injected UID -- DO NOT TRUST <injected@invalid.example>" >/dev/null 2>&1; then
+    notok "a UID was added from the operational keyring; the certify-only master is reachable there"
+else
+    ok "a UID cannot be added from the operational keyring — certification needs the offline master"
+fi
+if env GNUPGHOME="$OPS" gpg --batch --pinentry-mode loopback --passphrase '' \
+        --quick-set-expire "$MFPR" 5y >/dev/null 2>&1; then
+    notok "the primary's expiry was changed from the operational keyring"
+else
+    ok "the primary's expiry cannot be changed from the operational keyring"
+fi
+env GNUPGHOME="$OPS" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+
 printf '\n-----------------------------------------------\n'
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+if [ "${#SKIPPED[@]}" -gt 0 ]; then
+    printf '%d NOT EXECUTED:\n' "${#SKIPPED[@]}"
+    for g in "${SKIPPED[@]}"; do printf '  %s\n' "$g"; done
+fi
 if [ "$FAIL" -gt 0 ]; then printf '\nFailed:\n'; for g in "${FAILED[@]}"; do printf '  %s\n' "$g"; done; fi
 [ "$FAIL" -eq 0 ]
