@@ -37,6 +37,14 @@ rejects() {
         notok "REJECTS $desc — returned 0; the harness would have passed on nothing"
     elif [ -z "${out//[[:space:]]/}" ]; then
         notok "REJECTS $desc — returned $rc but printed no diagnostic; a silent failure is hard to act on"
+    elif grep -qiE 'syntax error|command not found|no such file' <<<"$out"; then
+        # The rejection must come from the PRIMITIVE, not from a shell that
+        # could not load it. Measured: on an Ubuntu runner `/bin/sh` is dash,
+        # which cannot parse assert.sh's arrays and here-strings, so a case
+        # spawned with `sh -c` returned non-zero for a reason that had nothing
+        # to do with the thing under test -- and this file recorded it as a
+        # pass. A false green inside the suite whose subject is false greens.
+        notok "REJECTS $desc — returned $rc because the SHELL failed, not the primitive: $(tr '\n' ' ' <<<"$out" | head -c 110)"
     else
         ok "REJECTS $desc — $(printf '%s' "$out" | sed 's/^assert: FAILED: //' | tr '\n' ' ' | head -c 105)"
     fi
@@ -197,10 +205,13 @@ section "A prompt with no stdin  (Packaging v1 bash -s; defect 4: silent decline
 # answered "no" while exiting 0, and two operator scans were lost before one
 # journal line explained it. What a harness can check before starting such a
 # command is that its stdin is not already closed.
+# `bash -c`, not `sh -c`: lib/assert.sh declares `#!/usr/bin/env bash` and uses
+# arrays and here-strings. On an Ubuntu runner /bin/sh is dash, which cannot
+# parse it -- see the note in rejects() for what that cost.
 accepts "a command given a real answer on stdin" \
-    sh -c '. '"$HERE"'/lib/assert.sh; need_stdin_answer "omnibridge pair" <<<"y"'
+    bash -c '. '"$HERE"'/lib/assert.sh; need_stdin_answer "omnibridge pair" <<<"y"'
 rejects "a command whose stdin is closed" \
-    sh -c '. '"$HERE"'/lib/assert.sh; exec 0<&-; need_stdin_answer "omnibridge pair"'
+    bash -c '. '"$HERE"'/lib/assert.sh; exec 0<&-; need_stdin_answer "omnibridge pair"'
 
 printf '\n-----------------------------------------------\n'
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"

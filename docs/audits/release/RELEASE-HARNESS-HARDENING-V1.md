@@ -165,7 +165,50 @@ ok  REJECTS a command whose stdin is closed
 pass every rejection case in this file. Fifteen acceptance cases stop that, and
 CI gate **H3** requires both halves to stay present.
 
-### 4.1 The regression that is a measurement
+### 4.1 The suite found a false PASS in itself, and CI found it first
+
+The first CI run of this phase failed, and what it failed on is the best
+evidence that any of this was worth doing.
+
+Two cases spawned a subshell with `sh -c` to source the library. On a GitHub
+Ubuntu runner **`/bin/sh` is dash**, which cannot parse `assert.sh` — it uses
+arrays and here-strings:
+
+```
+sh: 57: …/lib/assert.sh: Syntax error: "(" unexpected (expecting "}")
+```
+
+The ACCEPTS case failed, visibly. **The REJECTS case passed** — because the
+subshell exited non-zero, which is all `rejects` was checking. The rejection
+had nothing to do with the primitive under test; the shell had simply failed
+to load it. **A false green inside the suite whose entire subject is false
+greens**, on a machine whose only difference was which `/bin/sh` it has.
+
+Both halves are fixed:
+
+* the two cases spawn `bash -c`, because `assert.sh` declares
+  `#!/usr/bin/env bash` and means it;
+* **`rejects` now distinguishes a refusal from a breakage.** A non-zero exit
+  whose output carries `syntax error`, `command not found` or `no such file`
+  is reported as the shell failing, not the primitive refusing.
+
+Verified both ways: forcing the cases back to `sh -c` inside an
+`ubuntu:24.04` container now produces
+
+```
+not ok  REJECTS a command whose stdin is closed — returned 2 because the SHELL
+        failed, not the primitive: sh: 57: …/assert.sh: Syntax error …
+```
+
+and the unmodified suite is green in the same container — 39 of 40, the
+fortieth correctly `n/a` because a container runs as root and root can write
+to a `0500` directory.
+
+The lesson is the phase's own rule turned on itself: **a non-zero exit is not
+evidence of a refusal any more than a zero exit is evidence of a measurement.**
+Both need to be attributed before they mean anything.
+
+### 4.2 The regression that is a measurement
 
 Defect #20 is re-measured on every run rather than described:
 
