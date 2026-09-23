@@ -322,26 +322,30 @@ The primary is **certify-only**; releases are signed by its `sign`-only subkey
 against the **primary** fingerprint above — that is the long-term anchor, and
 the verifier resolves the subkey for you.
 
-**Where the key is.** The armoured public key is
-[`packaging/release/omnibridge-release-pubkey.asc`](packaging/release/omnibridge-release-pubkey.asc)
-in this repository, which gives it a stable URL that does not change with the
-release:
+**Where the key is.** The armoured public key is published as a **release
+asset**, `omnibridge-release-pubkey.asc`, attached to every release. It is
+deliberately **not** kept in this repository: a key checked into the tree it
+signs adds nothing a release asset does not already give you, and it invites
+the mistake of trusting a key because it sits next to the code.
 
 ```
-https://raw.githubusercontent.com/yurisismotto/omnibridge/main/packaging/release/omnibridge-release-pubkey.asc
+https://github.com/yurisismotto/omnibridge/releases/latest/download/omnibridge-release-pubkey.asc
 ```
 
-It is also attached to every release page as `omnibridge-release-pubkey.asc`.
-Both copies are the same key, and neither is a substitute for checking the
-fingerprint printed above — a key fetched over HTTPS from a repository is
-still a key somebody could have replaced, and the fingerprint is what makes
-the check mean something.
+That URL always resolves to the newest release's copy; a specific release's
+copy is on its own page. Downloading the key is **not** what makes it
+trustworthy — a key fetched over HTTPS is still a key somebody could have
+replaced. The fingerprint printed above is what makes the check mean
+something, so compare it every time.
 
 ```bash
 # 1. import the published public key into a keyring of its own
-curl -fsSLO https://raw.githubusercontent.com/yurisismotto/omnibridge/main/packaging/release/omnibridge-release-pubkey.asc
+curl -fsSLO https://github.com/yurisismotto/omnibridge/releases/latest/download/omnibridge-release-pubkey.asc
 gpg --homedir ./ob-verify --import omnibridge-release-pubkey.asc
 gpg --homedir ./ob-verify --export > ob-release.gpg
+
+# and check it is the identity above before trusting it
+gpg --homedir ./ob-verify --fingerprint F545DC184E909192C3FB6F6E64963019E731BE07
 
 # 2. check the signature, then the files
 ./packaging/release/verify-release.sh \
