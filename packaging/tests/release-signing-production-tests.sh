@@ -321,10 +321,15 @@ section "SIGN-NEG-06 — no private material anywhere it could be published"
 # A scanner that finds nothing has two explanations, and only one of them is
 # good news. So the scanner is FIRST shown to catch a planted key; only then is
 # its silence on the real targets worth reporting.
+# The one header this shell still needs by name, to prove the canary below is
+# a real armoured key before the scan is trusted. The other forms the scanner
+# recognises -- plain, ENCRYPTED, OPENSSH, RSA, EC, DSA -- live in the regex in
+# scan_tree, which is the only thing that reads them. They were once also shell
+# variables here; when scan_tree moved to Python they became dead, and the
+# linter said so (SC2034). Deleting them was the fix. A suppression directive
+# would have kept four copies of one list, three of which nothing reads and
+# none of which anything checks.
 PGP_MARK='-----BEGIN PGP PRIVATE KEY BLOCK-----'
-PK_MARK='-----BEGIN PRIVATE KEY-----'
-ENC_MARK='-----BEGIN ENCRYPTED PRIVATE KEY-----'
-SSH_MARK='-----BEGIN OPENSSH PRIVATE KEY-----'
 
 # A HEADER IS NOT A KEY
 # ---------------------
