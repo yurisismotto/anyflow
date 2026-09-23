@@ -22,6 +22,8 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/guest-agent.sh
 . "$HERE/lib/guest-agent.sh"
+# shellcheck source=lib/assert.sh
+. "$HERE/lib/assert.sh"
 
 DOMAIN=""; DISTRO=""; EVIDENCE=""; PHONE_IP=""; ADB_SERIAL=""; PAIR_TTL=240
 GUEST_USER="${GUEST_USER:-anyflow}"; GUEST_UID="${GUEST_UID:-1000}"
@@ -80,6 +82,12 @@ ob() { gu "omnibridge $*"; }
 # ---------------------------------------------------------------------------
 section "Preconditions"
 # ---------------------------------------------------------------------------
+# Every host tool this run cannot proceed without, named before anything is
+# measured. qrencode in particular: without it there is no QR, and the operator
+# stands in front of a screen with nothing on it.
+need_tool virsh jq adb qrencode python3 || abort "a host tool this harness depends on is missing"
+ok "every host tool this harness needs is installed"
+
 ga_ping "$DOMAIN" 300 || abort "guest agent in '$DOMAIN' does not answer"
 ok "the guest agent answers"
 
@@ -1003,7 +1011,7 @@ fi
 xfer_id="$(printf '%s' "$xfers" | grep -B4 "$SENT_FILE_NAME" | sed -n 's/^ *\([0-9a-f]\{8\}\) *sending.*/\1/p' | tail -1)"
 if [ -n "$xfer_id" ]; then
     jf="$(gu "journalctl --user -u omnibridged --no-pager --since '$files_mark' 2>/dev/null | grep -F 'transfer=$xfer_id'")"
-    [ -n "${jf//[[:space:]]/}" ] \
+    need_window_covers "L15: the journal window" "$jf" "transfer=$xfer_id" \
         || abort "no journal line names transfer=$xfer_id; this transfer cannot be corroborated"
     printf '%s\n' "$jf" | save "43b-L15-journal.txt"
     ok "L15: $(printf '%s\n' "$jf" | grep -c .) journal line(s) name transfer=$xfer_id specifically"
@@ -1122,12 +1130,10 @@ nstatus_after="$(ob 'notifications status' 2>&1)"
 printf '%s\n' "$nstatus_after" | save "47-L16-status-after.txt"
 after_n="$(printf '%s' "$nstatus_after" | sed -n 's/^ *mirrored now *//p' | head -1 | tr -d '[:space:]')"
 after_n="${after_n:-0}"
-if [ "$after_n" -eq $(( before_n + 1 )) ] 2>/dev/null; then
+if need_delta "L16: the mirrored count" "$before_n" "$after_n" 1; then
     ok "L16: exactly one notification was mirrored to the packaged desktop ($before_n -> $after_n)"
-elif [ "$after_n" -gt "$before_n" ] 2>/dev/null; then
-    notok "L16: the mirrored count grew by more than the one notification this gate posted ($before_n -> $after_n); the count cannot be attributed to it"
 else
-    notok "L16: the mirrored count did not increase ($before_n -> $after_n)"
+    notok "L16: the mirrored count did not move by exactly the one notification this gate posted ($before_n -> $after_n)"
 fi
 
 # Content binding: the desktop was asked to show THIS notification.

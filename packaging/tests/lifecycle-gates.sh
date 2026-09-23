@@ -28,6 +28,8 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/guest-agent.sh
 . "$HERE/lib/guest-agent.sh"
+# shellcheck source=lib/assert.sh
+. "$HERE/lib/assert.sh"
 
 DOMAIN=""; DISTRO=""; PKGDIR=""; PHONE_IP=""; EVIDENCE=""
 GUEST_USER="${GUEST_USER:-anyflow}"; GUEST_UID="${GUEST_UID:-1000}"
@@ -111,7 +113,18 @@ ok "the guest agent runs as root"
 gx "id -u $GUEST_USER" >/dev/null 2>&1 || abort "guest has no user '$GUEST_USER'"
 ok "guest desktop user '$GUEST_USER' exists"
 
+# The host tools this harness cannot run without. Packaging v1's install-smoke
+# called an absent `runuser`, the call failed, nobody looked, and the gate
+# passed having run nothing.
+need_tool virsh jq sha256sum find || abort "a host tool this harness depends on is missing"
+ok "every host tool this harness needs is installed"
+
 # Packages: present on the host, digest-verified, and the right number of them.
+#
+# Absolute, because a relative path is read as a NAMED VOLUME by podman and
+# docker: Packaging v1 mounted an empty volume over the source tree that way
+# and every file assertion inside it measured nothing.
+need_abs_path "--pkgdir" "$PKGDIR" || abort "--pkgdir must be absolute"
 [ -d "$PKGDIR" ] || abort "--pkgdir '$PKGDIR' is not a directory"
 [ -f "$PKGDIR/SHA256SUMS" ] || abort "no SHA256SUMS in '$PKGDIR' — the artifact under test would be unverified"
 ( cd "$PKGDIR" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) \
@@ -123,7 +136,11 @@ case "$DISTRO" in
     *)        PKGEXT="deb"; want_pkgs=2 ;;
 esac
 mapfile -t PKGS < <(find "$PKGDIR" -maxdepth 1 -name "*.$PKGEXT" -printf '%f\n' | sort)
-# A glob that matched nothing is how L17 silently skipped its whole group.
+# A glob that matched nothing is how L17 silently skipped its whole group, and
+# a glob that matched the WRONG number is how six packages were built and one
+# was shipped. Both are the same assertion: an exact count.
+need_glob "$PKGDIR" "*.$PKGEXT" "$want_pkgs" \
+    || abort "the package set in '$PKGDIR' is not the one under test (found: ${PKGS[*]:-<none>})"
 [ "${#PKGS[@]}" -eq "$want_pkgs" ] \
     || abort "expected $want_pkgs *.$PKGEXT in '$PKGDIR', found ${#PKGS[@]}: ${PKGS[*]:-<none>}"
 ok "found exactly $want_pkgs *.$PKGEXT package(s): ${PKGS[*]}"
@@ -220,7 +237,10 @@ if [ "$PKGEXT" = "deb" ]; then
 else
     n_inst="$(gx 'rpm -q omnibridge omnibridge-gui >/dev/null 2>&1 && echo 2 || echo 0')"
 fi
-[ "${n_inst//[[:space:]]/}" = "2" ] \
+# NOTE: the count crosses a `sh -c` in the guest. Packaging v1's version lost
+# `${Status}` to that shell and the count silently became 0 -- which is why
+# this is an exact-count assertion and not a >0 one.
+need_exact_count "L1: installed package count" "$n_inst" "2" \
     && ok "L1: both packages report installed" \
     || notok "L1: expected 2 installed packages, dpkg/rpm reports ${n_inst//[[:space:]]/}"
 

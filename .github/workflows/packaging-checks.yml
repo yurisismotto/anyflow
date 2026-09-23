@@ -94,6 +94,13 @@ jobs:
       - name: Release signing — negative tests
         run: ./packaging/tests/release-signing-tests.sh
 
+      # Does the harness fail when it should? Every primitive in lib/assert.sh
+      # is required to REJECT its recorded failure mode and to ACCEPT the good
+      # case — the second half is what stops a primitive hard-coded to fail
+      # from passing the suite. No guest, no phone, no secret: pure logic.
+      - name: Harness self-tests — the primitives reject what they must
+        run: ./packaging/tests/harness-selftests.sh
+
       # systemd-analyze reads the unit the way systemd will: it catches a
       # misspelled directive, an unparseable value and a directive in the wrong
       # section, none of which a grep can see.
