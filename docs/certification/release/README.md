@@ -5,6 +5,7 @@ opposed to whether any one piece of it works.
 
 | Doc | What it is | Verdict |
 | --- | --- | --- |
+| [RC Certification v1](RC-CERTIFICATION-V1.md) | the release candidate itself — one immutable commit, built, signed, verified and installed | **RC V1: CERTIFIED WITH EXPLICIT NON-BLOCKING DEBTS** |
 | [Release Readiness v1 — final](RELEASE-READINESS-V1-FINAL.md) | the current verdict over the thirteen RC conditions | **READY FOR RC WITH EXPLICIT NON-BLOCKING DEBTS** — 13/13 |
 | [Release Signing Closure v1](RELEASE-SIGNING-CLOSURE-V1.md) | the production signing identity, the signed artifact set, and the evidence for both | **D-2: PASS** |
 | [Release Readiness v1](RELEASE-READINESS-V1.md) | the original thirteen-condition audit, 2026-09-22 | **BLOCKED — on D-2 alone**, superseded 2026-09-23, kept as the record |
