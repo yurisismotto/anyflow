@@ -1,0 +1,100 @@
+#!/usr/bin/make -f
+#
+# OmniBridge, for Debian and Ubuntu.
+#
+# The shape of this file is dictated by two things: the build must work with no
+# network, and the desktop metadata must be byte-identical to what the RPM
+# installs. Everything else is debhelper's default.
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Cargo must not reach the network, and must not read a config belonging to
+# whoever ran the build. CARGO_HOME is redirected into the build tree; with
+# that plus --offline and the vendored sources unpacked by the build script, a
+# fetch is not merely unnecessary, it is impossible. That is the property a
+# buildd needs, and it is the same one the RPM's %build relies on.
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+
+# Ubuntu 24.04 satisfies the Rust floor only through `rustc-1.91`, which
+# installs into /usr/lib/rust-1.91/bin and does NOT provide /usr/bin/rustc.
+# Prepending it when it exists is what makes one rules file work on all three
+# targets. `wildcard` keeps this silent where the directory is absent.
+RUST_ALT := $(firstword $(wildcard /usr/lib/rust-1.91/bin /usr/lib/rust-1.89/bin))
+ifneq ($(RUST_ALT),)
+export PATH := $(RUST_ALT):$(PATH)
+endif
+
+%:
+	dh $@
+
+# `cargo vendor` writes a `Cargo.toml.orig` beside every vendored crate, and
+# names it in that crate's `.cargo-checksum.json`. `dh_clean` deletes `*.orig`
+# anywhere in the tree by default — so the clean step that runs before the
+# build silently removes 270 files the checksums refer to, and cargo then stops
+# with:
+#
+#     error: failed to calculate checksum of:
+#       .../desktop/vendor/anyhow-1.0.104/Cargo.toml.orig
+#
+# Excluding the pattern is the fix. Nothing is lost: the build tree is a fresh
+# unpack of the source bundle, so there is no stale `.orig` for dh_clean to
+# find that the vendoring did not put there.
+override_dh_clean:
+	dh_clean -X.orig
+
+override_dh_auto_build:
+	cd desktop && cargo build --release --locked --offline \
+	    -p omnibridge-daemon \
+	    -p omnibridge-cli \
+	    -p omnibridge-gui
+
+override_dh_auto_test:
+	cd desktop && cargo test --release --locked --offline
+
+override_dh_auto_install:
+	install -Dm0755 desktop/target/release/omnibridged \
+	    debian/tmp/usr/bin/omnibridged
+	install -Dm0755 desktop/target/release/omnibridge \
+	    debian/tmp/usr/bin/omnibridge
+	install -Dm0755 desktop/target/release/omnibridge-gui \
+	    debian/tmp/usr/bin/omnibridge-gui
+# The same script, with the same arguments, as the RPM's %install. That is what
+# makes the desktop entry, the icon, the D-Bus activation entry and the
+# AppStream metadata identical across formats: three of the four are installed
+# verbatim and only the D-Bus file's Exec= line is derived, from --prefix.
+	desktop/gui/tools/install-desktop-metadata.sh \
+	    --prefix /usr --destdir debian/tmp
+# One unit, every format. Copied from packaging/common/ rather than duplicated,
+# so a hardening change cannot land on one distribution and miss the other.
+	install -Dm0644 packaging/common/omnibridged.service \
+	    debian/tmp/usr/lib/systemd/user/omnibridged.service
+
+# Shipped disabled, on every format. A global enable would raise a LAN listener
+# for every account on the machine, and the daemon does nothing useful before a
+# device is paired. Audit §4.3, R7.
+#
+# This also generates the correct maintainer-script fragments, which is why
+# none are written by hand: a hand-rolled postinst would be a worse copy of
+# what debhelper already emits, and a hand-rolled prerm would try to reach a
+# user's service manager, which root cannot do.
+override_dh_installsystemduser:
+	dh_installsystemduser --no-enable
+
+# No -dbgsym packages, matching the RPM's `%global debug_package %{nil}` —
+# audit Q2 records that as a deliberate v1 choice rather than an oversight.
+#
+# Left on, debhelper generated omnibridge-dbgsym and omnibridge-gui-dbgsym and
+# lintian reported all three of their files as `debug-file-with-no-debug-symbols`:
+# the release profile emits no debug info, so the packages were empty of the
+# only thing they exist to carry. Shipping two packages that contain nothing
+# useful is worse than shipping neither.
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym
+
+# Nothing here compresses or strips the documentation into something the RPM
+# would not have. The package ships README.md and the licence, and that is all
+# — the docs/ tree is engineering evidence and belongs in the repository.
+
+# No dh_installdeb-generated purge logic beyond debhelper's own. The user's
+# trust store lives in ~/.local/share/omnibridge and is not this package's to
+# create, move or remove, on install, upgrade, remove or purge. Audit §11.

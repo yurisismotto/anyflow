@@ -1,0 +1,39 @@
+[package]
+name = "omnibridge-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Adapter/binary crate: `unsafe` needs a deliberate, reviewable
+# `#[allow(unsafe_code)]` with a justification comment. None exists today.
+unsafe_code = "deny"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[[bin]]
+name = "omnibridge"
+path = "src/main.rs"
+
+[dependencies]
+# The control contract and the platform transport, not the agent. Before
+# Wave 0 this was `omnibridge-daemon`, which meant the CLI inherited mDNS, the
+# capability crates and UPower to obtain some `serde` structs (audit C1).
+omnibridge-control = { version = "1.0.0", path = "../control" }
+# `default-features = false` turns off the crate's `tray` feature. A command
+# that runs and exits has no use for a tray icon.
+omnibridge-linux = { version = "1.0.0", path = "../platform-linux", default-features = false }
+tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "io-std", "signal"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"

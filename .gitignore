@@ -1,0 +1,29 @@
+# Rust
+/desktop/target/
+**/*.rs.bk
+
+# Release artifacts — packaging/release/make-source-bundle.sh writes here.
+# The vendored crate tree it produces is 343 MB and is generated from the
+# committed Cargo.lock, which is the thing that is actually authoritative.
+/dist/
+
+# Android / Gradle
+/android/.gradle/
+/android/.kotlin/
+/android/build/
+# Every module's build output, not just `:app`'s — N5 added `:fixture` and the
+# next module should not have to remember this line.
+/android/*/build/
+/android/local.properties
+/android/.idea/
+*.apk
+*.aab
+
+# Editors
+.vscode/
+*.swp
+
+# Runtime state — never commit an identity or a trust store
+*.key
+state.json
+trust-store.json

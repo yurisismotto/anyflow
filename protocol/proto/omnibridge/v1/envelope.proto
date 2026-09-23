@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package omnibridge.v1;
+
+// Java options are for the Android build; prost ignores them. Both sides
+// compile these exact files, so the wire format cannot drift.
+option java_package = "io.github.yurisismotto.omnibridge.proto";
+option java_outer_classname = "EnvelopeProto";
+option java_multiple_files = true;
+
+import "omnibridge/v1/core.proto";
+
+// Every frame on the wire is exactly one Envelope, length-prefixed by a
+// 4-byte big-endian unsigned integer (see docs/architecture/PROTOCOL.md).
+//
+// Design notes:
+//
+//  * The spec asked for `messageType` + `payload`. We use a `oneof` instead:
+//    a oneof *is* a tag+payload pair, but it makes it structurally impossible
+//    to have a type tag that disagrees with the payload bytes, and it removes
+//    a whole class of "parse payload as the wrong type" bugs. Capability
+//    traffic still uses an opaque payload (see CapabilityMessage) because
+//    capabilities own and version their own schemas.
+//
+//  * `timestamp_unix_ms` is INFORMATIONAL ONLY. It is never an input to an
+//    authorization or replay decision, because we do not assume synchronized
+//    clocks between peers. Replay protection comes from `sequence` plus
+//    message-id de-duplication, both scoped to a single TLS connection.
+message Envelope {
+  // Protocol version in use for this connection. Fixed after the HELLO /
+  // HELLO_ACK exchange; a mismatch afterwards is a protocol violation.
+  uint32 protocol_version = 1;
+
+  // 16 cryptographically random bytes. Not a UUIDv7: we deliberately avoid
+  // embedding a timestamp, both to avoid a clock dependency and to avoid
+  // leaking device clock state.
+  bytes message_id = 2;
+
+  // Strictly increasing, per-connection, starting at 1. A repeated or
+  // decreasing sequence number means replay or a broken peer: drop and close.
+  uint64 sequence = 3;
+
+  // Sender's wall clock. Informational; display and staleness hints only.
+  int64 timestamp_unix_ms = 4;
+
+  // Set on a reply to the `message_id` of the request being answered.
+  bytes correlation_id = 5;
+
+  oneof body {
+    Hello hello = 16;
+    HelloAck hello_ack = 17;
+    PairRequest pair_request = 18;
+    PairResponse pair_response = 19;
+    CapabilityAnnounce capability_announce = 20;
+    Ping ping = 21;
+    Pong pong = 22;
+    Error error = 23;
+    CapabilityMessage capability_message = 24;
+  }
+}
+
+// Transport-level wrapper for capability traffic. The transport layer never
+// interprets `payload`; it routes on `capability_id` to a registered handler.
+// This is the mechanism that keeps capabilities out of the transport layer.
+message CapabilityMessage {
+  // Versioned capability identifier, e.g. "battery.v1".
+  string capability_id = 1;
+  // Opaque to the transport. Encoding is defined by the capability itself.
+  bytes payload = 2;
+}

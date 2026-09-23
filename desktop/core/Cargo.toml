@@ -1,0 +1,66 @@
+[package]
+name = "omnibridge-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# The host implementations of the core's seams (`SecretStore` on a Unix
+# filesystem, `Store::open(dir)`, XDG paths, /etc/hostname). On by default so
+# every existing caller — including the test suite, which no refactor may
+# edit — keeps working. Turn it off and this crate has no `std::os`, no
+# environment and no filesystem assumption at all; that is exactly what the
+# Wave 0 portability gate checks:
+#
+#   cargo check -p omnibridge-core --no-default-features --target <non-unix>
+default = ["unix-fs"]
+unix-fs = []
+
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Portable, security-critical: `unsafe` is forbidden outright.
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+async-trait = "0.1.92"
+bytes = "1.12.1"
+data-encoding = "2.11.1"
+omnibridge-proto = { version = "1.0.0", path = "../proto" }
+hmac = "0.12.1"
+prost = "0.14.3"
+rand = "0.9.5"
+rcgen = { version = "0.14.7", default-features = false, features = ["crypto", "ring", "pem"] }
+rustls = { version = "0.23.45", default-features = false, features = ["std", "ring"] }
+rustls-pki-types = "1.15.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.10.9"
+subtle = "2.6.1"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["rt", "net", "io-util", "sync", "time", "macros"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
+tracing = "0.1.44"
+x509-parser = "0.18.1"
+zeroize = "1.8.2"
+
+[dev-dependencies]
+omnibridge-proto = { version = "1.0.0", path = "../proto" }
+data-encoding = "2.11.1"
+serde_json = "1.0.151"
+rustls = { version = "0.23.45", default-features = false, features = ["std", "ring"] }
+rustls-pki-types = "1.15.1"
+tempfile = "3.27.0"
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
+x509-parser = "0.18.1"

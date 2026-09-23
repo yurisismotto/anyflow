@@ -1,0 +1,65 @@
+[workspace]
+resolver = "2"
+members = [
+    "proto",
+    "core",
+    "control",
+    "runtime",
+    "platform-linux",
+    "daemon",
+    "cli",
+    "gui",
+    "capabilities/battery",
+    "capabilities/clipboard",
+    "capabilities/files",
+    "capabilities/notifications",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+# The Rust floor, and it is measured from the committed `Cargo.lock` rather
+# than chosen. 1.82 used to stand here and was not true of the tree as
+# committed: `cargo metadata --locked` reports locked crates that demand more
+# than that, and the highest of them is what this number has to be.
+#
+#   time 0.3.55 / time-core / time-macros   1.88.0   <- the floor
+#   rcgen 0.14.10                           1.88
+#   zbus 5.19.0 / zvariant / zcheapstr      1.87
+#
+# So a toolchain below 1.88 fails in Cargo's resolver, before compiling one
+# line of OmniBridge. That is not academic: Debian 13 trixie's stock `rustc` is
+# 1.85.1 and Ubuntu 24.04's `rustc-1.82` package is exactly 1.82, and both
+# were measured failing here (LINUX-UBUNTU-DEBIAN-COMPAT-U0.md §20.3).
+#
+# Downgrading `zbus`, `rcgen` and `time` to hold a 1.82 line was considered
+# and rejected: it would trade the D-Bus client every platform backend shares,
+# and the certificate generator, for a compatibility claim no supported target
+# needs — Ubuntu 24.04 carries `rustc-1.91` in its own archive, Ubuntu 26.04
+# ships 1.93.1, and Debian 13 has backports.
+#
+# `.github/workflows/linux-distro-compat.yml` pins a job to exactly this
+# number so the next dependency bump cannot raise the real floor silently,
+# which is how the 1.82 claim became false in the first place.
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/yurisismotto/omnibridge"
+
+# NOTE (Wave 0, ARCH-010): there is deliberately no `[workspace.lints]` table.
+#
+# `unsafe_code` used to live here as `forbid`, workspace-wide. `forbid` cannot
+# be relaxed by an inner `#[allow]`, which made it impossible for a future
+# platform adapter (Win32, CNG, Security.framework, IOKit all need FFI) to
+# exist without first weakening the guarantee for `omnibridge-core` too.
+#
+# The lint is now declared per crate, in each crate's own `[lints]` table:
+#
+#   forbid  omnibridge-proto, omnibridge-core, omnibridge-control, omnibridge-runtime,
+#           omnibridge-capability-{battery,clipboard,files}
+#   deny    omnibridge-linux, omnibridge-daemon, omnibridge-cli, omnibridge-gui
+#
+# Relaxing the *workspace default* to `deny` was considered and rejected: it
+# would silently drop the guarantee from the crates where it matters most.
+# A new crate that declares no `[lints]` table gets rustc's `allow`, which is
+# visible in review as a missing block rather than invisible as an inherited
+# weakening. See docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.

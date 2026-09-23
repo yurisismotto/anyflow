@@ -1,0 +1,240 @@
+/*
+ * OmniBridge desktop stylesheet.
+ *
+ * Colour tokens are injected ahead of this file as @define-color by
+ * src/theme.rs, so the same rules serve light and dark and there is exactly
+ * one place where a hex value is decided.
+ *
+ * Structural values (radius, spacing, weights) are literal here because GTK
+ * CSS has no custom properties; they mirror docs/design/tokens.json and the
+ * token test checks the ones that matter.
+ */
+
+/* ---- typography ------------------------------------------------------- */
+/*
+ * Inter is the brand direction but is not bundled: on a GNOME desktop the
+ * system UI face is already a close neo-grotesque, and shipping a font to
+ * override the user's own font settings is the wrong trade on Linux. If
+ * Inter is installed it is picked up first. See docs/design/BRAND.md.
+ */
+window, .ob-root {
+    font-family: Inter, Cantarell, "Adwaita Sans", sans-serif;
+}
+
+.ob-display   { font-size: 32px; font-weight: 700; letter-spacing: -0.5px; }
+.ob-title     { font-size: 24px; font-weight: 700; letter-spacing: -0.25px; }
+.ob-heading   { font-size: 20px; font-weight: 600; }
+.ob-subtitle  { font-size: 16px; font-weight: 600; }
+.ob-body      { font-size: 14px; font-weight: 400; }
+.ob-label     { font-size: 13px; font-weight: 500; }
+.ob-caption   { font-size: 12px; font-weight: 400; }
+.ob-mono      { font-family: "JetBrains Mono", "Source Code Pro", monospace; font-size: 13px; }
+
+.ob-text-primary   { color: @ob_text_primary; }
+.ob-text-secondary { color: @ob_text_secondary; }
+.ob-text-muted     { color: @ob_text_muted; }
+
+/* ---- surfaces --------------------------------------------------------- */
+window.ob-root, .ob-content {
+    background-color: @ob_background;
+}
+
+.ob-card {
+    background-color: @ob_surface;
+    border: 1px solid @ob_border;
+    border-radius: 16px;
+    padding: 16px;
+}
+
+/* A card that is itself a button keeps the card look and gains a hover. */
+button.ob-card {
+    background-image: none;
+    box-shadow: none;
+    padding: 16px;
+}
+button.ob-card:hover  { background-color: @ob_surface_sunken; }
+button.ob-card:active { background-color: @ob_surface_sunken; }
+
+.ob-card-sunken {
+    background-color: @ob_surface_sunken;
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.ob-sidebar {
+    background-color: @ob_surface;
+    border-right: 1px solid @ob_border;
+}
+
+/* ---- navigation ------------------------------------------------------- */
+.ob-nav row {
+    border-radius: 8px;
+    margin: 2px 8px;
+    min-height: 40px;
+}
+.ob-nav row:selected {
+    background-color: alpha(@ob_blue, 0.12);
+    color: @ob_blue;
+}
+.ob-nav row:selected label { color: @ob_blue; font-weight: 600; }
+.ob-nav row:hover { background-color: @ob_surface_sunken; }
+
+/* ---- an exclusive choice ----------------------------------------------- */
+/*
+ * The lock-policy list, and any list box that is a *choice* rather than a
+ * navigation surface. It sits inside a card, so it borrows the card's ground
+ * instead of painting the list background Adwaita would give it — otherwise a
+ * white slab appears inside the card and the three options read as a separate
+ * panel rather than as the setting they belong to.
+ *
+ * Selection is the same accent the sidebar uses, so "this is the one that is
+ * chosen" looks the same everywhere in the application. It is never the only
+ * signal: the row keeps its title and its description, and assistive
+ * technology reads the selected state from the list box itself.
+ */
+.ob-choice {
+    background-color: transparent;
+}
+.ob-choice row {
+    border-radius: 8px;
+    padding: 6px 8px;
+    min-height: 40px;
+}
+.ob-choice row:selected {
+    background-color: alpha(@ob_blue, 0.12);
+}
+.ob-choice row:selected label { color: @ob_blue; }
+.ob-choice row:hover { background-color: @ob_surface_sunken; }
+
+/* ---- status language -------------------------------------------------- */
+/*
+ * Colour is never the only carrier: each of these sits beside an icon and a
+ * word. The dot classes paint the brand hue at full strength on a shape big
+ * enough that its colour is decoration; the text classes use the corrected
+ * hue that clears AA.
+ */
+.ob-status-connected    { color: @ob_cyan; }
+.ob-status-available    { color: @ob_blue; }
+.ob-status-transferring { color: @ob_blue; }
+.ob-status-success      { color: @ob_cyan; }
+.ob-status-warning      { color: @ob_amber; }
+.ob-status-stale        { color: @ob_amber; }
+.ob-status-error        { color: @ob_red; }
+.ob-status-revoked      { color: @ob_red; }
+.ob-status-disconnected { color: @ob_text_muted; }
+
+.ob-dot {
+    min-width: 8px;
+    min-height: 8px;
+    border-radius: 999px;
+}
+.ob-dot-cyan    { background-color: @ob_dot_cyan; }
+.ob-dot-blue    { background-color: @ob_dot_blue; }
+.ob-dot-violet  { background-color: @ob_dot_violet; }
+.ob-dot-amber   { background-color: #F59E0B; }
+.ob-dot-red     { background-color: #EF4444; }
+.ob-dot-neutral { background-color: @ob_disabled; }
+
+/* ---- buttons ---------------------------------------------------------- */
+/*
+ * The CTA wears the corrected accent sweep, not the identity one: white on
+ * Bridge Cyan is 2.40:1 and this button always has a label on it. These three
+ * stops are the on_light accents, the same values @ob_cyan/@ob_blue/@ob_violet
+ * carry in the light theme — spelled out because GTK CSS cannot interpolate
+ * between two @colors in a gradient.
+ */
+button.ob-cta {
+    background-image: linear-gradient(to right, #10747E 0%, #445CDD 55%, #6A49EE 100%);
+    background-color: transparent;
+    color: #FFFFFF;
+    font-weight: 600;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 20px;
+    box-shadow: none;
+}
+button.ob-cta:hover { filter: brightness(1.08); }
+button.ob-cta:disabled {
+    background-image: none;
+    background-color: @ob_surface_sunken;
+    color: @ob_disabled;
+}
+
+button.ob-secondary {
+    background-image: none;
+    background-color: @ob_surface;
+    color: @ob_text_primary;
+    border: 1px solid @ob_border_strong;
+    border-radius: 999px;
+    padding: 8px 16px;
+}
+button.ob-secondary:hover { background-color: @ob_surface_sunken; }
+
+/* Set apart from everything else, never filled: forgetting a device is not
+   an action that should be the loudest thing on the screen. */
+button.ob-destructive {
+    background-image: none;
+    background-color: transparent;
+    color: @ob_red;
+    border: 1px solid alpha(@ob_red, 0.5);
+    border-radius: 999px;
+    padding: 8px 16px;
+}
+button.ob-destructive:hover { background-color: alpha(@ob_red, 0.08); }
+
+/* ---- tinted icon tiles ------------------------------------------------ */
+.ob-tile {
+    border-radius: 12px;
+    /* A floor, not a size: callers set_size_request smaller tiles for chips. */
+    min-width: 28px;
+    min-height: 28px;
+    padding: 6px;
+}
+.ob-tile-cyan   { background-color: alpha(@ob_cyan, 0.10); color: @ob_cyan; }
+.ob-tile-blue   { background-color: alpha(@ob_blue, 0.10); color: @ob_blue; }
+.ob-tile-violet { background-color: alpha(@ob_violet, 0.10); color: @ob_violet; }
+.ob-tile-amber  { background-color: alpha(@ob_amber, 0.10); color: @ob_amber; }
+.ob-tile-red    { background-color: alpha(@ob_red, 0.10); color: @ob_red; }
+/* A capability that is not granted: present, legible, plainly inactive. */
+.ob-tile-neutral { background-color: @ob_surface_sunken; color: @ob_disabled; }
+
+/* ---- notices ---------------------------------------------------------- */
+.ob-notice {
+    border-radius: 12px;
+    padding: 12px;
+    background-color: alpha(@ob_blue, 0.08);
+}
+.ob-notice-caution { background-color: alpha(@ob_amber, 0.10); }
+
+/* ---- progress --------------------------------------------------------- */
+/* No text sits on a progress fill, so the vivid brand stops are fine here. */
+progressbar.ob-progress > trough {
+    background-color: @ob_surface_sunken;
+    border-radius: 999px;
+    min-height: 6px;
+}
+progressbar.ob-progress > trough > progress {
+    background-image: linear-gradient(to right, #18B8C9, #4F6BFF);
+    border-radius: 999px;
+    min-height: 6px;
+}
+
+/* ---- status bar ------------------------------------------------------- */
+.ob-statusbar {
+    background-color: @ob_surface;
+    border-top: 1px solid @ob_border;
+    padding: 6px 16px;
+}
+
+/* ---- misc ------------------------------------------------------------- */
+.ob-separator { background-color: @ob_border; min-height: 1px; }
+
+/*
+ * Focus must stay visible: keyboard navigation is the primary way some
+ * people drive this app, and libadwaita's default ring is easy to lose
+ * against a tinted card.
+ */
+*:focus-visible {
+    outline: 2px solid @ob_blue;
+    outline-offset: 2px;
+}

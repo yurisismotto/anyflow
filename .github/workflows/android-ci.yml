@@ -1,0 +1,240 @@
+# CI-004 — the Android build and unit-test gate.
+#
+# What this proves, and what it does not
+# --------------------------------------
+# It proves that the Android app **compiles** — production sources,
+# JVM test sources and instrumented test sources — and that the **JVM unit
+# suites pass**, on a clean machine, from the committed Gradle wrapper and
+# version catalog.
+#
+# It is **NOT hardware certification**. No emulator is started, no device is
+# attached and `connectedAndroidTest` is never invoked. Nothing here may be
+# cited as evidence about notification listening, the Keystore, the clipboard,
+# QR pairing or anything else that needs a real Android runtime: those are
+# certified on hardware or not at all.
+#
+# Why it exists
+# -------------
+# Until this file, a pull request touching only `android/**` ran **zero**
+# GitHub checks — the two desktop workflows are both filtered to `desktop/**`.
+# U2 P1 demonstrated the consequence directly: an Android-only change merged
+# with nothing having compiled it in CI, and the instrumented test sources were
+# left unable to compile for an entire release cycle without anything noticing,
+# because the only thing that would have compiled them was a developer
+# remembering to.
+#
+# Everything below is derived from the repository, not remembered
+# ---------------------------------------------------------------
+#   android/gradle/libs.versions.toml   agp = "8.8.0", kotlin = "2.1.0"
+#   android/gradle/wrapper/…            gradle-8.11.1, SHA-256 pinned
+#   android/app/build.gradle.kts        compileSdk 35, targetSdk 35, minSdk 29
+#                                       source/targetCompatibility VERSION_17
+#                                       kotlinOptions.jvmTarget = "17"
+#
+# So: **JDK 17** (what the module declares it compiles against, and the minimum
+# AGP 8.8 accepts), the **repository's own Gradle wrapper**, and **SDK platform
+# 35** because that is what `compileSdk` names. The steps below re-read
+# `compileSdk` and the Java level out of the build file at run time and fail if
+# they have moved, so this header cannot quietly become a lie.
+#
+# Resource limits
+# ---------------
+# `--no-daemon` because a CI runner is discarded after one build and a daemon
+# only costs startup memory. `android/gradle.properties` already sets
+# `org.gradle.parallel=false` and `workers.max=2` for the developer laptop;
+# they are passed explicitly here too so a change to that file cannot silently
+# make CI behave differently from a local run.
+#
+# Android lint is NOT a gate here — see the "lint" section at the bottom.
+
+name: Android · build + unit tests
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-ci.yml'
+  push:
+    branches: [main, develop]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-ci.yml'
+  workflow_dispatch:
+
+# Read-only, and deliberately minimal. This workflow signs nothing, publishes
+# nothing and uploads no artifact: a debug build uses the locally generated
+# debug keystore, so no signing material, keystore or credential is needed or
+# accepted here.
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: android
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.welcome=never
+
+jobs:
+  build-and-test:
+    name: assembleDebug + testDebugUnitTest · JDK 17, AGP 8.8
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # `cache: gradle` is setup-java's own first-party Gradle cache; no
+      # third-party action is introduced for it.
+      - name: JDK 17 — the level app/build.gradle.kts compiles against
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # Derivation, and a guard. If the module moves to Java 21, this fails
+      # loudly here rather than producing a confusing Kotlin/javac mismatch
+      # several minutes into the build.
+      - name: The declared Java level is what this job installed
+        run: |
+          set -eu
+          declared=$(sed -n 's/.*JavaVersion.VERSION_\([0-9]*\).*/\1/p' app/build.gradle.kts | head -1)
+          jvm_target=$(sed -n 's/.*jvmTarget *= *"\([0-9.]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          installed=$(java -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1)
+          echo "sourceCompatibility : ${declared}"
+          echo "kotlin jvmTarget    : ${jvm_target}"
+          echo "installed JDK       : ${installed}"
+          if [ "${declared}" != "${installed}" ] || [ "${jvm_target}" != "${installed}" ]; then
+            echo "::error::app/build.gradle.kts declares Java ${declared} / jvmTarget ${jvm_target},"
+            echo "::error::and this workflow installed JDK ${installed}. Change them together,"
+            echo "::error::and check the AGP version supports the new level first."
+            exit 1
+          fi
+
+      # The wrapper is the toolchain. `gradle-wrapper.properties` already pins
+      # `distributionSha256Sum` and sets `validateDistributionUrl=true`, so a
+      # substituted distribution fails the build rather than running — which is
+      # why no separate wrapper-validation action is needed here.
+      - name: Gradle wrapper identity
+        run: |
+          set -eux
+          grep -E 'distributionUrl|distributionSha256Sum|validateDistributionUrl' \
+            gradle/wrapper/gradle-wrapper.properties
+          ./gradlew --version
+
+      # The runner image ships an Android SDK; only the platform `compileSdk`
+      # names has to be guaranteed present. Installed through the SDK's own
+      # `sdkmanager` rather than by downloading an archive from anywhere.
+      - name: Android SDK platform · exactly the compileSdk this project declares
+        run: |
+          set -eu
+          : "${ANDROID_HOME:?the runner image must provide an Android SDK}"
+          compile_sdk=$(sed -n 's/^ *compileSdk *= *\([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -1)
+          if [ -z "${compile_sdk}" ]; then
+            echo "::error::could not read compileSdk from app/build.gradle.kts."
+            echo "::error::This job derives the SDK platform from the build file on purpose;"
+            echo "::error::fix the parse rather than hard-coding a version here."
+            exit 1
+          fi
+          echo "compileSdk declared: ${compile_sdk}"
+          sdkmanager="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          test -x "${sdkmanager}" || sdkmanager=$(command -v sdkmanager)
+          yes | "${sdkmanager}" --licenses > /dev/null 2>&1 || true
+          "${sdkmanager}" "platforms;android-${compile_sdk}"
+          test -d "${ANDROID_HOME}/platforms/android-${compile_sdk}"
+          echo "ANDROID_COMPILE_SDK=${compile_sdk}" >> "${GITHUB_ENV}"
+
+      # ------------------------------------------------------------------ 1 --
+      # Compilation. `:app` is the product; `:fixture` is the test-only
+      # notifications hardware fixture, which `settings.gradle.kts` includes
+      # beside `:app` and which nothing else ever compiles.
+      - name: assembleDebug · the app and the hardware fixture
+        run: ./gradlew --no-daemon --max-workers=2 :app:assembleDebug :fixture:assembleDebug
+
+      # Instrumented tests are NOT run here — no emulator, no device. Their
+      # *sources* are compiled, and that alone is worth a step: this is exactly
+      # what had silently broken before this workflow existed. Compiling them
+      # needs no Android runtime at all.
+      - name: assembleDebugAndroidTest · instrumented sources still compile
+        run: ./gradlew --no-daemon --max-workers=2 :app:assembleDebugAndroidTest
+
+      # ------------------------------------------------------------------ 2 --
+      # THE GATE. The task is authoritative: no test count is written down
+      # here, so adding a suite needs no workflow edit and deleting one cannot
+      # be hidden by a number that was never updated.
+      - name: testDebugUnitTest · the JVM suites
+        run: ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest
+
+      # Evidence, not a gate. Prints what actually ran so a reviewer can see
+      # the P1/P2/P3 regression suites in the log without downloading anything.
+      - name: What ran
+        if: always()
+        run: |
+          set -eu
+          results=app/build/test-results/testDebugUnitTest
+          if [ ! -d "${results}" ]; then
+            echo "no unit-test results were produced"
+            exit 0
+          fi
+          python3 - "${results}" <<'PY'
+          import glob, os, sys, xml.etree.ElementTree as ET
+          total = failures = errors = skipped = 0
+          rows = []
+          for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.xml"))):
+              r = ET.parse(path).getroot()
+              t, f, e, s = (int(r.get(k, 0)) for k in ("tests", "failures", "errors", "skipped"))
+              total, failures, errors, skipped = total + t, failures + f, errors + e, skipped + s
+              rows.append((r.get("name", "?").rsplit(".", 1)[-1], t, f, e))
+          for name, t, f, e in rows:
+              print(f"  {name:<40} {t:>4} tests  {f} failures  {e} errors")
+          print(f"\n  {len(rows)} suites, {total} tests, {failures} failures, "
+                f"{errors} errors, {skipped} skipped")
+          PY
+
+      - name: What this job proved
+        run: |
+          echo "ANDROID BUILD + JVM UNIT TESTS"
+          echo "  AGP $(sed -n 's/^agp *= *"\(.*\)"/\1/p' gradle/libs.versions.toml) ·" \
+               "Kotlin $(sed -n 's/^kotlin *= *"\(.*\)"/\1/p' gradle/libs.versions.toml) ·" \
+               "compileSdk ${ANDROID_COMPILE_SDK} · JDK 17"
+          echo
+          echo "This is NOT hardware certification. No emulator and no device took part:"
+          echo "connectedAndroidTest was never invoked, and the instrumented suites were"
+          echo "compiled but not executed. Notification listening, the Keystore, the"
+          echo "clipboard and QR pairing are certified on real hardware or not at all."
+
+# -----------------------------------------------------------------------------
+# Android lint — deliberately NOT a gate, and why
+# -----------------------------------------------------------------------------
+# `:app:lintDebug` currently reports 1 error and 47 warnings. The single error
+# is, audited:
+#
+#   app/src/main/java/io/github/yurisismotto/omnibridge/ui/ClipboardTileService.kt:82
+#   TileService#startActivityAndCollapse(Intent) is deprecated
+#   [StartActivityAndCollapseDeprecated]
+#
+# The code there is already correct. It branches on
+# `Build.VERSION.SDK_INT >= UPSIDE_DOWN_CAKE` and passes a `PendingIntent` on
+# API 34+, where the `Intent` overload throws; the flagged line is the API
+# 29–33 branch, and on those releases the `PendingIntent` overload does not
+# exist. The check flags the call site without reading the version gate.
+#
+# So there is no source fix to make. The only ways to a green `lintDebug` are:
+#
+#   * `@Suppress("StartActivityAndCollapseDeprecated")` at the call site — a
+#     suppression, not a fix, and this branch is not the place to decide that;
+#   * a `lint-baseline.xml` — which hides this error *and* the next one;
+#   * dropping the pre-34 branch — a Quick Settings tile regression on Android
+#     10 through 13, i.e. a product change.
+#
+# None of those belongs in a test/CI branch, and a gate switched on by
+# suppressing the one thing it found would be a gate in name only. Lint is
+# therefore recorded as remaining debt: compile plus unit tests is the first
+# Android CI gate. Making lint a gate later means deciding the tile question
+# on its merits first, then adding a `:app:lintDebug` step here.

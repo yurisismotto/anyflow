@@ -1,0 +1,77 @@
+[package]
+name = "omnibridge-linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints.rust]
+# An adapter crate, so `unsafe` is `deny` rather than `forbid`: a future
+# platform binding may genuinely need FFI, and `forbid` cannot be relaxed by a
+# local `#[allow]`. `deny` means any `unsafe` here needs a deliberate,
+# reviewable `#[allow(unsafe_code)]` with a justification comment.
+#
+# There is none today. This crate contains no `unsafe`.
+unsafe_code = "deny"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[features]
+# The KDE Plasma tray item. On by default, because the crate's own consumer
+# that matters — `omnibridged` — wants it, and a default-off feature is a feature
+# `cargo test --workspace` does not compile.
+#
+# `omnibridge-gui` and `omnibridge-cli` turn it off. Not because it would break
+# anything if they had it, but because the boundary is worth stating: the tray
+# is owned by the agent, and a GUI that could publish one would be the first
+# step back towards a resident GUI. Cargo's feature unification means a
+# workspace build still compiles this code once, with the feature on, and links
+# it into all three — that is how unification works and it is not what the
+# declaration is for.
+default = ["tray", "desktop-activation"]
+# `tokio/rt` is already on for the crate. Nothing else is added: the tray
+# spawns tasks and awaits a stream, and it deliberately owns no timer.
+tray = ["dep:zbus", "dep:futures-lite"]
+# Repairing the desktop application's D-Bus activation in a session that is
+# already running — see `activation.rs`. Same owner as the tray (the agent,
+# never the GUI or the CLI), so it is default-on beside it and off for both.
+#
+# It implies `tray` rather than standing alone because it needs exactly one
+# thing from it: `DESKTOP_APP_ID`, the single definition of the application's
+# identity on the session bus. A second copy of that string is the one thing
+# the identity discipline in `tray/model.rs` exists to prevent, and no
+# consumer wants this without the tray anyway — both are the agent's
+# session-bus integration.
+desktop-activation = ["dep:zbus", "tray"]
+
+[dependencies]
+omnibridge-core = { version = "1.0.0", path = "../core", features = ["unix-fs"] }
+omnibridge-control = { version = "1.0.0", path = "../control" }
+omnibridge-proto = { version = "1.0.0", path = "../proto" }
+async-trait = "0.1"
+tokio = { version = "1", features = ["net", "io-util", "rt"] }
+tracing = "0.1"
+
+# The session bus, for the StatusNotifierItem. Already in this workspace's
+# resolved graph — `omnibridge-capability-notifications` and
+# `omnibridge-capability-battery` each take it optionally, and `omnibridged` enables
+# both — so this adds a direct edge rather than a new crate. Same
+# `default-features = false` + `tokio` as those two: zbus's own executor would
+# be a second runtime inside a process that already has one.
+zbus = { version = "5", optional = true, default-features = false, features = ["tokio"] }
+# `StreamExt::next` over zbus's `NameOwnerChanged` stream, and nothing else.
+# The same dependency, for the same one method, that the notifications backend
+# already takes.
+futures-lite = { version = "2", optional = true, default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }
+# The tray's integration tests raise a private session bus and a fake
+# `org.kde.StatusNotifierWatcher` on it. The fake serves the interface from
+# the same signatures the real one declares, so a test cannot pass against a
+# contract the implementation invented.
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+futures-lite = { version = "2", default-features = false, features = ["std"] }

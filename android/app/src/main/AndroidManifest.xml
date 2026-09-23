@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- LAN connection to the paired computer. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      Required to hold a WifiManager.MulticastLock while browsing for the
+      desktop over mDNS. Without the lock, Wi-Fi hardware filters multicast
+      while the screen is off and discovery silently stops working.
+
+      This permission is also one of the permissions that qualifies a service
+      for the `connectedDevice` foreground service type on Android 14+, which
+      is the type this app uses. That is not a coincidence or a loophole: we
+      hold it because we genuinely use multicast.
+    -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- The ongoing-connection notification. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Scanning the pairing QR code. Requested at the moment of use. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!--
+      Deliberately absent, and the rule that keeps them so:
+
+        OmniBridge acquires a privileged Android capability only when a named,
+        user-visible feature requires it; only through the platform-sanctioned
+        API for that feature; only with the user's explicit, separately
+        revocable consent; and never as a means of defeating a platform
+        restriction that exists to protect the user.
+
+      By that rule these stay out, and no feature is a reason to revisit them,
+      because each is either a workaround for a protection or a grant far wider
+      than any OmniBridge feature needs:
+
+        * no BIND_ACCESSIBILITY_SERVICE
+        * no QUERY_ALL_PACKAGES
+        * no SYSTEM_ALERT_WINDOW
+        * no READ_LOGS
+        * no location permission (this app never needs the user's location)
+        * no MANAGE_EXTERNAL_STORAGE
+        * no default-IME status, no hidden APIs, no reflection, no root
+        * no CompanionDeviceManager association (ADR-0015 §10: a live CDM
+          association makes this app a *trusted* listener, which switches OFF
+          Android's sensitive-content redaction. Adopting it is a notification-
+          privacy decision and needs its own ADR, whatever the reason you
+          reached for it.)
+
+      BIND_NOTIFICATION_LISTENER_SERVICE used to be on this list, and it moved.
+      It is the only entry that has ever moved, and moving it took an ADR
+      (ADR-0015). It is declared below on the notification listener service —
+      held by the *system*, not by us, exactly as BIND_QUICK_SETTINGS_TILE is
+      for the clipboard tile — and it is what stops any other app from binding
+      that service. Nothing is read until the user grants notification access
+      in Settings AND separately grants notifications.v1 to one paired
+      computer; either can be withdrawn without the other.
+
+      See docs/security/THREAT_MODEL.md and docs/adr/ADR-0015-notification-access.md.
+    -->
+
+    <!--
+      What the notification app-picker is allowed to see.
+
+      Android 11 (API 30) filters package visibility. A picker that lets a
+      person choose which applications may be mirrored has to be able to name
+      them, and there are exactly two ways to do that:
+
+        * QUERY_ALL_PACKAGES — the whole installed set, including every app
+          that has no launcher entry and nothing to do with notifications. It
+          is on the deliberately-absent list above and stays there: it is far
+          wider than this feature needs, and Play treats it as a
+          restricted permission precisely because it is an inventory of the
+          user's device;
+        * this `<queries>` element — the documented, unrestricted mechanism.
+          It makes visible exactly the applications that declare a launcher
+          entry, which is the same set the person sees on their home screen
+          and therefore the only set a picker can meaningfully offer.
+
+      Measured on the certification hardware (SM-X620, Android 16 / API 36,
+      One UI 8.0): 97 launchable applications, all 97 labels and icons
+      resolvable, against 501 packages installed — so this is a narrowing of
+      roughly five to one against QUERY_ALL_PACKAGES, not a synonym for it.
+      Every application observed posting a notification on that device was in
+      the 97.
+
+      Packages with no launcher entry that nonetheless post notifications —
+      the system UI, a weather daemon, `com.android.shell` — are not made
+      visible by this element and are not enumerated. They reach the picker
+      only when they are actually in the notification shade, through the
+      listener that is already bound and already reading them, which is
+      access the user has separately granted. See NotificationApps.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <application
+        android:name=".OmniBridgeApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:theme="@style/Theme.OmniBridge">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The pairing QR scanner (ANDROID-UX-ORIENTATION-01).
+
+          This activity is not ours: it is `CaptureActivity` from
+          `com.journeyapps:zxing-android-embedded`, which `ScanContract`
+          launches. It is re-declared here for exactly one attribute.
+
+          The library's own manifest declares it with
+
+              android:screenOrientation="sensorLandscape"
+
+          and the manifest merger imported that verbatim, because OmniBridge had
+          nothing of its own to say about it. That is why the scanner forced
+          landscape on a phone held in portrait: nobody in this repository
+          ever asked for landscape, and nothing here could have been changed
+          to stop it — the declaration came from a dependency.
+
+          `unspecified` is the platform default and the only value that means
+          "not ours to decide": Android applies the user's own orientation
+          policy, so a device with rotation locked to portrait stays portrait
+          and one with auto-rotate on follows the sensor. It is deliberately
+          NOT `fullSensor` or `fullUser`, which the library's README suggests:
+          those force sensor rotation and would override a person's rotation
+          lock, which is the same defect pointing the other way.
+
+          `tools:replace` is required — without it the merger sees two
+          conflicting values for one attribute and fails the build. Every
+          other attribute the library sets (its theme, `clearTaskOnLaunch`,
+          `stateNotNeeded`, `windowSoftInputMode`) is inherited unchanged.
+
+          The second half of the fix is in `PairingScanner.options()`: the
+          library *also* pins the orientation at runtime unless it is told not
+          to. Fixing either alone leaves the scanner locked.
+        -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="unspecified"
+            tools:replace="android:screenOrientation" />
+
+        <!--
+          The scanner OmniBridge actually launches (ANDROID-UX-SCANNER-INSETS-01).
+
+          `PairingCaptureActivity` is the library's `CaptureActivity` with one
+          thing added: an inset handler that keeps the prompt out from under
+          the navigation bar. The library's screen lays that prompt against
+          the bottom of the window, and since API 35 the bottom of the window
+          is behind the bar — measured on the certification hardware as
+          `zxing_status_view [623,2842][1176,2880]` inside `navigationBars
+          [0,2784][1800,2880]`.
+
+          The attributes below are the library's own, copied deliberately
+          rather than inherited: a subclass gets a *separate* manifest entry,
+          so anything the library declares for its activity has to be said
+          again here or it is silently lost. `zxing_CaptureTheme` is the
+          fullscreen capture theme, `clearTaskOnLaunch` and `stateNotNeeded`
+          are what stop a scanner surviving into a later task, and
+          `stateAlwaysHidden` keeps the keyboard away from a camera screen.
+
+          `screenOrientation="unspecified"` is the same value and the same
+          reason as the declaration above it: the platform default, meaning
+          Android applies the user's own orientation policy. It needs no
+          `tools:replace` because nothing else declares this class. A custom
+          activity must not be how `sensorLandscape` creeps back in.
+
+          Not exported: it is launched by `ScanContract` from inside this app
+          and by nothing else.
+        -->
+        <activity
+            android:name=".ui.PairingCaptureActivity"
+            android:exported="false"
+            android:clearTaskOnLaunch="true"
+            android:screenOrientation="unspecified"
+            android:stateNotNeeded="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
+
+        <!--
+          The Sharesheet entry point: Gallery / Files / Browser -> Share ->
+          OmniBridge. Exported because that is what makes it appear in the
+          chooser; it accepts only a shared stream and does nothing with an
+          empty or unrecognised intent.
+
+          `mimeType="*/*"` is what lets any file type be shared. It grants the
+          app nothing: the URI arrives with a temporary read permission for
+          that one item, which is strictly less access than any storage
+          permission would be, and is exactly why no storage permission is
+          declared anywhere in this manifest.
+        -->
+        <activity
+            android:name=".ui.SendActivity"
+            android:exported="true"
+            android:label="@string/share_target_label"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.OmniBridge.Dialog">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <!--
+              Selected text, shared straight to a paired computer as a
+              clipboard update. `text/plain` is listed explicitly even though
+              `*/*` already matches it, because Android ranks a share target
+              higher when the type is named — and because being explicit is
+              what documents that shared text takes the clipboard.v1 path,
+              not the files.v1 one.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          `connectedDevice`: this service exists only while an active
+          connection to a paired computer exists or is being established. It
+          is NOT a `dataSync` daemon and it is not started at boot.
+        -->
+        <service
+            android:name=".service.ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <!--
+          "Send clipboard" in the Quick Settings panel.
+
+          The tile cannot read the clipboard itself: a TileService has no
+          input focus, and since Android 10 that is what `getPrimaryClip`
+          requires. It therefore opens MainActivity with an explicit request,
+          and the Activity — which does have focus — reads the clipboard after
+          the person confirms. That is the supported flow, not a workaround
+          for one. See ClipboardTileService.
+
+          BIND_QUICK_SETTINGS_TILE is held by the *system*, not by us: it is
+          what stops any other app from binding this service.
+        -->
+        <!--
+          notifications.v1 — mirroring this phone's notifications to a paired
+          computer. Optional, off by default, and inert on a fresh install.
+
+          `android:permission` names the permission the *system* must hold to
+          bind this service. We do not hold it; declaring it is what stops any
+          other application from binding us.
+
+          `default_autobind=false` is the load-bearing one. Without it the
+          system binds this listener whenever the app is installed and access
+          is granted, and OmniBridge would be reading notifications with nobody
+          listening. With it, the binding is requested only while a paired
+          computer that holds the notifications.v1 grant is connected, and
+          released when the last one goes away — which is what makes "OmniBridge
+          reads your notifications only while a granted computer is connected"
+          structurally true rather than a promise. See ADR-0015 §3.
+
+          `default_filter_types` is a real, free, OS-enforced narrowing that
+          sits underneath OmniBridge's own per-app filter: the system delivers
+          only conversations and alerting notifications unless the user says
+          otherwise. `disabled_filter_types` is deliberately NOT declared —
+          it would grey those types out permanently in the system UI, and a
+          person who genuinely wants their media notification mirrored should
+          be able to have it.
+        -->
+        <service
+            android:name=".notifications.OmniBridgeNotificationListener"
+            android:exported="false"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.notification.default_autobind"
+                android:value="false" />
+            <meta-data
+                android:name="android.service.notification.default_filter_types"
+                android:value="conversations|alerting" />
+        </service>
+
+        <service
+            android:name=".ui.ClipboardTileService"
+            android:exported="true"
+            android:label="@string/clipboard_tile_label"
+            android:icon="@drawable/ic_clipboard"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>

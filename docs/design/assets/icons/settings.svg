@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- OmniBridge icon set: 24px grid, 2px stroke, round caps and joins.
+       Generated from the Android vector drawable of the same name so the
+       two platforms cannot drift. See docs/design/UI-GUIDELINES.md. -->
+  <path d="M12,15a3,3 0 1,0 0,-6a3,3 0 0,0 0,6z M19.4,13.5l1.9,1.1l-2,3.5l-2.1,-0.9a7.6,7.6 0 0,1 -1.9,1.1l-0.3,2.2h-4l-0.3,-2.2a7.6,7.6 0 0,1 -1.9,-1.1l-2.1,0.9l-2,-3.5l1.9,-1.1a7.7,7.7 0 0,1 0,-2.2l-1.9,-1.1l2,-3.5l2.1,0.9a7.6,7.6 0 0,1 1.9,-1.1l0.3,-2.2h4l0.3,2.2a7.6,7.6 0 0,1 1.9,1.1l2.1,-0.9l2,3.5l-1.9,1.1a7.7,7.7 0 0,1 0,2.2z" fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,120 @@
+Building OmniBridge on Debian and Ubuntu
+========================================
+
+Two things about this source package are unusual, and both are deliberate.
+
+
+1. The Rust floor is not satisfiable on stock Debian 13
+-------------------------------------------------------
+
+OmniBridge's MSRV is **1.88**. It is measured from the committed lockfile
+rather than chosen: `time` 0.3.55 demands it and cargo's resolver refuses
+before compiling a line. `desktop/Cargo.toml` carries the derivation.
+
+MEASURED, each target against its own archive:
+
+    Ubuntu 24.04 LTS   stock rustc 1.75.0     rustc-1.91 = 1.91.1   OK via alternative
+    Ubuntu 26.04 LTS   stock rustc 1.93.1                           OK, stock
+    Debian 13 trixie   stock rustc 1.85.1     no versioned rustc    NOT SATISFIABLE
+
+`Build-Depends` therefore reads:
+
+    rustc (>= 1.88) | rustc-1.91, cargo (>= 1.88) | cargo-1.91
+
+On Ubuntu 24.04 that resolves to `rustc-1.91`, which installs into
+`/usr/lib/rust-1.91/bin` and does **not** provide `/usr/bin/rustc`;
+`debian/rules` prepends that directory to `PATH` when it exists.
+
+**On stock Debian 13 trixie the dependency cannot be satisfied at all.** That
+is stated plainly here rather than hidden behind a lower floor that the code
+does not build against. Two routes work, and both are the builder's choice:
+
+    # trixie-backports, MEASURED: rustc 1.94.1+dfsg1-1~bpo13+3
+    echo 'deb http://deb.debian.org/debian trixie-backports main' \
+        > /etc/apt/sources.list.d/backports.list
+    apt-get update && apt-get -t trixie-backports install rustc cargo
+
+    # or a pinned rustup toolchain, which is what official artifacts use
+
+The published binaries are built in CI with a pinned toolchain, from the same
+immutable tag as the RPM. This is a third-party package, not a Debian-archive
+submission, and that distinction is what makes a pinned toolchain acceptable
+(readiness audit §6.2, PLAT-DEC-011).
+
+**None of this reaches the runtime.** `rustc` and `cargo` are build
+dependencies only. The installed packages depend on what `${shlibs:Depends}`
+derives from the actual ELF headers: libc, and for the GUI, GTK 4 and
+libadwaita. Nothing in `Depends` mentions Rust, and nothing needs to.
+
+
+2. The build is offline, from vendored sources
+----------------------------------------------
+
+`debian/rules` runs `cargo --locked --offline` with `CARGO_HOME` redirected
+into the build tree. A network fetch during the build is not merely
+unnecessary, it is impossible — which is what a buildd requires and what
+`packaging/release/make-source-bundle.sh` produces the inputs for:
+
+    omnibridge-<version>.tar.gz          the upstream source
+    omnibridge-<version>-vendor.tar.xz   every crate in desktop/Cargo.lock
+
+The build script unpacks the vendor tarball into `desktop/vendor` and copies
+`packaging/common/cargo-vendor-config.toml` to `desktop/.cargo/config.toml`,
+which replaces the crates.io source with that directory. The vendor tree is
+not committed: 343 MB of third-party source does not belong in the
+repository, and the lockfile it is generated from is what is authoritative.
+
+
+Building
+--------
+
+    ./packaging/release/make-source-bundle.sh --rev v1.0.0 --output dist
+    ./packaging/debian/build-deb.sh --image docker.io/library/debian:trixie dist
+
+`build-deb.sh` does the whole thing in a disposable container: installs the
+declared `Build-Depends` (and nothing by name, so an under-declared
+dependency fails the build instead of being covered by the host), unpacks the
+bundle, assembles `./debian/` from `packaging/debian/`, and runs
+`dpkg-buildpackage -b`.
+
+
+What is deliberately absent
+---------------------------
+
+**No firewall metadata.** Debian 13 enables no firewall by default and Ubuntu
+ships `ufw` inactive, so a firewalld XML would be dead weight on nearly every
+install and would imply a firewalld that is usually not there. Users who have
+turned `ufw` on need:
+
+    sudo ufw allow 55432/tcp
+    sudo ufw allow mdns
+
+**No maintainer scripts beyond what debhelper generates.** Each omission is
+deliberate:
+
+    postinst, enable the unit      dh_installsystemduser --no-enable emits the
+                                   correct fragment; a hand-written one would
+                                   be a worse copy
+    postinst, desktop database     desktop-file-utils declares a dpkg trigger
+                                   on /usr/share/applications
+    postinst, icon cache           hicolor-icon-theme declares a trigger on
+                                   /usr/share/icons/hicolor
+    postinst, D-Bus ReloadConfig   impossible as root; omnibridged repairs its
+                                   own activation from inside the user session
+    prerm, stop the daemon         root cannot reach a user's service manager
+    postrm purge, remove user data MUST NOT EXIST
+
+That last line is the one that matters most. `~/.local/share/omnibridge`
+holds the user's identity key and the record of every device they have
+paired. No transaction — install, upgrade, remove or **purge** — may create,
+move or delete it. `packaging/tests/packaging-checks.sh` greps every
+maintainer script for `$HOME` and `.local/share`, and
+`packaging/tests/install-smoke.sh` plants a fake trust store and compares its
+digest and mode across remove, reinstall and purge.
+
+**No GNOME Shell extension dependency.** OmniBridge publishes a
+StatusNotifierItem, which is the tray protocol KDE implements natively. A
+GNOME session needs an AppIndicator host extension to display one, and that is
+the user's choice to install: a package that pulled in a shell extension would
+be changing the user's desktop on their behalf. Without it the tray icon is
+absent and everything else works.

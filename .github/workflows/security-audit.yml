@@ -1,0 +1,100 @@
+# CI-006 — the dependency advisory gate.
+#
+# What this proves, and what it does not
+# --------------------------------------
+# It proves that no crate in the committed `desktop/Cargo.lock` has a known
+# advisory in the RustSec database at the moment the job runs. That is all it
+# proves: an advisory that has not been published yet is invisible to it, and
+# a vulnerability nobody has written up is invisible to everyone.
+#
+# It is **not** a substitute for the security certification. It does not read
+# code, does not run the product, and says nothing about OmniBridge's own
+# protocol, pairing or file handling.
+#
+# Why it exists
+# -------------
+# It found something the first time it was ever run. Security Certification v1
+# gate SEC-DEPS-01 ran `cargo audit` by hand and reported RUSTSEC-2026-0285 in
+# rustls 0.23.43 — "TLS 1.3 handshake messages incorrectly accepted across
+# encryption level boundaries". OmniBridge speaks TLS 1.3 and nothing else, so
+# that advisory sat on the code path every peer session uses. It was fixed in
+# its own branch before the certification continued.
+#
+# A check that finds a real defect on its first execution is a check that
+# should not be run by hand once a release.
+#
+# Why it runs on a schedule as well as on push
+# --------------------------------------------
+# This is the one gate in this repository whose result can change **without
+# the repository changing**. A new advisory against an unchanged lockfile is
+# exactly the case a push-triggered job cannot see, and it is the common case:
+# dependencies are not usually edited on the day a vulnerability in them is
+# published.
+#
+# Why the lockfile is the input
+# -----------------------------
+# `desktop/Cargo.lock` is committed and every official build resolves from it
+# — `--locked --offline` in the RPM's `%build`, in `debian/rules`, and in the
+# source bundle. Auditing the lockfile therefore audits what actually ships,
+# rather than what a fresh resolution might have picked today.
+
+name: Security · dependency advisories
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**/Cargo.toml'
+      - 'desktop/Cargo.lock'
+      - '.github/workflows/security-audit.yml'
+  push:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**/Cargo.toml'
+      - 'desktop/Cargo.lock'
+      - '.github/workflows/security-audit.yml'
+  # 07:13 UTC daily. An odd minute rather than the hour, because every
+  # scheduled workflow on GitHub that asks for :00 is queued behind every
+  # other one that did.
+  schedule:
+    - cron: '13 7 * * *'
+  workflow_dispatch:
+
+# Read-only. It reports; it opens nothing and publishes nothing.
+permissions:
+  contents: read
+
+concurrency:
+  group: security-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: cargo audit · desktop/Cargo.lock
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to the MSRV for the same reason `linux-distro-compat.yml` pins
+      # it: this repository builds against a declared floor, and a tool chain
+      # newer than that floor can resolve differently.
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --no-self-update
+          rustup default 1.88.0
+          rustc --version
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # `--deny warnings` turns unmaintained-crate and unsound advisories into
+      # failures as well as vulnerabilities. That is deliberate: an
+      # unmaintained TLS or parsing crate is a finding worth seeing on the day
+      # it appears, not on the day it becomes a CVE.
+      #
+      # If a finding is ever accepted rather than fixed, it goes in
+      # `.cargo/audit.toml` with the advisory id and a written reason — in the
+      # repository, reviewable — never as a flag hidden in this file.
+      - name: cargo audit
+        working-directory: desktop
+        run: cargo audit --deny warnings

@@ -1,0 +1,75 @@
+[package]
+name = "omnibridge-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Adapter/binary crate: `unsafe` needs a deliberate, reviewable
+# `#[allow(unsafe_code)]` with a justification comment. None exists today.
+unsafe_code = "deny"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[lib]
+name = "omnibridge_gui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "omnibridge-gui"
+path = "src/main.rs"
+
+[dependencies]
+# The control protocol types, shared with the CLI and the agent. Sharing them
+# is the point: the GUI cannot drift from the socket contract. What it no
+# longer does is depend on the *agent* to get them — before Wave 0 a GTK
+# application pulled in mDNS, UPower and every capability crate for this
+# (audit C1).
+omnibridge-control = { version = "1.0.0", path = "../control" }
+# The Linux control endpoint. A desktop UI is a platform application; it is
+# the *portable* crates that must not name a platform.
+# `default-features = false` turns off the crate's `tray` feature. The tray is
+# the agent's, not the GUI's: `omnibridged` owns the StatusNotifierItem and this
+# process is what it activates. A GUI that could publish a tray item is one
+# refactor away from being kept resident to hold one.
+omnibridge-linux = { version = "1.0.0", path = "../platform-linux", default-features = false }
+# The native GUI floors. Both are enforced at build time by `system-deps`
+# reading the distribution's own pkg-config metadata, so they are a hard gate
+# rather than a hope — and neither is a conservative pin. Each was measured by
+# lowering it one step and recompiling (U0 §14.2):
+#
+#   v4_12  `gtk::CssProvider::load_from_string` (src/lib.rs) is
+#          `#[cfg(feature = "v4_12")]`. At v4_10 the theme installer does not
+#          compile. `load_from_data(&str)` is the ungated predecessor if this
+#          floor ever has to come down, but no supported target needs it.
+#   v1_5   `adw::Dialog` (views/pairing.rs) and `adw::AlertDialog`
+#          (views/peers.rs) do not exist at v1_4.
+#
+# Ubuntu 24.04 LTS ships libadwaita **exactly 1.5.0** and is supported to
+# 2029, so this floor has no margin at all on the LTS most users have. The
+# 24.04 row of `.github/workflows/linux-distro-compat.yml` compiles this crate
+# against that distribution's own libadwaita for precisely that reason: reach
+# for an `AdwSpinner` (1.6) or an `AdwBottomSheet` (1.7) and that row goes
+# red, rather than the loss being discovered by a user.
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_5"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "sync"] }
+async-channel = "2"
+serde_json = "1"
+anyhow = "1"
+# Same encoder the daemon uses for the terminal QR, so the two cannot
+# disagree about what was encoded.
+qrcode = { version = "0.14", default-features = false }
+
+[build-dependencies]
+glib-build-tools = "0.20"

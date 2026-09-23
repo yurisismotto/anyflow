@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The wide connection ribbon. Empty states and transfer motifs: two devices,
+  one flow. Same curvature, weight and terminals as the mark, stretched.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="200dp" android:height="72dp"
+    android:viewportWidth="200" android:viewportHeight="72">
+    <path android:pathData="M18,46 C 62,46 56,22 100,26 C 144,30 140,20 182,26"
+        android:strokeWidth="7" android:strokeLineCap="round">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:type="linear"
+                android:startX="16" android:startY="46" android:endX="184" android:endY="26">
+                <item android:offset="0" android:color="#FF18B8C9" />
+                <item android:offset="0.5" android:color="#FF4F6BFF" />
+                <item android:offset="1" android:color="#FF7C5CFC" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M18,46m-8,0a8,8 0 1,0 16,0a8,8 0 1,0 -16,0" android:fillColor="#FF18B8C9" />
+    <path android:pathData="M182,26m-8,0a8,8 0 1,0 16,0a8,8 0 1,0 -16,0" android:fillColor="#FF7C5CFC" />
+</vector>

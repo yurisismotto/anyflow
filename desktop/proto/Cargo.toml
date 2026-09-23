@@ -1,0 +1,36 @@
+[package]
+name = "omnibridge-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Portable, security-critical: `unsafe` is forbidden outright.
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+prost = "0.14.3"
+
+[build-dependencies]
+prost-build = "0.14.3"
+protox = "0.9.1"
+
+[dev-dependencies]
+# The field-set regression test compiles the same `.proto` files the build
+# script does and asserts against the resulting descriptors. Structural, not a
+# grep over the schema text: a prohibited field cannot hide behind a rename,
+# a comment or a line break.
+prost-types = "0.14.3"
+protox = "0.9.1"

@@ -1,0 +1,50 @@
+[package]
+name = "omnibridge-capability-files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# The Unix filesystem destination: XDG download dirs, 0600/0700 modes,
+# `O_EXCL`. On by default so every existing caller keeps working; with it off
+# this crate is portable and `FileSink` is the only way in. That is what the
+# Wave 0 compile gate checks.
+default = ["unix-fs"]
+unix-fs = []
+
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Portable, security-critical: `unsafe` is forbidden outright.
+unsafe_code = "forbid"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+# `default-features = false`: a capability crate needs the protocol half of
+# `omnibridge-core`, never its Unix filesystem adapter. Leaving the default on
+# would drag `unix-fs` into every build through feature unification, and the
+# portability gate would then pass for the wrong reason.
+omnibridge-core = { version = "1.0.0", path = "../../core", default-features = false }
+omnibridge-proto = { version = "1.0.0", path = "../../proto" }
+prost = "0.14"
+tokio = { version = "1", features = ["fs", "io-util", "sync", "time", "macros", "rt"] }
+tracing = "0.1"
+async-trait = "0.1"
+hmac = "0.12.1"
+sha2 = "0.10.9"
+subtle = "2.6.1"
+zeroize = "1.8.2"
+rand = "0.9.5"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+tempfile = "3"

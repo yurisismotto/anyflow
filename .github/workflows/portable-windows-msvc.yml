@@ -1,0 +1,361 @@
+# CI-001 — the Wave 0 portable-core compile gate on Windows MSVC.
+#
+# What this proves, and what it does not
+# --------------------------------------
+# It proves that no `std::os::unix`, no Linux-only dependency and no
+# accidentally unified Cargo feature has leaked into the six portable crates:
+# the boundary Wave 0 built still holds. It is a **boundary regression test**.
+#
+# It says nothing whatsoever about whether OmniBridge *runs* on Windows. That is
+# runtime certification, it needs a real machine, and it belongs to Wave 5+.
+# Conflating the two is how a project talks itself into believing it supports
+# a platform it has never run on.
+#   — docs/research/platform-expansion/28-WAVE-0-IMPLEMENTATION-SPEC.md §10.3
+#
+# Why a Windows runner and not a Linux cross-compile
+# --------------------------------------------------
+# `ring` needs a C toolchain, and for MSVC targets that means Build Tools for
+# Visual Studio, whose libraries are not redistributable onto a Linux host
+# (V-10). POC-CORE-01 cross-compiled `x86_64-pc-windows-gnu` from Fedora; that
+# is a different C runtime and a different `ring` build path, and it is
+# explicitly *not* evidence for MSVC. Hence POC-CORE-04, and hence this job.
+#
+# `omnibridge-runtime` is deliberately excluded: it depends on `mdns-sd`, whose
+# Windows behaviour is V-12 / POC-WIN-02 and is not Wave 0's problem.
+
+name: Portable core · Windows MSVC
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/portable-windows-msvc.yml'
+  push:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/portable-windows-msvc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-windows-msvc-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: pwsh
+    working-directory: desktop
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  portable-msvc:
+    name: cargo check · x86_64-pc-windows-msvc
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # ---------------------------------------------------------------- 1 --
+      - name: Toolchain identity — MSVC, not GNU
+        run: |
+          rustc -Vv
+          cargo -V
+          rustup show active-toolchain
+          rustup target add x86_64-pc-windows-msvc
+          rustup target list --installed
+
+          $hostTriple = ((rustc -Vv | Select-String '^host: ') -split ':\s*')[1].Trim()
+          Write-Host "effective host triple: $hostTriple"
+          if ($hostTriple -ne 'x86_64-pc-windows-msvc') {
+            Write-Host "::error::host triple is '$hostTriple', not x86_64-pc-windows-msvc."
+            Write-Host "::error::A -gnu toolchain is NOT an acceptable substitute for POC-CORE-04."
+            exit 1
+          }
+          if (-not ((rustup target list --installed) -contains 'x86_64-pc-windows-msvc')) {
+            Write-Host "::error::x86_64-pc-windows-msvc target is not installed."
+            exit 1
+          }
+
+      - name: MSVC build tools present (evidence only)
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            & $vswhere -latest -products * -property displayName
+            & $vswhere -latest -products * -property installationVersion
+          } else {
+            Write-Host 'vswhere not found; the real proof is ring compiling below.'
+          }
+
+      # ---------------------------------------------------------------- 2 --
+      - name: The portable package set still exists
+        run: |
+          $expected = @(
+            'omnibridge-proto',
+            'omnibridge-core',
+            'omnibridge-control',
+            'omnibridge-capability-clipboard',
+            'omnibridge-capability-files',
+            'omnibridge-capability-battery',
+            'omnibridge-capability-notifications'
+          )
+          $have = (cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages.name
+          $missing = $expected | Where-Object { $have -notcontains $_ }
+          if ($missing) {
+            Write-Host "::error::portable package(s) missing from the workspace: $($missing -join ', ')"
+            Write-Host "::error::A renamed or deleted portable crate must update this gate deliberately."
+            exit 1
+          }
+          Write-Host "portable set present: $($expected -join ', ')"
+
+      # ---------------------------------------------------------------- 3 --
+      # THE GATE. Verbatim from 28-WAVE-0-IMPLEMENTATION-SPEC.md §10.3.
+      - name: POC-CORE-04 — cargo check, portable set, MSVC
+        run: |
+          cargo check --locked --no-default-features `
+            --target x86_64-pc-windows-msvc `
+            -p omnibridge-proto `
+            -p omnibridge-core `
+            -p omnibridge-control `
+            -p omnibridge-capability-clipboard `
+            -p omnibridge-capability-files `
+            -p omnibridge-capability-battery `
+            -p omnibridge-capability-notifications
+
+      # Strengthening, not a substitute: `check` stops at metadata, `build`
+      # runs codegen and links, which is where `ring`'s MSVC objects and the
+      # pre-generated assembly actually have to work.
+      - name: Full codegen — cargo build, portable set, MSVC
+        run: |
+          cargo build --locked --no-default-features `
+            --target x86_64-pc-windows-msvc `
+            -p omnibridge-proto `
+            -p omnibridge-core `
+            -p omnibridge-control `
+            -p omnibridge-capability-clipboard `
+            -p omnibridge-capability-files `
+            -p omnibridge-capability-battery `
+            -p omnibridge-capability-notifications
+
+      # ---------------------------------------------------------------- 4 --
+      # Test targets. Five of the six portable crates compile every test
+      # target with the platform features off. `omnibridge-core` has three that
+      # do not, and deliberately so — they test the *unix-fs adapter* rather
+      # than the portable core:
+      #
+      #   * `identity_and_store`  — `Store::open(dir)`, trust-store round trips
+      #   * `identity_states`     — `probe_identity_at`, the 0600-mode refusal
+      #   * `revoked_tombstone`   — the revoked-device tombstone lifecycle
+      #
+      # `revoked_tombstone` joined them with the revoked-device cleanup work.
+      # It is an adapter test for the same reason the other two are: every one
+      # of its cases goes through `Store::open(tempdir)`, and several read and
+      # rewrite `state.json` on disk directly to exercise schema migration, the
+      # hidden-implies-revoked fail-closed rule, and survival across a restart.
+      # `Store::open` is `#[cfg(feature = "unix-fs")]`, so with the feature off
+      # the target does not compile — measured, not assumed: it fails with
+      # `E0599: no associated function ... named 'open'`. That is the seam
+      # working as designed. The *portable* half of the same feature — the
+      # tombstone's effect on admission — is covered by `omnibridge-daemon`'s
+      # `revoked_cleanup` suite, which is outside this job's crate set anyway.
+      #
+      # All three are named here rather than skipped by a wildcard, and the
+      # guard below fails if the set of core test files changes, so a *new*
+      # core test cannot slip past this gate unnoticed.
+      #
+      # `parser_fuzz.rs` (Security Certification v1, SEC-FUZZ-01) is
+      # **portable**, and deliberately so. It drives three parsers that an
+      # unauthenticated peer reaches before anything has decided who is
+      # talking: `framing::read_envelope` over a `std::io::Cursor`, the
+      # protobuf decoder beneath it, and `discovery::sanitize_device_name`.
+      # None of them touches the filesystem, so none is behind `unix-fs`, and a
+      # Windows agent will want every one of those assertions unchanged — a
+      # frame whose length prefix lies is a frame whose length prefix lies on
+      # any platform.
+      #
+      # The half of that campaign that *is* platform-shaped went elsewhere on
+      # purpose: `filename::sanitize`'s output becomes a path, so its campaign
+      # lives in `capabilities/files/tests/filename_fuzz.rs` with the crate
+      # that owns the sanitiser, rather than in `omnibridge-core`, which does
+      # not depend on a capability and must not start.
+      - name: Core test files unchanged (guard for the exclusion below)
+        run: |
+          $expected = @(
+            'identity_and_store.rs',
+            'identity_seam.rs',
+            'identity_states.rs',
+            'notifications_protocol.rs',
+            'pairing.rs',
+            'parser_fuzz.rs',
+            'portable_boundary.rs',
+            'protocol.rs',
+            'revoked_tombstone.rs',
+            'wire_identity.rs'
+          ) | Sort-Object
+          $actual = Get-ChildItem core/tests -Filter *.rs -File |
+                    Select-Object -ExpandProperty Name | Sort-Object
+          if (Compare-Object $expected $actual) {
+            Write-Host "::error::core/tests changed. Classify the new test target: portable, or unix-fs adapter?"
+            Write-Host "expected: $($expected -join ', ')"
+            Write-Host "actual  : $($actual   -join ', ')"
+            exit 1
+          }
+
+      # The same discipline for the notifications capability, whose test set
+      # is split three ways: `dismiss`, `sink`, `logging` and `hardening` are
+      # portable and compile everywhere, while `real_dbus` and `real_lock` are
+      # whole-file `#![cfg(feature = "linux-dbus")]` and compile to empty
+      # binaries with the feature off. That is why they need no exclusion
+      # below — but a *new* target must be classified deliberately rather than
+      # discovered when this job goes red.
+      #
+      # `hardening.rs` (N5) is **portable**, deliberately: everything it
+      # exercises — the reconnect grace, the queue and mirror ceilings, role
+      # epochs, backend loss, lock transitions and every injected failure —
+      # runs against the `MemorySink`/`MemoryLock` pair, which is the whole
+      # reason the `NotificationSink` seam exists. A Windows sink will want
+      # every one of those assertions unchanged.
+      - name: Notification test files unchanged (classification guard)
+        run: |
+          $expected = @(
+            'convergence.rs',
+            'dismiss.rs',
+            'hardening.rs',
+            'logging.rs',
+            'real_dbus.rs',
+            'real_lock.rs',
+            'sink.rs'
+          ) | Sort-Object
+          $actual = Get-ChildItem capabilities/notifications/tests -Filter *.rs -File |
+                    Select-Object -ExpandProperty Name | Sort-Object
+          if (Compare-Object $expected $actual) {
+            Write-Host "::error::capabilities/notifications/tests changed. Classify the new target:"
+            Write-Host "::error::  portable (compiles with --no-default-features), or"
+            Write-Host "::error::  Linux-only (whole file behind #![cfg(feature = `"linux-dbus`")])?"
+            Write-Host "expected: $($expected -join ', ')"
+            Write-Host "actual  : $($actual   -join ', ')"
+            exit 1
+          }
+
+      - name: Portable test targets compile — MSVC
+        run: |
+          cargo test --locked --no-run --no-default-features `
+            --target x86_64-pc-windows-msvc `
+            -p omnibridge-proto `
+            -p omnibridge-control `
+            -p omnibridge-capability-clipboard `
+            -p omnibridge-capability-files `
+            -p omnibridge-capability-battery `
+            -p omnibridge-capability-notifications
+
+          cargo test --locked --no-run --no-default-features `
+            --target x86_64-pc-windows-msvc `
+            -p omnibridge-core `
+            --lib `
+            --test identity_seam `
+            --test notifications_protocol `
+            --test pairing `
+            --test portable_boundary `
+            --test protocol `
+            --test wire_identity
+
+      # ---------------------------------------------------------------- 5 --
+      # The dependency boundary, measured on the resolved graph rather than
+      # grepped from source. Wave 0 already hit this once: Cargo feature
+      # unification switched `unix-fs` back on through a capability crate's
+      # default dependency on `omnibridge-core`, and a source grep would have
+      # missed it (POC-CORE-01).
+      - name: Dependency boundary — no Linux platform crate, no unified platform feature
+        run: |
+          $tree = cargo tree --locked --no-default-features `
+            --target x86_64-pc-windows-msvc -e normal `
+            -p omnibridge-proto `
+            -p omnibridge-core `
+            -p omnibridge-control `
+            -p omnibridge-capability-clipboard `
+            -p omnibridge-capability-files `
+            -p omnibridge-capability-battery `
+            -p omnibridge-capability-notifications `
+            --prefix none --format '{p} [{f}]'
+
+          $lines = $tree | ForEach-Object { $_ -replace ' \(\*\)$','' } | Sort-Object -Unique
+          $lines | ForEach-Object { Write-Host $_ }
+
+          # Package names only — matching whole lines would false-positive on
+          # feature names (tokio carries a feature literally called "libc").
+          $names = $lines | ForEach-Object { $_.Split(' ')[0] } | Sort-Object -Unique
+
+          $forbiddenCrates = @(
+            'omnibridge-linux', 'omnibridge-daemon', 'omnibridge-runtime',
+            'omnibridge-gui', 'omnibridge-cli',
+            'x11rb', 'x11rb-protocol', 'zbus', 'zbus_names',
+            'gtk4', 'gtk4-sys', 'libadwaita', 'libadwaita-sys',
+            'glib', 'glib-sys', 'gdk4', 'gio', 'gobject-sys',
+            'wayland-client', 'wayland-backend', 'smithay-client-toolkit',
+            'mdns-sd', 'nix', 'libc', 'rustix'
+          )
+          $hits = $names | Where-Object { $forbiddenCrates -contains $_ }
+          if ($hits) {
+            Write-Host "::error::Linux/platform crate reached the portable set: $($hits -join ', ')"
+            exit 1
+          }
+
+          # And no platform Cargo feature came back on through unification.
+          $forbiddenFeatures = @('unix-fs', 'linux-backends', 'upower', 'linux-dbus')
+          $bad = @()
+          foreach ($line in ($lines | Where-Object { $_ -like 'omnibridge-*' })) {
+            if ($line -match '\[(.*)\]$') {
+              foreach ($f in ($matches[1] -split ',' | Where-Object { $_ })) {
+                if ($forbiddenFeatures -contains $f.Trim()) { $bad += $line }
+              }
+            }
+          }
+          if ($bad) {
+            Write-Host "::error::platform feature unified back on:"
+            $bad | ForEach-Object { Write-Host "::error::  $_" }
+            exit 1
+          }
+
+          Write-Host "boundary clean: $($names.Count) packages, no platform crate, no platform feature."
+
+      # ---------------------------------------------------------------- 6 --
+      # ARCH-010. The Windows gate must never be the reason `unsafe` is
+      # relaxed in the portable core.
+      - name: Unsafe policy unchanged (ARCH-010)
+        run: |
+          $forbid = @('proto','core','control','runtime',
+                      'capabilities/clipboard','capabilities/files','capabilities/battery',
+                      'capabilities/notifications')
+          $deny   = @('platform-linux','daemon','cli','gui')
+          $failed = $false
+          foreach ($c in $forbid) {
+            if (-not (Select-String -Path "$c/Cargo.toml" -SimpleMatch 'unsafe_code = "forbid"' -Quiet)) {
+              Write-Host "::error::$c/Cargo.toml no longer declares unsafe_code = `"forbid`""; $failed = $true
+            }
+          }
+          foreach ($c in $deny) {
+            if (-not (Select-String -Path "$c/Cargo.toml" -SimpleMatch 'unsafe_code = "deny"' -Quiet)) {
+              Write-Host "::error::$c/Cargo.toml no longer declares unsafe_code = `"deny`""; $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+          Write-Host "unsafe policy intact: forbid in the portable/security crates, deny in the adapters."
+
+      # ---------------------------------------------------------------- 7 --
+      - name: ring built by MSVC (evidence)
+        run: |
+          $out = Get-ChildItem -Path target/x86_64-pc-windows-msvc/debug/build `
+                   -Filter 'ring-*' -Directory -ErrorAction SilentlyContinue
+          if ($out) {
+            $out | ForEach-Object {
+              Get-ChildItem -Path $_.FullName -Recurse -Include *.lib,*.obj -ErrorAction SilentlyContinue |
+                Select-Object -First 20 -ExpandProperty FullName
+            }
+          }
+          Write-Host "rustls + ring resolved and compiled for x86_64-pc-windows-msvc."

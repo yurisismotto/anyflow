@@ -1,0 +1,61 @@
+[package]
+name = "omnibridge-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints.rust]
+# Wave 0 (ARCH-010): the `unsafe_code` lint is scoped per crate rather than
+# workspace-wide. `forbid` cannot be relaxed by an inner `#[allow]`, so a
+# workspace-wide `forbid` would make every future platform adapter — which
+# will need FFI to Win32, CNG, Security.framework or IOKit — impossible to
+# write without first weakening the security core. See
+# docs/implementation/WAVE-0-PLATFORM-ABSTRACTION.md.
+#
+# Adapter/binary crate: `unsafe` needs a deliberate, reviewable
+# `#[allow(unsafe_code)]` with a justification comment. None exists today.
+unsafe_code = "deny"
+
+[lints.clippy]
+todo = "warn"
+unwrap_used = "warn"
+
+[[bin]]
+name = "omnibridged"
+path = "src/main.rs"
+
+[features]
+default = ["upower"]
+upower = ["omnibridge-runtime/upower"]
+
+[dependencies]
+omnibridge-core = { version = "1.0.0", path = "../core" }
+omnibridge-proto = { version = "1.0.0", path = "../proto" }
+omnibridge-control = { version = "1.0.0", path = "../control" }
+omnibridge-runtime = { version = "1.0.0", path = "../runtime", default-features = false }
+omnibridge-linux = { version = "1.0.0", path = "../platform-linux" }
+omnibridge-capability-battery = { version = "1.0.0", path = "../capabilities/battery" }
+omnibridge-capability-clipboard = { version = "1.0.0", path = "../capabilities/clipboard" }
+omnibridge-capability-files = { version = "1.0.0", path = "../capabilities/files" }
+omnibridge-capability-notifications = { version = "1.0.0", path = "../capabilities/notifications" }
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+qrcode = { version = "0.14", default-features = false }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
+sha2 = "0.10.9"
+rustls-pki-types = "1"
+prost = "0.14.3"
+# `test-util` gives the tests a virtual clock. Liveness is measured in
+# minutes; a suite that waited them out in real time would never be run.
+tokio = { version = "1", features = ["full", "test-util"] }

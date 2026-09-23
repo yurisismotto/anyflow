@@ -1,0 +1,188 @@
+# CI-003 — the desktop source-quality gate.
+#
+# What this proves, and what it does not
+# --------------------------------------
+# It proves that the desktop workspace is **formatted** and **warning-free
+# under clippy**, production and test code alike, on the toolchain this project
+# is developed against. It is a source-hygiene gate and nothing more: it runs
+# no test, binds no socket and touches no desktop session, so a green tick here
+# says nothing about whether OmniBridge works.
+#
+# Why it exists
+# -------------
+# U2 found a tautological assertion in a test — `x || !x` — that some clippy
+# versions reject and others accept, and it reached `develop` because no
+# workflow ran clippy at all. `linux-distro-compat.yml` runs `cargo check`,
+# which does not lint; `portable-windows-msvc.yml` measures the portability
+# boundary. Neither was ever going to catch it. Lint drift is only cheap to fix
+# while it is small, and it is only small while something is watching.
+#
+# Clippy here vs MSRV there — two different questions
+# ---------------------------------------------------
+# This job runs **stable**, which is what `desktop/rust-toolchain.toml` pins
+# and therefore what a contributor sees locally. It answers:
+#
+#     "Does the current supported development toolchain consider this
+#      repository warning-free?"
+#
+# It is deliberately NOT an MSRV job and must never become one. The MSRV gate
+# lives in `linux-distro-compat.yml`, pins exactly the declared `rust-version`,
+# and answers the other question:
+#
+#     "Does the declared minimum compiler build the project?"
+#
+# Keeping them apart matters in both directions. Clippy's lint set changes
+# between releases, so pinning this job to the MSRV would freeze the lints at
+# whatever 1.88 knew and defeat the point. And a new lint appearing on stable
+# is a reason to fix the code, never a reason to raise `rust-version` — the
+# declared floor moves only when a dependency actually moves it, deliberately,
+# in `desktop/Cargo.toml` and in that workflow's `OMNIBRIDGE_MSRV` together.
+#
+# Why `--all-features`
+# --------------------
+# Measured from the workspace rather than assumed. Every feature declared in
+# `desktop/` is additive and Linux-enabling, and none excludes another:
+#
+#   omnibridge-core                 default = ["unix-fs"]
+#   omnibridge-capability-files     default = ["unix-fs"]
+#   omnibridge-capability-clipboard default = ["linux-backends"]
+#   omnibridge-capability-notif.    default = ["linux-dbus"]
+#   omnibridge-runtime / -daemon    default = ["upower"]
+#   omnibridge-capability-battery   default = []        upower = ["dep:zbus"]
+#
+# So `--all-features` is precisely the default set plus `battery/upower`, which
+# the daemon turns on anyway — i.e. the shipped Linux desktop configuration,
+# not an invalid combination assembled to please a linter. It is what makes the
+# `linux-dbus` half of the notifications crate — `backend/dbus.rs`,
+# `backend/logind.rs` and the `real_dbus` / `real_lock` test targets — reachable
+# by clippy at all; with the feature off those compile to empty binaries.
+#
+# The *other* direction, `--no-default-features`, is not this job's business:
+# the portable boundary is measured on a Windows runner by
+# `portable-windows-msvc.yml`, which is the only place it means anything.
+#
+# `--all-targets` is load-bearing too. Both U2 test defects — the clipboard
+# capability assumption and the tautology — live in `tests/`, and a clippy run
+# that skipped test targets would have missed both.
+
+name: Desktop quality · fmt + clippy
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-quality.yml'
+  # Deliberately NOT `feature/**`, matching the discipline in the other two
+  # desktop workflows: a feature branch with an open PR would otherwise run
+  # this twice for one push.
+  push:
+    branches: [main, develop]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-quality.yml'
+  workflow_dispatch:
+
+# Read-only. This job builds and lints; it publishes nothing, comments on
+# nothing and needs no token beyond fetching the source.
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: desktop
+
+env:
+  CARGO_TERM_COLOR: always
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  quality:
+    name: cargo fmt + clippy · stable, --all-features
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # The same measured minimum `linux-distro-compat.yml` installs, for the
+      # same reasons, and nothing else:
+      #   gcc, libc6-dev    ring compiles C and assembly
+      #   pkg-config        how system-deps finds the GTK stack
+      #   libgtk-4-dev      omnibridge-gui only
+      #   libadwaita-1-dev  omnibridge-gui only
+      # In particular no libssl-dev (transport is rustls/ring), no
+      # libdbus-1-dev (zbus 5 is pure Rust), no libx11-dev (x11rb brings its
+      # own connection) and no protobuf-compiler (protox compiles in-process).
+      - name: Native build dependencies
+        working-directory: .
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc libc6-dev pkg-config libgtk-4-dev libadwaita-1-dev
+
+      # `desktop/rust-toolchain.toml` says `channel = "stable"` with rustfmt
+      # and clippy, and rustup honours that file from this directory. Asking it
+      # explicitly means the install happens in a step that can fail clearly,
+      # rather than inside the first `cargo fmt` as a confusing surprise.
+      - name: Rust toolchain · whatever rust-toolchain.toml asks for
+        run: |
+          set -eux
+          rustup show active-toolchain
+          rustc -Vv
+          cargo -V
+          cargo fmt --version
+          cargo clippy --version
+
+      # A drift guard, not a version check: this job is only honest while the
+      # pinned channel is a moving one. If someone pins `rust-toolchain.toml`
+      # to a fixed version, the answer to "does the *current* toolchain
+      # consider this warning-free" quietly becomes "no idea", and that should
+      # be a deliberate decision rather than a silent one.
+      - name: The pinned channel is still a channel, not a frozen version
+        run: |
+          set -eu
+          channel=$(sed -n 's/^ *channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+          echo "rust-toolchain.toml channel: ${channel}"
+          case "${channel}" in
+            stable|beta|nightly|stable-*|beta-*|nightly-*) ;;
+            *)
+              echo "::error::rust-toolchain.toml now pins '${channel}'."
+              echo "::error::This gate exists to answer whether the CURRENT supported"
+              echo "::error::toolchain is warning-free. Pinning a fixed version makes it"
+              echo "::error::answer a different question, and the MSRV job in"
+              echo "::error::linux-distro-compat.yml already answers that one."
+              exit 1
+              ;;
+          esac
+
+      # `--locked` on every cargo invocation below: CI must build what is
+      # committed. A job that let Cargo update the lockfile would be lint-
+      # checking a dependency graph nobody has ever run.
+      - name: cargo metadata · the committed lockfile resolves
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: cargo fmt --all --check
+        run: cargo fmt --all --check
+
+      # THE GATE. Workspace, every target (lib, bins, tests, examples,
+      # benches), every feature, warnings denied.
+      - name: cargo clippy · workspace, all targets, all features, -D warnings
+        run: |
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: What this job proved
+        run: |
+          echo "SOURCE QUALITY on $(rustc -V)"
+          echo "  cargo fmt --all --check           clean"
+          echo "  cargo clippy --workspace          clean under -D warnings"
+          echo "    --all-targets --all-features"
+          echo
+          echo "This is NOT a test run and NOT an MSRV check. The MSRV gate is the"
+          echo "'msrv' job in linux-distro-compat.yml; behaviour is certified in a real"
+          echo "GNOME session, and the portable boundary on a Windows runner."

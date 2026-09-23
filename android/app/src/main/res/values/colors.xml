@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Only the colours the *platform* needs before Compose is running: the
+  launcher background, the window background behind the first frame, and the
+  notification accent. Everything the UI itself draws comes from
+  ui/theme/Color.kt, which is the single Kotlin-side token table.
+-->
+<resources>
+    <color name="ic_launcher_background">#0B1020</color>
+    <color name="omnibridge_background">#F7F9FC</color>
+    <color name="omnibridge_background_dark">#080C18</color>
+    <!-- Notification accent. The corrected blue, not brand blue: a notification
+         title can be small text on a light shade. -->
+    <color name="omnibridge_accent">#445CDD</color>
+</resources>
