@@ -192,8 +192,10 @@ async fn main() -> anyhow::Result<()> {
     if let Err(why) = clipboard_backend.watch_availability() {
         tracing::info!(
             reason = %why,
-            "clipboard auto-send is unavailable on this session; manual \
-             `omnibridge clipboard send` still works"
+            "clipboard auto-send is unavailable on this session; sending by \
+             hand reads the selection the same way and is usually unavailable \
+             too. Receiving is unaffected — `omnibridge clipboard status` has \
+             the detail"
         );
     }
     let clipboard = ClipboardManager::new(clipboard_backend, device_id.clone());

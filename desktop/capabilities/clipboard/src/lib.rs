@@ -769,7 +769,8 @@ impl ClipboardManager {
                     tracing::warn!(
                         reason = %why,
                         "clipboard auto-send is enabled but this session cannot \
-                         report clipboard changes; sending by hand still works"
+                         report clipboard changes; sending by hand reads the \
+                         selection the same way and is usually unavailable too"
                     );
                     if epoch.changed().await.is_err() {
                         return;

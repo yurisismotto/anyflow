@@ -48,10 +48,17 @@ pub enum BackendError {
     Failed(String),
     /// The operation did not finish within [`crate::limits::BACKEND_TIMEOUT`].
     ///
-    /// Its own variant because on GNOME this is the *normal* signal that the
-    /// session is locked, not an error worth alarming about: `wl-copy` and
-    /// `wl-paste` need a seat and a serial that the compositor will not grant
-    /// behind a lock screen, and they wait rather than fail.
+    /// Its own variant because `wl-copy` and `wl-paste` need a seat and a
+    /// serial that the compositor may not grant, and they *wait* rather than
+    /// fail when it does not.
+    ///
+    /// A locked session is one reason the seat is withheld, and on GNOME it is
+    /// the common one. It is **not** the only one, and the message must not
+    /// say it is: on a compositor with neither `wlr`/`ext-data-control` nor a
+    /// reachable Xwayland, no client may read a selection it does not own, and
+    /// the read times out identically with the session wide awake. Finding
+    /// F-2 was this message asserting the lock on a session whose
+    /// `LockedHint` was `no` before and after the call.
     TimedOut,
 }
 
@@ -61,9 +68,11 @@ impl std::fmt::Display for BackendError {
             Self::Unavailable(why) => write!(f, "clipboard unavailable: {why}"),
             Self::Failed(why) => write!(f, "clipboard operation failed: {why}"),
             Self::TimedOut => f.write_str(
-                "the clipboard did not respond in time. On GNOME Wayland this \
-                 normally means the session is locked: wl-copy and wl-paste \
-                 cannot obtain a seat behind the lock screen.",
+                "the clipboard did not respond in time: wl-copy and wl-paste \
+                 are waiting for a seat the compositor has not granted. A \
+                 locked session is one cause; a session where no client may \
+                 read a selection it does not own is another. Run \
+                 `omnibridge clipboard status` to see which applies here.",
             ),
         }
     }
