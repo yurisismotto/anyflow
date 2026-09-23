@@ -97,18 +97,39 @@ else
         *GOODSIG*) : ;;
         *) die "the signature on SHA256SUMS is not good$( [ -n "$KEYRING" ] && printf ' for %s' "$KEYRING" ). gpg said: $(printf '%s' "$status" | tr '\n' ' ' | head -c 200)" ;;
     esac
-    sig_fpr="$(printf '%s\n' "$status" | awk '/VALIDSIG/ {print $3; exit}')"
+    validsig="$(printf '%s\n' "$status" | awk '/VALIDSIG/ {print; exit}')"
+    sig_fpr="$(awk '{print $3}'  <<<"$validsig")"
+    pri_fpr="$(awk '{print $NF}' <<<"$validsig")"
     [ -n "$sig_fpr" ] || die "the signature verified but carried no fingerprint; refusing to report success"
-    say "good signature by $sig_fpr"
+    if [ -n "$pri_fpr" ] && [ "$pri_fpr" != "$sig_fpr" ]; then
+        say "good signature by subkey $sig_fpr of primary key $pri_fpr"
+    else
+        say "good signature by $sig_fpr"
+    fi
 
     if [ -n "$EXPECT_FPR" ]; then
         # Case-insensitive, and spaces stripped, because a fingerprint is
         # copied from a web page as often as from a terminal.
-        want="$(printf '%s' "$EXPECT_FPR" | tr -d '[:space:]' | tr 'a-f' 'A-F')"
-        got="$(printf '%s' "$sig_fpr"     | tr -d '[:space:]' | tr 'a-f' 'A-F')"
-        [ "$want" = "$got" ] \
-            || die "the signature is by $got, but $want was expected. This is what a substituted release looks like."
-        say "the signing key is the expected one ($got)"
+        #
+        # The PRIMARY fingerprint is accepted as well as the signing one. What
+        # a project publishes, and what a user is told to check, is the primary
+        # key's fingerprint -- but a certify-only master signs nothing, so the
+        # signature carries its SUBKEY's fingerprint instead. Comparing only
+        # the signing key would tell a user with the correct fingerprint that
+        # their release was substituted.
+        norm() { printf '%s' "$1" | tr -d '[:space:]' | tr 'a-f' 'A-F'; }
+        want="$(norm "$EXPECT_FPR")"
+        got="$(norm "$sig_fpr")"
+        got_pri="$(norm "${pri_fpr:-}")"
+        if [ "$want" = "$got" ] || { [ -n "$got_pri" ] && [ "$want" = "$got_pri" ]; }; then
+            if [ "$want" = "$got_pri" ] && [ "$got" != "$got_pri" ]; then
+                say "the signing key is subkey $got of the expected primary key $got_pri"
+            else
+                say "the signing key is the expected one ($got)"
+            fi
+        else
+            die "the signature is by $got (primary ${got_pri:-unknown}), but $want was expected. This is what a substituted release looks like."
+        fi
     else
         say "NOTE: no expected fingerprint was given, so any key this keyring trusts would pass. Pass --fingerprint for the stronger check."
     fi

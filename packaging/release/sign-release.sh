@@ -116,10 +116,24 @@ say "the signature verifies against SHA256SUMS"
 
 # And it must be THIS key's signature, not merely a valid one from whatever
 # else the keyring happens to hold.
-sig_fpr="$(gpg --batch --status-fd 1 --verify "$OUT" "$MANIFEST" 2>/dev/null \
-           | awk '/^\[GNUPG:\] VALIDSIG/ {print $3; exit}')"
-[ "$sig_fpr" = "$fpr" ] \
-    || die "the signature is by '$sig_fpr', not by the requested key '$fpr'"
-say "the signature is by the requested key"
+#
+# VALIDSIG names TWO fingerprints: field 3 is the key that actually made the
+# signature, and the last field is the PRIMARY key it belongs to. With the
+# recommended structure -- a certify-only master plus a signing subkey -- those
+# differ, and gpg correctly signs with the subkey when asked for the master.
+# Comparing only field 3 therefore rejects the very layout this project
+# recommends; measured, before it could ship.
+validsig="$(gpg --batch --status-fd 1 --verify "$OUT" "$MANIFEST" 2>/dev/null \
+            | awk '/^\[GNUPG:\] VALIDSIG/ {print; exit}')"
+[ -n "$validsig" ] || die "the signature verified but produced no VALIDSIG line"
+sig_fpr="$(awk '{print $3}' <<<"$validsig")"
+pri_fpr="$(awk '{print $NF}' <<<"$validsig")"
+if [ "$sig_fpr" = "$fpr" ]; then
+    say "the signature is by the requested key"
+elif [ "$pri_fpr" = "$fpr" ]; then
+    say "the signature is by subkey $sig_fpr of the requested key $fpr"
+else
+    die "the signature is by '$sig_fpr' (primary '$pri_fpr'), not by the requested key '$fpr'"
+fi
 
 printf '\nSIGNED  %s\n  key   %s\n  over  %s (%s entries)\n' "$OUT" "$fpr" "$MANIFEST" "$n_entries"
