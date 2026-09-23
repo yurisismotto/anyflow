@@ -279,6 +279,14 @@ Every process the product spawns, found by searching all of production for
 | **`wl-copy`** | write the clipboard; probe `--sensitive` via `--help` | **No** | backend reports `Unsupported` with the reason; daemon still starts, capability still registers and answers honestly | `wl-clipboard` | `wl-clipboard` `/usr/bin/wl-copy` ✓ measured | ✓ measured |
 | **`wl-paste`** | read the clipboard; `--watch` for change events; probe data-control | **No** | falls through to the Xwayland XFIXES watch, then to "watch unavailable, manual send still works" | `wl-clipboard` | ✓ measured | ✓ measured |
 
+> **Superseded in part — 2026-09-22, `fix/clipboard-status-truthfulness-v1`.**
+> The `wl-paste` row's final fallback text is quoted from the product as it
+> then was, and that text was wrong: **manual send does not still work** when
+> there is no watch source, because both read the selection the same way. The
+> row is left as written because it records what the product said on the day
+> it was measured. Finding **F-2**,
+> [peer-gate closure §4](../../certification/linux/RELEASE-PEER-GATES-CLOSURE-V1.md).
+
 **That is the complete list.** The product does **not** invoke `loginctl`, `systemctl`,
 `journalctl`, `xdg-open`, `gio`, `notify-send`, `gdbus`, `dbus-send`, `nmcli`, `hostname`,
 `ip`, `ss`, `xclip` or `xsel`. Every textual hit for those names in production source is a
@@ -785,6 +793,16 @@ user daemon, that is packaging-wave work and is recorded as such.
    releases and is part of a normal GNOME install; a session deliberately configured
    without it loses **auto-send only** (manual send still works, and the daemon says so).
    Gate **G-CLIP-WATCH**.
+
+   > **Superseded in part — 2026-09-22, `fix/clipboard-status-truthfulness-v1`.**
+   > The parenthesis above is wrong, and it was wrong because the product said
+   > so: *manual send does not still work* when there is no watch source.
+   > Both read the selection the same way. Measured on Debian 13 trixie with
+   > the session provably unlocked — finding **F-2**,
+   > [peer-gate closure §4](../../certification/linux/RELEASE-PEER-GATES-CLOSURE-V1.md).
+   > The gate G-CLIP-WATCH verdict recorded here is unchanged; only the
+   > parenthetical claim about manual sending is corrected. Receiving is
+   > unaffected on every session tested.
 3. **U-3's fragility is Ubuntu 24.04's alone.** Nothing else on the matrix is within two
    minor versions of a floor.
 

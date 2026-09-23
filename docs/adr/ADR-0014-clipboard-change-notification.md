@@ -107,10 +107,25 @@ and this module is the seed of its watch half.
 
 **Auto-send works on GNOME**, which is the point.
 
-**It depends on Xwayland running.** If `DISPLAY` is unset — a GNOME session
-built without Xwayland — detection falls through to "no watch source", which is
-reported by `omnibridge clipboard status` and degrades to manual sending. Nothing
-breaks; a feature is simply unavailable and says so.
+**It depends on Xwayland running.** If `DISPLAY` is unset, or Xwayland is
+running but unreachable — a GNOME session built without it, or one where the
+connection is refused — detection falls through to "no watch source", which
+`omnibridge clipboard status` reports.
+
+> **Corrected 2026-09-22, `fix/clipboard-status-truthfulness-v1`.** This
+> paragraph said the fallback *"degrades to manual sending. Nothing breaks; a
+> feature is simply unavailable and says so."* **It does not degrade to manual
+> sending.** `clipboard send` reads the selection through the same path the
+> watcher does, so when there is no watch source there is no manual send
+> either: `wl-paste` waits for a seat the compositor will not grant and the
+> read ends in a timeout. Measured on Debian 13 trixie, GNOME 48 Wayland, with
+> the session provably unlocked — finding **F-2** in
+> [peer-gate closure §4](../certification/linux/RELEASE-PEER-GATES-CLOSURE-V1.md).
+>
+> What *is* unaffected is **receiving**: writing a clip with `wl-copy` needs no
+> data-control protocol and works on every session tested. The decision this
+> ADR records is unchanged — XFIXES on Xwayland is still the right watch
+> mechanism for GNOME — only its stated consequence was wrong.
 
 **It works better elsewhere.** On sway, Hyprland or KWin the first branch is
 taken and no X connection is opened at all.
