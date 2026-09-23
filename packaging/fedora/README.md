@@ -145,7 +145,7 @@ which is what is committed and what is authoritative.
 
 ```bash
 # the release path: pinned to a tag, cannot pick up an untracked file
-./packaging/release/make-source-bundle.sh --rev v0.1.0
+./packaging/release/make-source-bundle.sh --rev v1.0.0
 
 # validating a packaging change before it is committed
 ./packaging/release/make-source-bundle.sh --worktree
@@ -154,9 +154,9 @@ which is what is committed and what is authoritative.
 Artifacts land in `dist/` unless `--output` says otherwise:
 
 ```
-dist/omnibridge-0.1.0.tar.gz            Source0
-dist/omnibridge-0.1.0-vendor.tar.xz     Source1
-dist/omnibridge-0.1.0-SOURCES.sha256    checksums over both
+dist/omnibridge-1.0.0.tar.gz            Source0
+dist/omnibridge-1.0.0-vendor.tar.xz     Source1
+dist/omnibridge-1.0.0-SOURCES.sha256    checksums over both
 ```
 
 `dist/` is a build output. Do not commit it.
@@ -204,10 +204,10 @@ with its dependencies declared.
 ### Building offline
 
 ```bash
-./packaging/release/make-source-bundle.sh --rev v0.1.0 --output ~/rpmbuild/SOURCES
+./packaging/release/make-source-bundle.sh --rev v1.0.0 --output ~/rpmbuild/SOURCES
 cp packaging/fedora/omnibridge.spec ~/rpmbuild/SPECS/
 rpmbuild -bs ~/rpmbuild/SPECS/omnibridge.spec
-mock -r fedora-44-x86_64 --rebuild ~/rpmbuild/SRPMS/omnibridge-0.1.0-2.fc44.src.rpm
+mock -r fedora-44-x86_64 --rebuild ~/rpmbuild/SRPMS/omnibridge-1.0.0-1.fc44.src.rpm
 ```
 
 `mock` disables networking during `%build` by default, which is the point:
@@ -255,7 +255,7 @@ podman run --rm --network=none \
 ```bash
 ./packaging/tests/packaging-checks.sh                      # static
 ./packaging/tests/packaging-checks.sh --bundle dist        # ...and the bundle
-./packaging/tests/packaging-checks.sh --rpm out/omnibridge-0.1.0-2.fc44.x86_64.rpm
+./packaging/tests/packaging-checks.sh --rpm out/omnibridge-1.0.0-1.fc44.x86_64.rpm
 ```
 
 Cheap assertions over the things this tree has already been observed to get

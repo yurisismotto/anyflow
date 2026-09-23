@@ -60,7 +60,7 @@ digest, mode and owner across `remove`, `reinstall` and `purge`.
 ## Building
 
 ```bash
-./packaging/release/make-source-bundle.sh --rev v0.1.0 --output dist
+./packaging/release/make-source-bundle.sh --rev v1.0.0 --output dist
 ./packaging/debian/build-deb.sh --image docker.io/library/debian:trixie dist
 ./packaging/debian/build-deb.sh --image docker.io/library/ubuntu:24.04  dist
 ./packaging/debian/build-deb.sh --image docker.io/library/ubuntu:26.04  dist

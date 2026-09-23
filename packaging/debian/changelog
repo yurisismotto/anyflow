@@ -1,3 +1,11 @@
+omnibridge (1.0.0-1) unstable; urgency=medium
+
+  * First general-availability release. No product, protocol or packaging
+    change from 0.1.0-1: this is the release-version bump alone, and the
+    payload the release candidate certification measured is unchanged.
+
+ -- Yuri Converso Sismotto <yuri.sismotto@gmail.com>  Wed, 23 Sep 2026 00:00:00 +0000
+
 omnibridge (0.1.0-1) unstable; urgency=medium
 
   * Initial Debian and Ubuntu packaging.

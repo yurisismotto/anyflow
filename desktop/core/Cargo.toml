@@ -36,7 +36,7 @@ unwrap_used = "warn"
 async-trait = "0.1.92"
 bytes = "1.12.1"
 data-encoding = "2.11.1"
-omnibridge-proto = { version = "0.1.0", path = "../proto" }
+omnibridge-proto = { version = "1.0.0", path = "../proto" }
 hmac = "0.12.1"
 prost = "0.14.3"
 rand = "0.9.5"
@@ -55,7 +55,7 @@ x509-parser = "0.18.1"
 zeroize = "1.8.2"
 
 [dev-dependencies]
-omnibridge-proto = { version = "0.1.0", path = "../proto" }
+omnibridge-proto = { version = "1.0.0", path = "../proto" }
 data-encoding = "2.11.1"
 serde_json = "1.0.151"
 rustls = { version = "0.23.45", default-features = false, features = ["std", "ring"] }

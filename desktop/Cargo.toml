@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 # The Rust floor, and it is measured from the committed `Cargo.lock` rather
 # than chosen. 1.82 used to stand here and was not true of the tree as

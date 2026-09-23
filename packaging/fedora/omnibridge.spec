@@ -11,8 +11,8 @@ Name:           omnibridge
 # not an unguarded one: packaging/release/make-source-bundle.sh refuses to
 # build a bundle when the two disagree, and packaging/tests/packaging-checks.sh
 # asserts it without building anything. Audit §13.1.
-Version:        0.1.0
-Release:        3%{?dist}
+Version:        1.0.0
+Release:        1%{?dist}
 Summary:        Local-first device continuity between Android and Fedora
 
 License:        Apache-2.0
@@ -327,6 +327,11 @@ EOF
 
 
 %changelog
+* Wed Sep 23 2026 Yuri Converso Sismotto <yuri.sismotto@gmail.com> - 1.0.0-1
+- First general-availability release. No product, protocol or packaging change
+  from 0.1.0-3: this is the release-version bump alone, and the payload the
+  release candidate certification measured is unchanged.
+- Release reset to 1, because Version: moved.
 * Tue Sep 22 2026 Yuri Converso Sismotto <yuri.sismotto@gmail.com> - 0.1.0-3
 - Split the desktop application into an omnibridge-gui subpackage.
 - Install the desktop entry, the hicolor icon, the D-Bus activation entry and
