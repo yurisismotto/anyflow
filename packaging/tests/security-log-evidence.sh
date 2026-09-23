@@ -52,6 +52,8 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/guest-agent.sh
 . "$HERE/lib/guest-agent.sh"
+# shellcheck source=lib/assert.sh
+. "$HERE/lib/assert.sh"
 
 DOMAIN=""; DISTRO=""; EVIDENCE=""; PHONE_IP=""; ADB_SERIAL=""
 GUEST_USER="${GUEST_USER:-anyflow}"; GUEST_UID="${GUEST_UID:-1000}"
@@ -116,6 +118,9 @@ trap restore_trace EXIT
 # ---------------------------------------------------------------------------
 section "Preconditions"
 # ---------------------------------------------------------------------------
+need_tool virsh jq adb sha256sum || abort "a host tool this harness depends on is missing"
+ok "every host tool this harness needs is installed"
+
 ga_ping "$DOMAIN" 300 || abort "guest agent in '$DOMAIN' does not answer"
 ok "the guest agent answers"
 
@@ -285,7 +290,7 @@ ok "SEC-LOG-03: the transfer completed — id $xfer_id, ${fsize} B, to $phone_mo
 jnl="$(gu "journalctl --user -u omnibridged --no-pager -o cat --after-cursor '$cur'" | strip_ansi)"
 printf '%s\n' "$jnl" | save "13-journal-file.txt"
 n_jnl="$(printf '%s\n' "$jnl" | grep -c . || true)"
-[ "${n_jnl:-0}" -ge 20 ] 2>/dev/null \
+need_nonempty "SEC-LOG-03: the journal capture" "$jnl" 20 \
     || abort "the journal capture holds only ${n_jnl} line(s); a sentinel search over that proves nothing"
 n_trace="$(printf '%s\n' "$jnl" | grep -c '^TRACE' || true)"
 [ "${n_trace:-0}" -ge 1 ] 2>/dev/null \
@@ -299,11 +304,9 @@ grep -qE 'mdns|listener|session' <<<"$jnl" \
     || notok "SEC-LOG-03: the capture carries no unrelated daemon activity; it does not look like a real log stream"
 
 # The anchor: something the PRODUCT wrote about THIS transfer.
-if grep -qF "transfer=$xfer_id" <<<"$jnl"; then
-    ok "SEC-LOG-03: the capture names transfer=$xfer_id — the window provably covers this operation"
-else
-    abort "no journal line names transfer=$xfer_id; the window does not cover the transfer and any 'absent' result would be vacuous"
-fi
+need_window_covers "SEC-LOG-03: the journal capture" "$jnl" "transfer=$xfer_id" \
+    && ok "SEC-LOG-03: the capture names transfer=$xfer_id — the window provably covers this operation" \
+    || abort "the window does not cover the transfer; any 'absent' result over it would be vacuous"
 grep -qE "(size|bytes)=$fsize" <<<"$jnl" \
     && ok "SEC-LOG-03: the capture carries this file's byte count ($fsize)" \
     || notok "SEC-LOG-03: the capture does not carry the byte count $fsize"
@@ -394,7 +397,7 @@ gx 'pkill -f "dbus-monitor --session"; true' >/dev/null 2>&1
 
 after_n="$(ob 'notifications status' 2>&1 | sed -n 's/^ *mirrored now *//p' | head -1 | tr -d '[:space:]')"
 after_n="${after_n:-0}"
-[ "$after_n" -eq $(( before_n + 1 )) ] 2>/dev/null \
+need_delta "L16: the mirrored count" "$before_n" "$after_n" 1 \
     || abort "the mirrored count went $before_n -> $after_n, not +1; the operation this gate is about did not happen as intended"
 ok "L16: exactly one notification was mirrored ($before_n -> $after_n)"
 
@@ -409,7 +412,7 @@ fi
 njnl="$(gu "journalctl --user -u omnibridged --no-pager -o cat --after-cursor '$ncur'" | strip_ansi)"
 printf '%s\n' "$njnl" | save "22-journal-notification.txt"
 n_njnl="$(printf '%s\n' "$njnl" | grep -c . || true)"
-[ "${n_njnl:-0}" -ge 20 ] 2>/dev/null \
+need_nonempty "L16: the journal capture" "$njnl" 20 \
     || abort "the notification journal capture holds only ${n_njnl} line(s); this is the vacuity lifecycle closure refused to pass on"
 n_ntrace="$(printf '%s\n' "$njnl" | grep -c '^TRACE' || true)"
 ok "L16: the journal capture holds $n_njnl line(s), $n_ntrace of them TRACE"

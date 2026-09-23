@@ -825,6 +825,46 @@ for h in "$ROOT"/packaging/tests/*.sh; do
 done
 [ "$h1_bad" -eq 0 ] && pass "H1: no harness pipes into grep -q on the host side"
 
+# ---------------------------------------------------------------------------
+# H2 — every guest-driving harness loads the fail-loud primitives
+# ---------------------------------------------------------------------------
+# lib/assert.sh is where the twenty-nine recorded false results are encoded as
+# refusals. A harness that drives a guest and does not load it is one that has
+# to remember all of them in prose.
+printf '\n== H2: the guest harnesses load lib/assert.sh ==\n'
+h2_bad=0
+for h in lifecycle-gates.sh lifecycle-peer-gates.sh security-log-evidence.sh; do
+    f="$ROOT/packaging/tests/$h"
+    [ -f "$f" ] || { fail "H2: $h is missing"; h2_bad=$((h2_bad + 1)); continue; }
+    if grep -q 'lib/assert.sh' "$f"; then
+        pass "H2: $h loads lib/assert.sh"
+    else
+        fail "H2: $h does not load lib/assert.sh"
+        h2_bad=$((h2_bad + 1))
+    fi
+done
+[ "$h2_bad" -eq 0 ] || true
+
+# ---------------------------------------------------------------------------
+# H3 — the self-tests exist, are executable, and actually assert both ways
+# ---------------------------------------------------------------------------
+# A self-test file that only ever checked the good case would pass whatever the
+# primitives did. Both halves must be present in it.
+printf '\n== H3: the harness self-tests assert in both directions ==\n'
+st="$ROOT/packaging/tests/harness-selftests.sh"
+if [ ! -x "$st" ]; then
+    fail "H3: packaging/tests/harness-selftests.sh is missing or not executable"
+else
+    n_rej="$(grep -c '^rejects \|^is_false ' "$st" || true)"
+    n_acc="$(grep -c '^accepts \|^is_true ' "$st" || true)"
+    [ "${n_rej:-0}" -ge 10 ] 2>/dev/null \
+        && pass "H3: $n_rej cases require a primitive to REJECT its failure mode" \
+        || fail "H3: only ${n_rej:-0} rejection cases; the self-tests are not covering the recorded classes"
+    [ "${n_acc:-0}" -ge 5 ] 2>/dev/null \
+        && pass "H3: $n_acc cases require a primitive to ACCEPT the good case, so one hard-coded to fail cannot pass" \
+        || fail "H3: only ${n_acc:-0} acceptance cases; a primitive that rejected everything would pass the suite"
+fi
+
 printf '\n%s\n' "-----------------------------------------------"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
