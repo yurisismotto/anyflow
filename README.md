@@ -8,7 +8,7 @@ Open-source, local-first device continuity.
 > until it was renamed to **OmniBridge** before the public v1.0.0 release.
 > The rename went all the way down — binaries, application ids, ALPN, mDNS,
 > the QR prefix, the protobuf namespace and the pairing-proof domain — with no
-> compatibility aliases, because there is no released version to stay
+> compatibility aliases, because there was no released version to stay
 > compatible with. **An existing AnyFlow build cannot talk to an OmniBridge
 > build and a development pairing must be redone once.**
 > See [ADR-0018](docs/adr/ADR-0018-rename-to-omnibridge.md) for the decision
@@ -28,7 +28,7 @@ No required cloud. No vendor lock-in. No telemetry by default.
 Devices find each other on the local network, authenticate with pinned public
 keys over TLS 1.3, and only after an explicit, human-confirmed pairing.
 
-> **Status: pre-1.0.** The certified foundation — identity, discovery,
+> **Status: v1.0.0.** The certified foundation — identity, discovery,
 > pairing, authenticated transport, ping/pong — carries four capabilities:
 > `battery.v1`, `files.v1`, `clipboard.v1` and `notifications.v1`. **Media
 > control and browser integration are not implemented**; the architecture is
