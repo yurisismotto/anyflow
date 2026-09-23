@@ -260,15 +260,104 @@ else
     ok "sign-release.sh contains no passphrase-handling code at all; the gpg agent or the secret store holds it"
 fi
 # Nothing test-only may be committed. The keys live in $WORK and nowhere else.
+#
+# ONE FILE IS ALLOWED, AND IT IS OPENED RATHER THAN TRUSTED
+# ---------------------------------------------------------
+# The armoured PUBLIC release key is committed on purpose:
+# RELEASE-SIGNING-FOUNDATION-V1.md §8.7 decided that publication means "a
+# release asset, and a stable URL", and a stable URL means version control.
+# Renaming it to something this check does not match would be the wrong fix
+# twice over -- `.asc` is what `gpg --import` expects and what README.md
+# documents -- so the exception is named here and it is the only one.
+#
+# A NAME IS NOT A WARRANT. As written before v1.0.0 this check proved nothing
+# about content: it matched an extension, so a secret key committed as
+# `notes.txt` passed it and a public key named `.asc` failed it. The allowed
+# file is now opened, and is required to be a public block holding no private
+# armour of any form and to carry the identity README.md tells users to
+# trust. That is strictly more than the old form established about any file.
+#
 # A here-string, not a pipe: `git ls-files` is long, `grep -q` exits on its
 # first match, and under pipefail the SIGPIPE turns a match into a miss -- the
 # defect packaging-checks.sh H1 exists to catch, which caught this line.
+PUBKEY_REL='packaging/release/omnibridge-release-pubkey.asc'
+PUBKEY="$ROOT/$PUBKEY_REL"
 tracked="$(git -C "$ROOT" ls-files)"
+[ -n "${tracked//[[:space:]]/}" ] || die "git ls-files returned nothing; this scan would be vacuous"
 key_shaped="$(grep -E '\.(gpg|asc|key|pem)$' <<<"$tracked" || true)"
-if [ -n "${key_shaped//[[:space:]]/}" ]; then
-    notok "a key-shaped file is committed to the repository: $(head -3 <<<"$key_shaped" | tr '\n' ' ')"
+unexpected="$(grep -vxF -- "$PUBKEY_REL" <<<"$key_shaped" || true)"
+if [ -n "${unexpected//[[:space:]]/}" ]; then
+    notok "a key-shaped file is committed to the repository: $(head -3 <<<"$unexpected" | tr '\n' ' ')"
 else
-    ok "no key-shaped file is committed to the repository"
+    ok "no key-shaped file is committed to the repository beyond the published public key"
+fi
+
+# The published key must BE there. README.md hands users a URL for it, and a
+# documented URL that 404s is a verification recipe with no first step.
+if grep -qxF -- "$PUBKEY_REL" <<<"$tracked"; then
+    ok "the published public key is committed at $PUBKEY_REL"
+else
+    notok "$PUBKEY_REL is not committed, but README.md publishes a URL for it"
+fi
+
+if [ -s "$PUBKEY" ]; then
+    # The detector is shown to work before its silence is worth anything: the
+    # same discipline as SIGN-NEG-06. The control is a REAL exported secret
+    # key, planted in scratch space; nothing of any production key is touched.
+    priv_re='-----BEGIN (PGP |OPENSSH |ENCRYPTED |RSA |EC |DSA )?PRIVATE KEY( BLOCK)?-----'
+    CANARY_KEY="$WORK/pubkey-check-canary.asc"
+    gpg --batch --pinentry-mode loopback --passphrase '' \
+        --armor --export-secret-keys "$FPR" > "$CANARY_KEY" 2>/dev/null
+    if grep -qE -- "$priv_re" "$CANARY_KEY"; then
+        ok "published-key precondition: the private-armour detector FINDS a real exported secret key"
+    else
+        die "the private-armour detector missed a real secret key; its verdict on $PUBKEY_REL would mean nothing"
+    fi
+
+    if grep -qE -- "$priv_re" "$PUBKEY"; then
+        notok "$PUBKEY_REL carries private key armour; it must be public material only"
+    else
+        ok "$PUBKEY_REL carries no private key armour of any form"
+    fi
+    if grep -qF -- '-----BEGIN PGP PUBLIC KEY BLOCK-----' "$PUBKEY"; then
+        ok "$PUBKEY_REL is an armoured public key block"
+    else
+        notok "$PUBKEY_REL is not an armoured public key block"
+    fi
+
+    # Imported into a home of its own, because what gpg makes of the bytes is
+    # the fact, and the host keyring cannot answer for it.
+    PUBHOME="$WORK/pubkey-check"; rm -rf "$PUBHOME"; mkdir -p "$PUBHOME"; chmod 700 "$PUBHOME"
+    if GNUPGHOME="$PUBHOME" gpg --batch --quiet --import "$PUBKEY" >/dev/null 2>&1; then
+        n_secret="$(find "$PUBHOME/private-keys-v1.d" -type f 2>/dev/null | wc -l)"
+        if [ "${n_secret:-0}" -eq 0 ]; then
+            ok "importing $PUBKEY_REL yields zero secret key files"
+        else
+            notok "importing $PUBKEY_REL yielded $n_secret secret key file(s)"
+        fi
+
+        # README.md is where a user reads the fingerprint to trust. Taking it
+        # from there rather than repeating a literal means the two cannot
+        # drift apart without this failing.
+        readme_fpr="$(sed -n 's/^primary  *\([0-9A-Fa-f]\{40\}\) *$/\1/p' "$ROOT/README.md" | head -1)"
+        if [ -n "$readme_fpr" ]; then
+            ok "README.md publishes a primary fingerprint to check against"
+            got_fpr="$(GNUPGHOME="$PUBHOME" gpg --batch --with-colons --list-keys 2>/dev/null \
+                       | awk -F: '/^fpr:/ { print $10; exit }')"
+            if [ "$got_fpr" = "$readme_fpr" ]; then
+                ok "the committed public key is the identity README.md publishes ($readme_fpr)"
+            else
+                notok "the committed public key is ${got_fpr:-<unreadable>}, but README.md publishes $readme_fpr"
+            fi
+        else
+            notok "no 'primary <FPR>' line in README.md, so the committed key's identity is unchecked"
+        fi
+        GNUPGHOME="$PUBHOME" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+    else
+        notok "gpg cannot import $PUBKEY_REL; a user following README.md would fail at step 1"
+    fi
+else
+    notok "$PUBKEY_REL is missing or empty"
 fi
 
 # ---------------------------------------------------------------------------
